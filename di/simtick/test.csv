@@ -1,0 +1,19 @@
+action,ms,bytes,lang,code,repeat,comment
+before,0,0,q,sim:use`di.simtick,1,,Initialize module
+before,0,0,q,cfg:`preset`tradingdate`openingtime`closingtime`tradingdays`baseintensity`alpha`beta`transitionpoint`openmult`midmult`closemult`pricemodel`startprice`drift`vol`jumpintensity`jumpmean`jumpvol`qtymodel`qty`avgqty`qtyvol`generatequotes`basespread`pretradeoffset`quoteupdaterate`avgquotesize`spreadopenmult`spreadmidmult`spreadclosemult`rngmodel`seed!(`test;2026.01.20;09:30;16:00;252;0.5;0.3;1.0;0.3;1.5;0.5;3.0;`gbm;100.0;0.05;0.2;2.0;-0.01;0.02;`lognormal;100;100;0.8;0b;0.001;50;0.1;500;1.5;1.0;1.5;`pseudo;42),1,,Setup test config
+comment,0,0,q,,1,,=== Arrivals Tests ===
+true,0,0,q,0<count sim.arrivals[cfg],1,,Arrivals returns non-empty list
+true,0,0,q,9h=type sim.arrivals[cfg],1,,Arrivals returns float list
+true,0,0,q,(asc a)~a:sim.arrivals[cfg],1,,Arrivals are sorted
+true,0,0,q,all 0<=sim.arrivals[cfg],1,,All arrivals >= 0
+comment,0,0,q,,1,,=== Price Tests ===
+before,0,0,q,times:1+til 100,1,,Setup times
+true,0,0,q,(count times)=count sim.price[cfg;times],1,,Price returns same count as times
+true,0,0,q,all 0<sim.price[cfg;times],1,,All prices positive
+true,0,0,q,100.0=first sim.price[cfg;times],1,,First price equals startprice
+comment,0,0,q,,1,,=== Run Tests ===
+true,0,0,q,98h=type sim.run[cfg],1,,Run returns table
+true,0,0,q,`time`price`qty~cols sim.run[cfg],1,,Trade table has correct columns
+true,0,0,q,0<count sim.run[cfg],1,,Run returns trades
+true,0,0,q,all 0<(sim.run[cfg])`price,1,,All trade prices positive
+true,0,0,q,all 0<(sim.run[cfg])`qty,1,,All trade quantities positive
