@@ -8,11 +8,13 @@ For a detailed explanation of the mathematical foundations, see the [Technical P
 
 Realistic synthetic tick data is valuable for many quantitative finance workflows. This module generates trade and quote data that captures key statistical properties of real markets.
 
-The module is designed for **progressive complexity**: start with simple Geometric Brownian Motion (GBM) for basic price simulation, then layer on additional features as your use case requires:
+The module is designed for **progressive complexity**: configure from simple to sophisticated scenarios by adjusting parameters:
 
-- **Simple**: GBM price dynamics with Poisson-like arrivals
-- **Intermediate**: Add intraday seasonality (U-shape or J-shape patterns)
-- **Advanced**: Enable Hawkes self-excitation for trade clustering, jump-diffusion for discontinuous moves, and realistic bid-ask spread dynamics
+- **Baseline**: Set `alpha:0` and equal multipliers for basic Poisson arrivals with GBM prices
+- **Add seasonality**: Vary `openmult`, `midmult`, `closemult` for U-shape or J-shape intraday patterns
+- **Add clustering**: Increase `alpha` to enable Hawkes self-excitation for realistic trade bursts
+- **Add jumps**: Switch to `pricemodel:jump` for discontinuous price moves
+- **Add quotes**: Set `generatequotes:1b` for bid-ask spread dynamics
 
 This flexibility allows the same module to serve quick prototypes and sophisticated stress-testing scenarios.
 
@@ -130,7 +132,7 @@ q)result`quote
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `baseintensity` | Base arrival rate (trades/sec) | 0.5 |
-| `alpha` | Hawkes excitation | 0.3 |
+| `alpha` | Hawkes excitation (0 = Poisson) | 0.3 |
 | `beta` | Hawkes decay (must be > alpha) | 1.0 |
 | `vol` | Annualized volatility | 0.2 |
 | `drift` | Annualized drift | 0.05 |
@@ -140,6 +142,9 @@ q)result`quote
 | `avgqty` | Average trade size | 100 |
 | `basespread` | Base bid-ask spread (fraction) | 0.001 |
 | `generatequotes` | Generate quotes flag | 0b |
+| `openmult` | Opening intensity multiplier | 1.5 |
+| `midmult` | Midday intensity multiplier | 0.5 |
+| `closemult` | Closing intensity multiplier | 3.0 |
 
 ## Testing
 
@@ -189,7 +194,7 @@ jupyter lab
 
 | Notebook | Description |
 |----------|-------------|
-| `demo.ipynb` | Basic usage, visualization of trades and quotes |
+| `simtickDemo.ipynb` | Load module, run simulation, visualize price and quantity |
 
 ## Project Structure
 
@@ -204,7 +209,7 @@ di/simtick/
 │   ├── IntradayTickSimulatorPaper.pdf
 │   └── HawkesProcessesInFinance.pdf
 └── notebooks/
-    └── demo.ipynb
+    └── simtickDemo.ipynb
 ```
 
 ## License
