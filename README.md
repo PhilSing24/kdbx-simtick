@@ -27,18 +27,17 @@ This module emphasizes **trade generation** and derives quotes in a simplified m
 
 **Not suitable for:**
 
-- **Backtesting** — backtesting requires real historical data to validate strategies against actual market conditions
 - **Market-making research** — no order book queue dynamics, no queue position modeling
 - **Execution optimization** — no realistic fill probability or market impact simulation
 - **HFT strategy development** — quote generation is not causally realistic
 
-For these advanced use cases, a full limit order book simulator with queue dynamics would be required.
+For these advanced use cases, a full limit order book simulator with queue dynamics would be preferred.
 
 ### Next Steps
 
 A future module will extend this simulator to support **multi-instrument generation with correlation**. Using KDB-X module hierarchy, a new `di.simmulti` module will build on `di.simtick` as the single-instrument foundation, adding:
 
-- Correlated Brownian motions across instruments via Cholesky decomposition
+- Correlated processes
 - Configurable correlation matrices
 - Synchronized or independent arrival processes
 
