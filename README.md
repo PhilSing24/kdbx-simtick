@@ -27,7 +27,7 @@ This module emphasizes **trade generation** and derives quotes in a simplified m
 
 **Not suitable for:**
 
-- **Market-making research** — no order book queue dynamics, no queue position modeling
+- **Advanced Market-making research** — no order book queue dynamics, no queue position modeling
 - **Execution optimization** — no realistic fill probability or market impact simulation
 - **HFT strategy development** — quote generation is not causally realistic
 
@@ -132,15 +132,16 @@ q)k4unit.moduletest`di.simtick
 
 ### Test Coverage
 
-| Group | Tested via | Description |
-|-------|------------|-------------|
-| Validation | `run` | Bad configs throw correct errors |
-| Arrivals | `arrivals` | Sorted, positive, within duration, non-empty |
-| Shape | `arrivals` | Open > mid, close > mid (derived from distribution) |
-| Price | `price` | Positive prices, startprice, realized vol ≈ input vol |
-| Trades | `run` | Correct columns, sorted times, positive prices/qty |
-| Quotes | `run` | bid < ask, sorted times, quote exists before each trade |
-| Config | `loadconfig` | CSV loads, presets accessible, correct types |
+| Group | Tests | Tested via | Description |
+|-------|-------|------------|-------------|
+| Validation | 3 | `run` | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers) |
+| Arrivals | 5 | `arrivals` | Output properties: non-empty, sorted, positive, within duration, correct type |
+| Shape | 3 | `arrivals` | Intraday pattern: open > mid, close > mid, J-shape verification |
+| Price | 6 | `price` | Positive prices, startprice correct, realized vol within tolerance, jump model works |
+| Trades | 8 | `run` | Correct schema, sorted times, positive prices/qty, integer qty, within session |
+| Quotes | 9 | `run` | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade |
+| Config | 7 | `loadconfig` | Keyed table, correct column count, correct types (float, symbol, date) |
+| **Total** | **41** | | |
 
 ## Project Structure
 ```
