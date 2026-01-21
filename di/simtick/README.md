@@ -196,7 +196,7 @@ The `docs/` folder contains:
 
 ## Notebooks
 
-Interactive examples using PyKX are available in `notebooks/`.
+An interactive **[example](notebooks/simtickDemo.ipynb)** using PyKX is available in `notebooks/`.
 
 ### Setup
 
