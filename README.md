@@ -61,7 +61,7 @@ A KDB-X module for simulating realistic intraday trade and quote data. Features:
 
 1. Add this repository to your `QPATH`:
 ```bash
-export QPATH=$QPATH:/path/to/kdbx-simtick
+export QPATH=$QPATH:/path/to/kdbx-modules
 ```
 
 2. Load the module:
@@ -101,6 +101,7 @@ q)result`quote
 | `simtick.arrivals[cfg]` | Generate arrival times only (seconds from open) |
 | `simtick.price[cfg;times]` | Generate prices for given times |
 | `simtick.loadconfig[filepath]` | Load presets from CSV |
+| `simtick.describe[]` | Return configuration schema as table |
 
 ## Presets
 
@@ -123,6 +124,10 @@ q)result`quote
 | `drift` | Annualized drift | 0.05 |
 | `transitionpoint` | Intraday shape (0.3=J, 0.5=U) | 0.3 |
 | `pricemodel` | `gbm` or `jump` | `gbm` |
+| `qtymodel` | `lognormal` or `constant` | `lognormal` |
+| `avgqty` | Average trade size | 100 |
+| `basespread` | Base bid-ask spread (fraction) | 0.001 |
+| `generatequotes` | Generate quotes flag | 0b |
 
 ## Testing
 ```q
@@ -132,25 +137,39 @@ q)k4unit.moduletest`di.simtick
 
 ### Test Coverage
 
-| Group | Tests | Tested via | Description |
-|-------|-------|------------|-------------|
-| Validation | 3 | `run` | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers) |
-| Arrivals | 5 | `arrivals` | Output properties: non-empty, sorted, positive, within duration, correct type |
-| Shape | 3 | `arrivals` | Intraday pattern: open > mid, close > mid, J-shape verification |
-| Price | 6 | `price` | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 8 | `run` | Correct schema, sorted times, positive prices/qty, integer qty, within session |
-| Quotes | 9 | `run` | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade |
-| Config | 7 | `loadconfig` | Keyed table, correct column count, correct types (float, symbol, date) |
-| **Total** | **41** | | |
+| Group | Tests | Description |
+|-------|-------|-------------|
+| Validation | 3 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers) |
+| Arrivals | 5 | Output properties: non-empty, sorted, positive, within duration, correct type |
+| Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
+| Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
+| Trades | 8 | Correct schema, sorted times, positive prices/qty, integer qty, within session |
+| Quotes | 8 | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade |
+| Config | 7 | Keyed table, correct column count, correct types (float, symbol, date) |
+| Describe | 3 | Returns table, correct columns, correct parameter count |
+| Constant Qty | 2 | All quantities equal, quantity equals avgqty |
+| Reproducibility | 1 | Same seed produces same output |
+| **Total** | **46** | |
+
+## Documentation
+
+The `documentation/` folder contains **Intraday Tick Simulator: Technical Documentation**, a paper detailing the mathematical foundations of this module including:
+
+- Hawkes process theory and Ogata thinning algorithm
+- Geometric Brownian Motion and Merton jump-diffusion
+- Quote generation methodology
+- Implementation details
 
 ## Project Structure
 ```
 di/
-  k4unit.q           # Test framework
   simtick/
-    init.q           # Module code
-    test.csv         # Unit tests
-    presets.csv      # Market scenario presets
+    init.q              # Module code
+    test.csv            # Unit tests (k4unit format)
+    presets.csv         # Market scenario presets
+    README.md           # This file
+    documentation/
+      tick_simulator_paper.pdf   # Mathematical foundations
 ```
 
 ## License

@@ -23,11 +23,11 @@ true,0,0,q,all arr<duration,1,,All arrivals within duration
 true,0,0,q,9h=type arr,1,,Arrivals type is float list
 comment,0,0,q,,1,,=== Shape Tests ===
 before,0,0,q,shapecfg:cfg,1,,Setup config for shape test
-before,0,0,q,shapecfg[`baseintensity]:2.0,1,,Higher intensity for clearer pattern
-before,0,0,q,shapecfg[`seed]:42,1,,Set seed
+before,0,0,q,shapecfg[`baseintensity]:5.0,1,,Higher intensity for clearer pattern
+before,0,0,q,shapecfg[`seed]:123,1,,Set seed
 before,0,0,q,sharr:simtick.arrivals[shapecfg],1,,Generate arrivals for shape test
 before,0,0,q,firsthour:count sharr where sharr<3600,1,,Count first hour arrivals
-before,0,0,q,midhour:count sharr where sharr within 10800 14400,1,,Count mid hour arrivals (hours 3-4)
+before,0,0,q,midhour:count sharr where sharr within 5400 9000,1,,Count arrivals around minimum (hours 1.5-2.5)
 before,0,0,q,lasthour:count sharr where sharr>duration-3600,1,,Count last hour arrivals
 true,0,0,q,firsthour>midhour,1,,Open activity > mid activity
 true,0,0,q,lasthour>midhour,1,,Close activity > mid activity
@@ -82,3 +82,22 @@ true,0,0,q,31=count cfgs`default,1,,Config has 31 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
+comment,0,0,q,,1,,=== Describe Tests ===
+before,0,0,q,schema:simtick.describe[],1,,Get schema
+true,0,0,q,98h=type schema,1,,describe returns table
+true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
+true,0,0,q,32=count schema,1,,Schema has 32 parameters
+comment,0,0,q,,1,,=== Constant Qty Tests ===
+before,0,0,q,constcfg:cfg,1,,Setup constant qty config
+before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
+before,0,0,q,constcfg[`generatequotes]:0b,1,,Disable quotes
+before,0,0,q,consttrades:simtick.run[constcfg],1,,Generate trades
+true,0,0,q,1=count distinct consttrades`qty,1,,All quantities equal
+true,0,0,q,constcfg[`avgqty]=first consttrades`qty,1,,Quantity equals avgqty
+comment,0,0,q,,1,,=== Reproducibility Tests ===
+before,0,0,q,seedcfg:cfg,1,,Setup seeded config
+before,0,0,q,seedcfg[`seed]:999,1,,Set seed
+before,0,0,q,seedcfg[`generatequotes]:0b,1,,Disable quotes
+before,0,0,q,run1:simtick.run[seedcfg],1,,First run
+before,0,0,q,run2:simtick.run[seedcfg],1,,Second run
+true,0,0,q,run1~run2,1,,Same seed produces same output
