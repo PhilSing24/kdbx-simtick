@@ -2,9 +2,21 @@
 
 Realistic intraday tick data simulator for KDB-X with configurable market microstructure.
 
+For a detailed explanation of the mathematical foundations, see the [Technical Paper](docs/IntradayTickSimulatorPaper.pdf).
+
 ## Rationale
 
-Realistic synthetic tick data is valuable for many quantitative finance workflows. This module generates trade and quote data that captures key statistical properties of real markets:
+Realistic synthetic tick data is valuable for many quantitative finance workflows. This module generates trade and quote data that captures key statistical properties of real markets.
+
+The module is designed for **progressive complexity**: start with simple Geometric Brownian Motion (GBM) for basic price simulation, then layer on additional features as your use case requires:
+
+- **Simple**: GBM price dynamics with Poisson-like arrivals
+- **Intermediate**: Add intraday seasonality (U-shape or J-shape patterns)
+- **Advanced**: Enable Hawkes self-excitation for trade clustering, jump-diffusion for discontinuous moves, and realistic bid-ask spread dynamics
+
+This flexibility allows the same module to serve quick prototypes and sophisticated stress-testing scenarios.
+
+### Key Features
 
 - **Trade clustering** — real trades arrive in bursts, not uniformly. We use a Hawkes process to model this self-exciting behavior.
 - **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
@@ -156,8 +168,8 @@ q)k4unit.moduletest`di.simtick
 
 The `docs/` folder contains:
 
-- **IntradayTickSimulatorPaper.pdf** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
-- **HawkesProcessesInFinance.pdf** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
+- **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
+- **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
 
 ## Notebooks
 
