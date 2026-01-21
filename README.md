@@ -1,6 +1,6 @@
 # kdbx-simtick
 
-Intraday tick data simulator for KDB-X using Hawkes process and GBM.
+Realistic intraday tick data simulator for KDB-X with configurable market microstructure.
 
 ## Rationale
 
@@ -27,17 +27,18 @@ This module emphasizes **trade generation** and derives quotes in a simplified m
 
 **Not suitable for:**
 
-- **Advanced Market-making research** — no order book queue dynamics, no queue position modeling
+- **Backtesting** — backtesting requires real historical data to validate strategies against actual market conditions
+- **Market-making research** — no order book queue dynamics, no queue position modeling
 - **Execution optimization** — no realistic fill probability or market impact simulation
 - **HFT strategy development** — quote generation is not causally realistic
 
-For these advanced use cases, a full limit order book simulator with queue dynamics would be preferred.
+For these advanced use cases, a full limit order book simulator with queue dynamics would be required.
 
 ### Next Steps
 
 A future module will extend this simulator to support **multi-instrument generation with correlation**. Using KDB-X module hierarchy, a new `di.simmulti` module will build on `di.simtick` as the single-instrument foundation, adding:
 
-- Correlated Brownian motions
+- Correlated Brownian motions across instruments via Cholesky decomposition
 - Configurable correlation matrices
 - Synchronized or independent arrival processes
 
@@ -79,8 +80,8 @@ q)cfg:cfgs`default
 q)simtick.run[cfg]
 time                          price    qty
 ------------------------------------------
-2026.01.20D09:30:02.487640474 100.0000 43 
-2026.01.20D09:30:03.846514899  99.8811 32 
+2026.01.20D09:30:02.487640474 100      43 
+2026.01.20D09:30:03.846514899 100.0011 32 
 2026.01.20D09:30:04.444929571 100.0122 78 
 ...
 ```
@@ -129,6 +130,18 @@ q)result`quote
 q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simtick
 ```
+
+### Test Coverage
+
+| Group | Tested via | Description |
+|-------|------------|-------------|
+| Validation | `run` | Bad configs throw correct errors |
+| Arrivals | `arrivals` | Sorted, positive, within duration, non-empty |
+| Shape | `arrivals` | Open > mid, close > mid (derived from distribution) |
+| Price | `price` | Positive prices, startprice, realized vol ≈ input vol |
+| Trades | `run` | Correct columns, sorted times, positive prices/qty |
+| Quotes | `run` | bid < ask, sorted times, quote exists before each trade |
+| Config | `loadconfig` | CSV loads, presets accessible, correct types |
 
 ## Project Structure
 ```
