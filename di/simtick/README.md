@@ -4,7 +4,7 @@ Realistic intraday tick data simulator for KDB-X with configurable market micros
 
 For a detailed explanation of the mathematical foundations, see the [Technical Paper](docs/IntradayTickSimulatorPaper.pdf).
 
-## Rationale
+## About
 
 Realistic synthetic tick data is valuable for many quantitative finance workflows. This module generates trade and quote data that captures key statistical properties of real markets.
 
@@ -60,6 +60,24 @@ Correlated price paths across assets are essential for:
 - **Portfolio risk management** — stress testing diversified portfolios under correlated drawdowns
 - **Value at Risk (VaR) and Expected Shortfall (ES)** — generating scenarios for tail risk estimation
 - **Cross-asset strategy testing** — pairs trading, statistical arbitrage, index replication
+
+
+### Configuration
+
+Simulations are driven by a configuration dictionary containing all model parameters (arrival rates, volatility, spread settings, etc.). Rather than building these manually, the module reads configurations from a **CSV file**.
+
+A ready-to-use file `presets.csv` is included with five market scenarios (default, liquid, illiquid, volatile, jumpy). You can:
+
+- Use presets directly: `cfg:cfgs`default`
+- Modify values for specific runs: `cfg[`vol]:0.4`
+- Add new rows to define custom scenarios
+- Create your own CSV following the same schema
+
+To see all available parameters and their descriptions:
+```q
+q)simtick.describe[]
+```
+
 
 ## Overview
 
