@@ -1,4 +1,4 @@
-# kdbx-simtick
+# di.simtick
 
 Realistic intraday tick data simulator for KDB-X with configurable market microstructure.
 
@@ -130,6 +130,7 @@ q)result`quote
 | `generatequotes` | Generate quotes flag | 0b |
 
 ## Testing
+
 ```q
 q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simtick
@@ -153,23 +154,45 @@ q)k4unit.moduletest`di.simtick
 
 ## Documentation
 
-The `documentation/` folder contains **Intraday Tick Simulator: Technical Documentation**, a paper detailing the mathematical foundations of this module including:
+The `docs/` folder contains:
 
-- Hawkes process theory and Ogata thinning algorithm
-- Geometric Brownian Motion and Merton jump-diffusion
-- Quote generation methodology
-- Implementation details
+- **IntradayTickSimulatorPaper.pdf** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
+- **HawkesProcessesInFinance.pdf** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
+
+## Notebooks
+
+Interactive examples using PyKX are available in `notebooks/`.
+
+### Setup
+
+```bash
+cd di/simtick
+python -m venv .venv
+source .venv/bin/activate   # Linux/Mac
+pip install -r requirements.txt
+jupyter lab
+```
+
+### Available Notebooks
+
+| Notebook | Description |
+|----------|-------------|
+| `demo.ipynb` | Basic usage, visualization of trades and quotes |
 
 ## Project Structure
+
 ```
-di/
-  simtick/
-    init.q              # Module code
-    test.csv            # Unit tests (k4unit format)
-    presets.csv         # Market scenario presets
-    README.md           # This file
-    documentation/
-      tick_simulator_paper.pdf   # Mathematical foundations
+di/simtick/
+├── init.q           # Module code
+├── presets.csv      # Market scenario presets
+├── test.csv         # Unit tests (k4unit format)
+├── README.md        # This file
+├── requirements.txt # Python dependencies
+├── docs/
+│   ├── IntradayTickSimulatorPaper.pdf
+│   └── HawkesProcessesInFinance.pdf
+└── notebooks/
+    └── demo.ipynb
 ```
 
 ## License
