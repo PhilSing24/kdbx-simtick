@@ -1,27 +1,83 @@
-/ di.sim - intraday tick simulator
-/ Hawkes process for arrivals, GBM for price
+/ di.simtick - realistic intraday tick simulator
 
-rng.boxmuller:{
-  / Box-Muller transform - requires even number of uniforms, produces 2 normals per 2 uniforms
-  if[count[x] mod 2; '`length];
-  x:2 0N#x;
-  r:sqrt -2f*log x 0;
-  theta:2f*acos[-1]*x 1;
-  x:r*cos theta;
-  x,:r*sin theta;
-  x
+/ Hawkes process: safety multiplier for lambda upper bound
+/ Ensures thinning algorithm acceptance rate stays reasonable
+/ Higher values = more conservative bound = slower but safer
+EXCITE_BUFFER:3
+
+/ Quote generation: maximum intermediate quote updates between trades
+/ Caps computation cost for large time gaps
+MAXQUOTE_UPDATES:10
+
+/ Quote generation: random jitter range for initial quote offset (milliseconds)
+/ Adds realism by varying the pre-trade quote timing
+INITQUOTE_JITTER_MS:100
+
+/ Price movement: fractional tick size for intermediate quote mid-price drift
+/ Controls how much the mid moves between trades (as fraction of price)
+QUOTE_TICK_SIZE:0.0001
+
+/ Time unit conversions
+NS_PER_MS:1000000
+NS_PER_SEC:1000000000
+
+
+val.haskeys:{[cfg;reqkeys;fn]
+  / check config dictionary has all required keys
+  / cfg: configuration dictionary
+  / reqkeys: symbol list of required keys
+  / fn: function name string for error context
+  if[count missing:reqkeys where not reqkeys in key cfg;
+    '"(",fn,"): missing config keys - ",", " sv string missing];
+  }
+
+val.nonempty:{[x;name;fn]
+  / check list is non-empty
+  / x: list to check
+  / name: parameter name for error message
+  / fn: function name string for error context
+  if[not count x; '"(",fn,"): ",name," cannot be empty"];
+  }
+
+val.hascols:{[t;reqcols;fn]
+  / check table has required columns
+  / t: table to check
+  / reqcols: symbol list of required columns
+  / fn: function name string for error context
+  if[not all reqcols in cols t;
+    '"(",fn,"): table missing columns - ",", " sv string reqcols where not reqcols in cols t];
+  }
+
+
+rng.boxmuller:{[n]
+  / Box-Muller transform for n standard normal random variates
+  / n: number of samples required
+  / returns: list of n standard normal floats
+  m:2*(n+1) div 2;  / ensure even count
+  u:m?1.0;
+  u:2 0N#u;
+  r:sqrt -2f*log u 0;
+  theta:2f*acos[-1]*u 1;
+  n#(r*cos theta),r*sin theta
   }
 
 rng.normal:{[n;cfg]
-  / dispatcher: get normal samples based on rngmodel
+  / generate n standard normal random samples
+  / n: number of samples required
+  / cfg: config dict containing `rngmodel
+  / returns: list of n standard normal floats
   model:cfg`rngmodel;
-  m:2*(n+1) div 2;
-  $[model=`pseudo; n#rng.boxmuller[m?1.0];
-    '"Unknown rngmodel: ",string model]
+  $[model=`pseudo; .z.m.rng.boxmuller[n];
+    '"rng.normal: unknown rngmodel - ",string model]
   }
+
 
 shape:{[cfg;progress]
   / intraday intensity multiplier using cosine interpolation
+  / cfg: config dict with `openmult`midmult`closemult`transitionpoint
+  / progress: fraction of trading day elapsed (0 to 1)
+  / returns: intensity multiplier for current time
+  /
   / transitionpoint controls when to switch from open->mid to mid->close
   / 0.5 = symmetric (U-shape), 0.3 = asymmetric (J-shape)
   openmult:cfg`openmult;
@@ -35,7 +91,9 @@ shape:{[cfg;progress]
 
 hawkes.step:{[params;state]
   / single step of Ogata thinning algorithm
-  / state: `t`excitation`times
+  / params: dict with `duration`lambdamax`baseintensity`alpha`beta`cfg
+  / state: dict with `t`excitation`times`done
+  / returns: updated state dict
   duration:params`duration;
   lambdamax:params`lambdamax;
   baseintensity:params`baseintensity;
@@ -55,7 +113,7 @@ hawkes.step:{[params;state]
 
   / current intensity
   progress:t%duration;
-  lambda0:baseintensity*shape[cfg;progress];
+  lambda0:baseintensity*.z.m.shape[cfg;progress];
   lambda:lambda0+excitation;
 
   / accept/reject
@@ -67,8 +125,19 @@ hawkes.step:{[params;state]
   }
 
 arrivals:{[cfg]
-  / Ogata thinning algorithm using over iterator
-  / returns list of arrival times in seconds from session start
+  / generate trade arrival times using Hawkes process (Ogata thinning)
+  / cfg: configuration dictionary
+  / returns: list of arrival times in seconds from session start
+  /
+  / Required config keys:
+  /   baseintensity, alpha, beta, openingtime, closingtime,
+  /   openmult, midmult, closemult, transitionpoint
+
+  / validate required config keys
+  reqkeys:`baseintensity`alpha`beta`openingtime`closingtime;
+  reqkeys,:`openmult`midmult`closemult`transitionpoint;
+  .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
+
   baseintensity:cfg`baseintensity;
   alpha:cfg`alpha;
   beta:cfg`beta;
@@ -76,84 +145,134 @@ arrivals:{[cfg]
   / session duration in seconds
   open:`timespan$cfg`openingtime;
   close:`timespan$cfg`closingtime;
-  duration:`long$(close-open)%1000000000;
+  if[open>=close; '"arrivals: openingtime must be before closingtime"];
+  duration:`long$(close-open)%NS_PER_SEC;
 
   / upper bound for intensity (for thinning)
   maxmult:cfg[`openmult]|cfg[`midmult]|cfg`closemult;
-  excitationbuffer:1+3*alpha%beta;
+  excitationbuffer:1+EXCITE_BUFFER*alpha%beta;
   lambdamax:baseintensity*maxmult*excitationbuffer;
 
   / params for step function
-  params:`duration`lambdamax`baseintensity`alpha`beta`cfg!(duration;lambdamax;baseintensity;alpha;beta;cfg);
+  params:`duration`lambdamax`baseintensity`alpha`beta`cfg!(
+    duration;lambdamax;baseintensity;alpha;beta;cfg);
 
   / initial state
   init:`t`excitation`times`done!(0f;0f;`float$();0b);
 
   / run until done
-  final:hawkes.step[params]/[{not x`done};init];
+  final:.z.m.hawkes.step[params]/[{not x`done};init];
 
   final`times
   }
 
-/ pure GBM return: vol, drift, epsilon, dt -> return factor
-gbm:{[s;r;eps;t] exp (t*r-.5*s*s)+eps*s*sqrt t}
+gbm:{[s;r;eps;t]
+  / GBM single-step return factor
+  / s: annualized volatility (sigma)
+  / r: annualized drift (mu)
+  / eps: standard normal random variate
+  / t: time step in years
+  / returns: multiplicative return factor exp((r - 0.5*s^2)*t + s*sqrt(t)*eps)
+  exp (t*r-.5*s*s)+eps*s*sqrt t
+  }
 
 pricegbm:{[cfg;dts]
-  / GBM price path
-  eps:rng.normal[-1+count dts;cfg];
-  cfg[`startprice]*prds 1.0,gbm[cfg`vol;cfg`drift;eps;1_ dts]
+  / generate price path using geometric Brownian motion
+  / cfg: config dict with `startprice`vol`drift`rngmodel
+  / dts: list of time deltas in years (first element is time to first trade)
+  / returns: list of prices corresponding to each time point
+  eps:.z.m.rng.normal[-1+count dts;cfg];
+  cfg[`startprice]*prds 1.0,.z.m.gbm[cfg`vol;cfg`drift;eps;1_ dts]
   }
 
 pricejump:{[cfg;dts]
-  / jump-diffusion (Merton): dS/S = μdt + σdW + J·dN
+  / generate price path using Merton jump-diffusion model
+  / dS/S = μdt + σdW + J·dN where J is lognormal, N is Poisson
+  / cfg: config dict with `startprice`vol`drift`tradingdays`jumpintensity`jumpmean`jumpvol`rngmodel
+  / dts: list of time deltas in years
+  / returns: list of prices corresponding to each time point
   n:-1+count dts;
   stepdts:1_ dts;
 
-  / diffusion
-  eps:rng.normal[n;cfg];
-  diffusion:gbm[cfg`vol;cfg`drift;eps;stepdts];
+  / diffusion component
+  eps:.z.m.rng.normal[n;cfg];
+  diffusion:.z.m.gbm[cfg`vol;cfg`drift;eps;stepdts];
 
-  / jumps: Poisson arrivals, lognormal sizes
+  / jump component: Poisson arrivals with lognormal sizes
   dtdays:stepdts*cfg`tradingdays;
   hasjump:(n?1.0)<1-exp neg cfg[`jumpintensity]*dtdays;
-  epsj:rng.normal[n;cfg];
-  jumps:exp hasjump*cfg[`jumpmean]+cfg[`jumpvol]*epsj;
+  epsj:.z.m.rng.normal[n;cfg];
+  jumps:exp hasjump*(cfg[`jumpmean]+cfg[`jumpvol]*epsj);
 
   cfg[`startprice]*prds 1.0,diffusion*jumps
   }
 
 price:{[cfg;times]
+  / generate prices for given arrival times
+  / cfg: configuration dictionary
+  / times: list of arrival times in seconds from session start
+  / returns: list of prices corresponding to each arrival time
+  /
+  / Required config keys:
+  /   openingtime, closingtime, tradingdays, pricemodel, startprice, vol, drift
+  /   For jump model: jumpintensity, jumpmean, jumpvol
+
+  / validate inputs
+  .z.m.val.nonempty[times;"times";"price"];
+  if[any times<0; '"price: times must be non-negative"];
+
+  reqkeys:`openingtime`closingtime`tradingdays`pricemodel`startprice`vol`drift;
+  .z.m.val.haskeys[cfg;reqkeys;"price"];
+
   / convert times to dt in years
   open:`timespan$cfg`openingtime;
   close:`timespan$cfg`closingtime;
-  secsperyear:cfg[`tradingdays]*`long$(close-open)%1000000000;
+  secsperyear:cfg[`tradingdays]*`long$(close-open)%NS_PER_SEC;
   dts:deltas[times]%secsperyear;
 
-  $[cfg[`pricemodel]=`jump; pricejump[cfg;dts]; pricegbm[cfg;dts]]
+  $[cfg[`pricemodel]=`jump; .z.m.pricejump[cfg;dts]; .z.m.pricegbm[cfg;dts]]
   }
 
 qty.constant:{[n;cfg]
-  n#cfg`qty
+  / generate constant quantities
+  / n: number of quantities
+  / cfg: config dict with `qty
+  / returns: list of n identical quantities
+  n#cfg`avgqty
   }
 
 qty.lognormal:{[n;cfg]
+  / generate lognormal random quantities
+  / n: number of quantities
+  / cfg: config dict with `avgqty`qtyvol`rngmodel
+  / returns: list of n integer quantities (minimum 1)
   avgqty:cfg`avgqty;
   qtyvol:cfg`qtyvol;
   mu:log[avgqty]-0.5*qtyvol*qtyvol;
-  eps:rng.normal[n;cfg];
+  eps:.z.m.rng.normal[n;cfg];
   `long$1|floor exp mu+qtyvol*eps
   }
 
 qty.gen:{[n;cfg]
+  / dispatch to appropriate quantity generator
+  / n: number of quantities
+  / cfg: config dict with `qtymodel and model-specific params
+  / returns: list of n quantities
   model:cfg`qtymodel;
-  $[model=`constant;  qty.constant[n;cfg];
-    model=`lognormal; qty.lognormal[n;cfg];
-    '"Unknown qtymodel: ",string model]
+  $[model=`constant;  .z.m.qty.constant[n;cfg];
+    model=`lognormal; .z.m.qty.lognormal[n;cfg];
+    '"qty.gen: unknown qtymodel - ",string model]
   }
 
 quote.generate:{[cfg;trades]
-  / generate quote updates between trades
-  / each trade has at least one quote before it
+  / generate quote updates for trades (fully vectorized)
+  / cfg: configuration dictionary
+  / trades: trade table with `time`price columns
+  / returns: quote table with `time`bid`ask`bidsize`asksize
+
+  / validate inputs
+  .z.m.val.hascols[trades;`time`price;"quote.generate"];
+
   n:count trades;
   if[n=0; :([]time:`timestamp$();bid:`float$();ask:`float$();bidsize:`long$();asksize:`long$())];
 
@@ -166,178 +285,173 @@ quote.generate:{[cfg;trades]
   quoteupdaterate:cfg`quoteupdaterate;
   avgquotesize:cfg`avgquotesize;
 
-  / initial quote before first trade
-  firsttime:tradetimes[0];
-  initoffset:`timespan$`long$1000000*pretradeoffset+first 1?100;
-  inittime:firsttime-initoffset;
+  / === 1. Initial quote (before first trade) ===
+  initoffset:`timespan$`long$NS_PER_MS*pretradeoffset+first 1?INITQUOTE_JITTER_MS;
+  inittime:tradetimes[0]-initoffset;
   initprice:tradeprices[0];
   initspread:basespread*initprice*cfg`spreadopenmult;
 
-  initbid:initprice-initspread%2;
-  initask:initprice+initspread%2;
+  / === 2. Pre-trade quotes (one per trade, vectorized) ===
+  / times: random offset before each trade
+  randoffsets:n?pretradeoffset;
+  pretimes:tradetimes-`timespan$`long$(pretradeoffset+randoffsets)*NS_PER_MS;
 
-  / initial state
-  init:`times`bids`asks`bidsizes`asksizes`prevtime`prevbid`prevask!(
-    enlist inittime;
-    enlist initbid;
-    enlist initask;
-    enlist avgquotesize;
-    enlist avgquotesize;
-    inittime;
-    initbid;
-    initask
-  );
+  / spreads based on time of day (vectorized)
+  prespreadmults:.z.m.quote.spreadmults[cfg;tradetimes];
+  prespreads:basespread*tradeprices*prespreadmults;
+  prebids:tradeprices-prespreads%2;
+  preasks:tradeprices+prespreads%2;
 
-  / params for step function
-  params:`cfg`basespread`pretradeoffset`quoteupdaterate`avgquotesize`tradetimes`tradeprices!(
-    cfg;basespread;pretradeoffset;quoteupdaterate;avgquotesize;tradetimes;tradeprices
-  );
+  / sizes (vectorized)
+  prebidsizes:avgquotesize+`long$100*.z.m.rng.boxmuller[n];
+  preasksizes:avgquotesize+`long$100*.z.m.rng.boxmuller[n];
 
-  / process each trade using over
-  final:quote.step[params]/[init;til n];
+  / === 3. Intermediate quotes (vectorized) ===
+  / only if we have at least 2 trades
+  intresult:$[n>1;
+    .z.m.quote.intermediates[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quoteupdaterate;avgquotesize];
+    `times`bids`asks`bidsizes`asksizes!5#enlist`float$()
+  ];
 
-  / build and sort quote table
-  quotes:([]time:final`times;bid:final`bids;ask:final`asks;bidsize:final`bidsizes;asksize:final`asksizes);
-  quotes:update bidsize:1|bidsize, asksize:1|asksize from quotes;
+  / === 4. Combine all quotes ===
+  alltimes:(enlist inittime),intresult[`times],pretimes;
+  allbids:(enlist initprice-initspread%2),intresult[`bids],prebids;
+  allasks:(enlist initprice+initspread%2),intresult[`asks],preasks;
+  allbidsizes:(enlist avgquotesize),intresult[`bidsizes],prebidsizes;
+  allasksizes:(enlist avgquotesize),intresult[`asksizes],preasksizes;
+
+  / build table, enforce minimum size of 1, sort by time
+  quotes:([]time:alltimes;bid:allbids;ask:allasks;bidsize:allbidsizes;asksize:allasksizes);
+  quotes:update bidsize:1|bidsize,asksize:1|asksize from quotes;
   `time xasc quotes
   }
 
-quote.step:{[params;state;i]
-  / process single trade - generate quotes before it
-  cfg:params`cfg;
-  basespread:params`basespread;
-  pretradeoffset:params`pretradeoffset;
-  quoteupdaterate:params`quoteupdaterate;
-  avgquotesize:params`avgquotesize;
+quote.intermediates:{[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quoteupdaterate;avgquotesize]
+  / generate all intermediate quotes across all gaps (fully vectorized)
+  / returns dict with `times`bids`asks`bidsizes`asksizes
+  n:count tradetimes;
+  empty:`times`bids`asks`bidsizes`asksizes!5#enlist`float$();
 
-  tradetime:params[`tradetimes][i];
-  tradeprice:params[`tradeprices][i];
+  / gap times in ms between consecutive trades
+  prevtimes:tradetimes til n-1;
+  nexttimes:tradetimes 1+til n-1;
+  prevprices:tradeprices til n-1;
+  nextprices:tradeprices 1+til n-1;
+  gaps:`long$(nexttimes-prevtimes)%NS_PER_MS;
 
-  prevtime:state`prevtime;
-  prevbid:state`prevbid;
-  prevask:state`prevask;
+  / number of intermediate quotes per gap (capped)
+  nupdates:MAXQUOTE_UPDATES&`long$floor quoteupdaterate*gaps%1000;
 
-  / time gap in ms
-  gap:`long$(tradetime-prevtime)%1000000;
+  / filter gaps that are too short (need room for quotes before pretradeoffset)
+  mingap:2*pretradeoffset;
+  nupdates:nupdates*gaps>mingap;
 
-  / number of intermediate updates
-  nupdates:`long$floor quoteupdaterate*gap%1000;
-  nupdates:nupdates&10;
+  totint:sum nupdates;
+  if[totint=0; :empty];
 
-  / generate intermediate quotes (vectorized)
-  state:$[nupdates>0;
-    quote.intermediate[params;state;tradetime;tradeprice;gap;nupdates];
-    state
-  ];
+  / expand gap indices: create nupdates[i] copies of index i for each gap
+  / e.g., if nupdates=(0 2 0 3), gapidx=(1 1 3 3 3)
+  gapidx:raze {x#y}'[nupdates; til count nupdates];
 
-  / quote just before trade
-  randoffset:first 1?pretradeoffset;
-  pretime:tradetime-`timespan$`long$(pretradeoffset+randoffset)*1000000;
+  / position within each gap (0, 1, 2, ... for each gap)
+  / e.g., if nupdates=(0 2 0 3), positions=(0 1 0 1 2)
+  positions:raze til each nupdates;
 
-  spread:basespread*tradeprice*quote.spreadmult[cfg;tradetime];
-  bid:tradeprice-spread%2;
-  ask:tradeprice+spread%2;
-  bidsize:avgquotesize+`long$100*first rng.boxmuller[2?1.0];
-  asksize:avgquotesize+`long$100*first rng.boxmuller[2?1.0];
+  / gap-specific values expanded to each intermediate quote
+  gapnupdates:nupdates gapidx;
+  gapprevtimes:prevtimes gapidx;
+  gapnexttimes:nexttimes gapidx;
+  gapprevprices:prevprices gapidx;
+  gapnextprices:nextprices gapidx;
 
-  / append and update state
-  state[`times],:pretime;
-  state[`bids],:bid;
-  state[`asks],:ask;
-  state[`bidsizes],:bidsize;
-  state[`asksizes],:asksize;
-  state[`prevtime]:pretime;
-  state[`prevbid]:bid;
-  state[`prevask]:ask;
-  state
-  }
+  / times: evenly spaced within [prevtime, nexttime - pretradeoffset]
+  availdurations:gapnexttimes-gapprevtimes-`timespan$`long$pretradeoffset*NS_PER_MS;
+  fractions:(1+positions)%1+gapnupdates;
+  inttimes:gapprevtimes+`timespan$`long$fractions*`long$availdurations;
 
-quote.intermediate:{[params;state;tradetime;tradeprice;gap;nupdates]
-  / generate intermediate quote updates (vectorized)
-  basespread:params`basespread;
-  pretradeoffset:params`pretradeoffset;
-  avgquotesize:params`avgquotesize;
-  cfg:params`cfg;
+  / prices: interpolate from prev toward next trade price, plus noise
+  midprices:gapprevprices+fractions*(gapnextprices-gapprevprices);
+  noise:QUOTE_TICK_SIZE*midprices*.z.m.rng.boxmuller[totint];
+  midprices+:noise;
 
-  prevtime:state`prevtime;
-  prevbid:state`prevbid;
-  prevask:state`prevask;
-
-  / candidate times
-  updatetimes:prevtime+`timespan$`long$(1+til nupdates)*1000000*gap%nupdates+1;
-
-  / filter times before trade offset
-  cutoff:tradetime-`timespan$`long$pretradeoffset*1000000;
-  mask:updatetimes<cutoff;
-  validtimes:updatetimes where mask;
-  nvalid:count validtimes;
-
-  if[nvalid=0; :state];
-
-  / generate random movements
-  eps:rng.normal[nvalid;cfg];
-  midmove:0.0001*tradeprice*sums eps;
-  spreadvar:1+0.1*abs rng.normal[nvalid;cfg];
-
-  / compute quotes vectorized
-  mids:(prevbid+prevask)%2+midmove;
-  sps:basespread*mids*spreadvar;
-  bids:mids-sps%2;
-  asks:mids+sps%2;
+  / spreads (vectorized across all intermediate quotes)
+  intspreadmults:.z.m.quote.spreadmults[cfg;inttimes];
+  spreadvar:1+0.1*abs .z.m.rng.boxmuller[totint];
+  intspreads:basespread*midprices*intspreadmults*spreadvar;
+  intbids:midprices-intspreads%2;
+  intasks:midprices+intspreads%2;
 
   / sizes
-  epssize:rng.normal[2*nvalid;cfg];
-  bidsizes:avgquotesize+`long$100*nvalid#epssize;
-  asksizes:avgquotesize+`long$100*nvalid _ epssize;
+  intbidsizes:avgquotesize+`long$100*.z.m.rng.boxmuller[totint];
+  intasksizes:avgquotesize+`long$100*.z.m.rng.boxmuller[totint];
 
-  / append to state
-  state[`times],:validtimes;
-  state[`bids],:bids;
-  state[`asks],:asks;
-  state[`bidsizes],:bidsizes;
-  state[`asksizes],:asksizes;
-  state[`prevbid]:last bids;
-  state[`prevask]:last asks;
-  state
+  `times`bids`asks`bidsizes`asksizes!(inttimes;intbids;intasks;intbidsizes;intasksizes)
   }
 
-quote.spreadmult:{[cfg;t]
-  / spread multiplier based on time of day
+quote.spreadmults:{[cfg;times]
+  / spread multiplier based on time of day (vectorized)
+  / cfg: config dict with spread parameters
+  / times: list of timestamps
+  / returns: list of spread multipliers (wider at open/close, tighter at midday)
   opentime:`timespan$cfg`openingtime;
   closetime:`timespan$cfg`closingtime;
   duration:closetime-opentime;
 
-  / get time portion of timestamp as timespan
-  timeofday:t-`timestamp$`date$t;  / nanoseconds since midnight
+  / time of day as timespan
+  timeofday:times-`timestamp$`date$times;
 
+  / progress through trading day (0 to 1)
   progress:(timeofday-opentime)%duration;
   progress:0f|progress&1f;
 
-  $[progress<0.5;
-    cfg[`spreadopenmult]+(cfg[`spreadmidmult]-cfg`spreadopenmult)*2*progress;
-    cfg[`spreadmidmult]+(cfg[`spreadclosemult]-cfg`spreadmidmult)*2*(progress-0.5)]
+  / vectorized conditional: early part vs late part of day
+  earlyvals:cfg[`spreadopenmult]+(cfg[`spreadmidmult]-cfg`spreadopenmult)*2*progress;
+  latevals:cfg[`spreadmidmult]+(cfg[`spreadclosemult]-cfg`spreadmidmult)*2*progress-0.5;
+  early:progress<0.5;
+  (early*earlyvals)+(not early)*latevals
   }
 
 validate:{[cfg]
-  / validate config
-  / check stability
-  if[cfg[`alpha]>=cfg`beta; '"Hawkes unstable: alpha must be < beta"];
+  / validate configuration dictionary for run
+  / cfg: configuration dictionary
+  / returns: cfg if valid, throws error otherwise
+  /
+  / Checks:
+  /   - Hawkes stability: alpha < beta
+  /   - Positive multipliers: openmult, midmult, closemult > 0
+  /   - Positive base intensity
+  /   - Transitionpoint in valid range (prevents division by zero)
+
+  / check Hawkes stability condition
+  if[cfg[`alpha]>=cfg`beta; '"validate: Hawkes unstable - alpha must be < beta"];
   / check multipliers positive
-  if[0>=min[cfg`openmult`midmult`closemult]; '"Multipliers must be positive"];
+  if[0>=min cfg`openmult`midmult`closemult; '"validate: multipliers must be positive"];
   / check base intensity
-  if[0>=cfg`baseintensity; '"baseintensity must be positive"];
+  if[0>=cfg`baseintensity; '"validate: baseintensity must be positive"];
+  / check transitionpoint bounds (prevents division by zero in shape function)
+  if[not cfg[`transitionpoint] within 0.01 0.99;
+    '"validate: transitionpoint must be between 0.01 and 0.99"];
   cfg
   }
 
+
 run:{[cfg]
   / main simulation entry point
-  cfg:validate[cfg];
+  / cfg: configuration dictionary (typically loaded via loadconfig)
+  / returns: trade table if generatequotes=0b, else dict with `trade`quote
+  /
+  / Example:
+  /   cfg:first loadconfig`:presets.csv
+  /   trades:run[cfg]
+  /   cfg[`generatequotes]:1b
+  /   result:run[cfg]  / result`trade, result`quote
+  cfg:.z.m.validate[cfg];
 
   / set seed for reproducibility
   if[cfg[`seed]>0; system "S ",string cfg`seed];
 
   / generate arrival times (seconds from open)
-  arrs:arrivals[cfg];
+  arrs:.z.m.arrivals[cfg];
   n:count arrs;
 
   if[n=0;
@@ -349,29 +463,81 @@ run:{[cfg]
 
   / convert to timestamps
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
-  times:basetime+`timespan$`long$arrs*1000000000;
+  times:basetime+`timespan$`long$arrs*NS_PER_SEC;
 
   / generate prices
-  prices:price[cfg;arrs];
+  prices:.z.m.price[cfg;arrs];
 
   / generate quantities
-  qtys:qty.gen[n;cfg];
+  qtys:.z.m.qty.gen[n;cfg];
 
   trades:([]time:times;price:prices;qty:qtys);
 
   / return trades only or dictionary with quotes
   $[cfg`generatequotes;
-    `trade`quote!(trades;quote.generate[cfg;trades]);
+    `trade`quote!(trades;.z.m.quote.generate[cfg;trades]);
     trades]
   }
 
-/ CSV type string for config file
-csvtypes:"SDUUFJSFFJSFFFFFFFFFFSJFBFFFFJFJ"
+/ Configuration schema: column name -> (type; description)
+/ Type codes: S=symbol, D=date, U=minute, F=float, J=long, B=boolean
+schema:()!()
+schema[`name]:("S";"preset name (key)")
+schema[`tradingdate]:("D";"simulation date")
+schema[`openingtime]:("U";"market open time")
+schema[`closingtime]:("U";"market close time")
+schema[`startprice]:("F";"initial price")
+schema[`seed]:("J";"random seed (0 = no seed)")
+schema[`rngmodel]:("S";"RNG model (`pseudo)")
+schema[`drift]:("F";"annualized drift")
+schema[`vol]:("F";"annualized volatility")
+schema[`tradingdays]:("J";"trading days per year")
+schema[`pricemodel]:("S";"price model (`gbm or `jump)")
+schema[`jumpintensity]:("F";"jump arrival rate (jumps/day)")
+schema[`jumpmean]:("F";"log jump mean")
+schema[`jumpvol]:("F";"log jump volatility")
+schema[`baseintensity]:("F";"base trade arrival rate (trades/sec)")
+schema[`alpha]:("F";"Hawkes excitation parameter")
+schema[`beta]:("F";"Hawkes decay parameter (must be > alpha)")
+schema[`transitionpoint]:("F";"intraday shape parameter (0.3=J, 0.5=U)")
+schema[`openmult]:("F";"intensity multiplier at open")
+schema[`midmult]:("F";"intensity multiplier at midday")
+schema[`closemult]:("F";"intensity multiplier at close")
+schema[`qtymodel]:("S";"quantity model (`constant or `lognormal)")
+schema[`avgqty]:("J";"average trade quantity")
+schema[`qtyvol]:("F";"quantity volatility (for lognormal)")
+schema[`generatequotes]:("B";"generate quotes flag")
+schema[`basespread]:("F";"base bid-ask spread (fraction of price)")
+schema[`spreadopenmult]:("F";"spread multiplier at open")
+schema[`spreadmidmult]:("F";"spread multiplier at midday")
+schema[`spreadclosemult]:("F";"spread multiplier at close")
+schema[`pretradeoffset]:("J";"min ms before trade for quote")
+schema[`quoteupdaterate]:("F";"quote updates per second")
+schema[`avgquotesize]:("J";"average quote size")
+
+/ Derive type string from schema
+csvtypes:raze first each value schema
 
 loadconfig:{[filepath]
-  / load config CSV as keyed table
-  1!(csvtypes;enlist csv) 0: filepath
+  / load preset configurations from CSV file
+  / filepath: file handle to CSV (e.g., `:presets.csv)
+  / returns: keyed table with preset name as key
+  /
+  / Example:
+  /   cfgs:loadconfig`:di/simtick/presets.csv
+  /   cfg:cfgs`default
+  /   run[cfg]
+  if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
+  1!(.z.m.csvtypes;enlist csv) 0: filepath
+  }
+
+describe:{[]
+  / return configuration schema as a table
+  / useful for documentation and introspection
+  / Example:
+  /   simtick.describe[]
+  ([]param:key .z.m.schema;typ:first each value .z.m.schema;description:last each value .z.m.schema)
   }
 
 / export public interface
-export:([run;arrivals;price;loadconfig])
+export:([run;arrivals;price;loadconfig;describe])

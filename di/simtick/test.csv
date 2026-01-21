@@ -23,8 +23,8 @@ true,0,0,q,all arr<duration,1,,All arrivals within duration
 true,0,0,q,9h=type arr,1,,Arrivals type is float list
 comment,0,0,q,,1,,=== Shape Tests ===
 before,0,0,q,shapecfg:cfg,1,,Setup config for shape test
-before,0,0,q,shapecfg[`baseintensity]:5.0,1,,High intensity for clearer pattern
-before,0,0,q,shapecfg[`seed]:123,1,,Set seed
+before,0,0,q,shapecfg[`baseintensity]:2.0,1,,Higher intensity for clearer pattern
+before,0,0,q,shapecfg[`seed]:42,1,,Set seed
 before,0,0,q,sharr:simtick.arrivals[shapecfg],1,,Generate arrivals for shape test
 before,0,0,q,firsthour:count sharr where sharr<3600,1,,Count first hour arrivals
 before,0,0,q,midhour:count sharr where sharr within 10800 14400,1,,Count mid hour arrivals (hours 3-4)
