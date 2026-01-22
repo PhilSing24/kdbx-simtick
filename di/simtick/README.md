@@ -49,9 +49,39 @@ For these advanced use cases, a full limit order book simulator with queue dynam
 
 ### Next Steps
 
-A future module will extend this simulator to support **multi-instrument generation with correlation**. Using KDB-X module hierarchy, a new `di.simmulti` module will build on `di.simtick` as the single-instrument foundation, adding:
+Two future modules will extend this simulator, using the KDB-X module framework's **sibling architecture**. Each module lives at the same level under `di/` and declares dependencies via relative module references.
 
-- Correlated processes
+**Module hierarchy:**
+
+```
+di/
+├── simtick/           # 1 instrument, 1 day (atomic unit)
+├── simcalendar/       # 1 instrument, N days (uses ..simtick)
+└── simbasket/         # M instruments, N days (uses ..simcalendar)
+```
+
+**Dependency chain:**
+
+```
+simtick ← simcalendar ← simbasket
+```
+
+Each module builds on its predecessor. This design allows users to load only what they need while keeping each module focused on a single responsibility.
+
+---
+
+**`di.simcalendar`** — Single instrument over multiple trading days
+
+- Accepts a list of trading dates (e.g., NYSE calendar)
+- Orchestrates `di.simtick` for each day
+- Models overnight gaps scaled by calendar days between sessions
+- Preserves day boundaries for statistical analysis of arrivals
+
+---
+
+**`di.simbasket`** — Multiple correlated instruments over multiple trading days
+
+- Correlated price processes across instruments
 - Configurable correlation matrices
 - Synchronized or independent arrival processes
 
