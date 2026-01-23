@@ -24,8 +24,6 @@ q)simcalendar:use`di.simcalendar
 
 ## Installation
 
-## Installation
-
 **Option 1: Command line (Makefile)**
 ```bash
 cd kdbx-modules
@@ -51,7 +49,6 @@ simcalendar:use`di.simcalendar
 ```
 
 ## Project Structure
-
 ```
 kdbx-modules/
 ├── Makefile
@@ -61,7 +58,7 @@ kdbx-modules/
     │   ├── init.q
     │   ├── presets.csv
     │   └── test.csv
-    └── simcalendar/       # 1 instrument, N days (uses ..simtick)
+    └── simcalendar/       # 1 instrument, N days (uses di.simtick)
         ├── init.q
         └── calendar.csv
 ```

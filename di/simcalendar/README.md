@@ -130,8 +130,7 @@ See `simtick.describe[]` for available parameters.
 ## Future Extensions
 
 - **Overnight gaps**: Model price jumps between close and next open (requires variance budget design)
-- **Early closes**: Support variable trading hours per day
-- **Daily statistics**: Return summary table alongside trades
+
 
 ## License
 
