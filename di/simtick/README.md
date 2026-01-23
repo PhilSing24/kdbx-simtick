@@ -68,6 +68,8 @@ simtick ← simcalendar ← simbasket
 
 Each module builds on its predecessor. This design allows users to load only what they need while keeping each module focused on a single responsibility.
 
+**Note:** We use absolute module paths (`use`di.simtick`) rather than relative sibling references (`use`..simtick`). The sibling syntax did not work in our testing with KDB-X Community Edition — further investigation needed. 
+
 ---
 
 **`di.simcalendar`** — Single instrument over multiple trading days
