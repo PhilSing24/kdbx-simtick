@@ -141,11 +141,11 @@ q)simtick:use`di.simtick
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
 q)cfg:cfgs`default
 q)simtick.run[cfg]
-time                          price    qty
-------------------------------------------
-2026.01.20D09:30:02.487640474 100      43 
-2026.01.20D09:30:03.846514899 100.0011 32 
-2026.01.20D09:30:04.444929571 100.0122 78 
+sym time                          price    qty
+-----------------------------------------------
+NVDA 2026.01.20D09:30:02.487640474 181.90   43 
+NVDA 2026.01.20D09:30:03.846514899 182.01   32 
+NVDA 2026.01.20D09:30:04.444929571 182.05   78 
 ...
 ```
 
@@ -172,8 +172,6 @@ q)result`quote
 | Preset | Description |
 |--------|-------------|
 | `default` | Standard trading day |
-| `liquid` | High volume, tighter spreads |
-| `illiquid` | Low volume |
 | `volatile` | Higher price volatility |
 | `jumpy` | Jump-diffusion price model |
 
