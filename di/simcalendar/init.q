@@ -69,7 +69,7 @@ run:{[cfg;calendar]
   if[cfg[`seed]>0; system "S ",string cfg`seed];
   
   / initialize accumulator
-  allTrades:([]time:`timestamp$();price:`float$();qty:`long$());
+  allTrades:([]sym:`symbol$();time:`timestamp$();price:`float$();qty:`long$());
   currentprice:cfg`startprice;
   
   / iterate through trading days
