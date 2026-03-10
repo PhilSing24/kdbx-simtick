@@ -129,8 +129,7 @@ See `simtick.describe[]` for available parameters.
 
 ## Future Extensions
 
-- **Overnight gaps**: Model price jumps between close and next open (requires variance budget design)
-
+- **Overnight gaps**: Model price jumps between close and next open (requires variance recalibration)
 
 ## License
 
