@@ -1,0 +1,56 @@
+action,ms,bytes,lang,code,repeat,comment
+before,0,0,q,simtick:use`di.simtick,1,Initialize simtick module
+before,0,0,q,simcalendar:use`di.simcalendar,1,Initialize simcalendar module
+before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,Load presets
+before,0,0,q,cfg:cfgs`default,1,Get default config
+before,0,0,q,cfg[`seed]:42,1,Set seed for reproducibility
+before,0,0,q,calendar:simcalendar.loadcalendar`:di/simcalendar/calendar.csv,1,Load calendar
+comment,0,0,q,,1,=== Validation Tests ===
+fail,0,0,q,simcalendar.validate[2026.01.20],1,Non-list date throws error
+fail,0,0,q,simcalendar.validate[`date$()],1,Empty date list throws error
+fail,0,0,q,simcalendar.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
+fail,0,0,q,simcalendar.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
+comment,0,0,q,,1,=== loadcalendar Tests ===
+true,0,0,q,14h=type calendar,1,loadcalendar returns date list
+true,0,0,q,0<count calendar,1,Calendar is non-empty
+true,0,0,q,(asc calendar)~calendar,1,Calendar is sorted ascending
+comment,0,0,q,,1,=== Run In-Memory Tests ===
+before,0,0,q,trades:simcalendar.run[cfg;calendar;(::)],1,Run in-memory simulation
+true,0,0,q,98h=type trades,1,Result is a table
+true,0,0,q,`sym`time`price`qty~cols trades,1,Trades has correct columns
+true,0,0,q,(asc trades`time)~trades`time,1,Trades sorted by time
+true,0,0,q,all 0<trades`price,1,All prices positive
+true,0,0,q,all 0<trades`qty,1,All quantities positive
+true,0,0,q,1=count distinct trades`sym,1,Single sym across all days
+true,0,0,q,cfg[`sym]=first trades`sym,1,Sym matches config
+comment,0,0,q,,1,=== Multi-Day Tests ===
+before,0,0,q,daycounts:select count i by "d"$time from trades,1,Count trades per day
+true,0,0,q,(count calendar)=count daycounts,1,All calendar days have trades
+true,0,0,q,all 0<exec x from daycounts,1,Each day has at least one trade
+comment,0,0,q,,1,=== Price Continuity Tests ===
+before,0,0,q,days:asc distinct "d"$trades`time,1,Get sorted days
+before,0,0,q,lastprice1:last exec price from trades where ("d"$time)=days 0,1,Last price of day 1
+before,0,0,q,firstprice2:first exec price from trades where ("d"$time)=days 1,1,First price of day 2
+true,0,0,q,lastprice1=firstprice2,1,Last price day 1 equals first price day 2
+true,0,0,q,all 0<exec price from trades where ("d"$time)=last days,1,Last day prices all positive
+comment,0,0,q,,1,=== Quotes Tests ===
+before,0,0,q,qcfg:cfg,1,Setup config with quotes
+before,0,0,q,qcfg[`generatequotes]:1b,1,Enable quote generation
+before,0,0,q,qresult:simcalendar.run[qcfg;calendar;(::)],1,Run with quotes
+true,0,0,q,99h=type qresult,1,Result with quotes is dict
+true,0,0,q,`trade`quote~key qresult,1,Dict has trade and quote keys
+true,0,0,q,`sym`time`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
+comment,0,0,q,,1,=== Disk Persistence Tests ===
+before,0,0,q,dbpath:`:/tmp/simcalendar_test,1,Set test database path
+before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up any existing test database
+before,0,0,q,diskresult:simcalendar.run[cfg;calendar;dbpath],1,Run with disk persistence
+true,0,0,q,diskresult~dbpath,1,Returns dbpath on success
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test",1,Database root exists on disk
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20",1,First date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.22",1,Last date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20/trade",1,Trade table exists in partition
+after,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up test database
+comment,0,0,q,,1,=== Reproducibility Tests ===
+before,0,0,q,run1:simcalendar.run[cfg;calendar;(::)],1,First run
+before,0,0,q,run2:simcalendar.run[cfg;calendar;(::)],1,Second run
+true,0,0,q,run1~run2,1,Same seed produces same output
