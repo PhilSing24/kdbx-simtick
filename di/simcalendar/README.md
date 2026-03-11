@@ -25,6 +25,8 @@ di/
 
 ## Usage
 
+### In-memory simulation
+
 ```q
 q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
@@ -35,15 +37,53 @@ q)cfg:simtick.loadconfig[`:di/simtick/presets.csv]`default
 / Load trading calendar
 q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
 
-/ Run multi-day simulation
-q)trades:simcalendar.run[cfg;calendar]
+/ Run multi-day simulation (in-memory)
+q)trades:simcalendar.run[cfg;calendar;(::)]
+q)cols trades
+`sym`time`price`qty
+q)count trades
+180778
+```
+
+### Disk persistence
+
+```q
+/ Persist to date-partitioned kdb+ database
+q)simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
+`:/home/philippe/mydb
+
+/ Load and query
+q)\l /home/philippe/mydb
+q)5#select from trade where date=2026.01.20
+date       sym  time                          price    qty
+----------------------------------------------------------
+2026.01.20 NVDA 2026.01.20D09:30:01.243820237 181.9    85
+2026.01.20 NVDA 2026.01.20D09:30:01.923257449 181.903  102
+2026.01.20 NVDA 2026.01.20D09:30:02.222464786 181.8667 142
+2026.01.20 NVDA 2026.01.20D09:30:02.233927676 181.8648 63
+2026.01.20 NVDA 2026.01.20D09:30:02.484859713 181.8648 446
+```
+
+### With quotes
+
+```q
+/ Enable quote generation
+q)cfg[`generatequotes]:1b
+
+/ In-memory - returns dict with `trade`quote
+q)result:simcalendar.run[cfg;calendar;(::)]
+q)result`trade
+q)result`quote
+
+/ On disk - writes both trade/ and quote/ partitions
+q)simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
 ```
 
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `simcalendar.run[cfg;calendar]` | Run simulation over calendar, returns trades table |
+| `simcalendar.run[cfg;calendar;dbpath]` | Run simulation, returns trades table or dbpath |
 | `simcalendar.loadcalendar[filepath]` | Load calendar from CSV, returns date list |
 | `simcalendar.describe[]` | Return module description |
 
@@ -75,6 +115,29 @@ Day 2: starts at P1, ends at P2
 Day 3: starts at P2, ends at P3
 ```
 
+### Disk Persistence
+
+Pass a file handle as the third argument to persist to a date-partitioned kdb+ database:
+
+- `(::)` — in-memory only, returns trades table (or dict with quotes)
+- `` `:/path/mydb `` — writes date-partitioned DB, returns dbpath
+
+The database structure on disk:
+
+```
+/path/mydb/
+├── sym                    / symbol enumeration file
+├── 2026.01.20/
+│   ├── trade/             / splayed trade table
+│   └── quote/             / splayed quote table (if generatequotes:1b)
+├── 2026.01.21/
+│   ├── trade/
+│   └── quote/
+...
+```
+
+When `generatequotes:1b`, both `trade` and `quote` partitions are written for each day.
+
 ### Overnight Gap
 
 Currently, each day's opening price equals the previous day's closing price — there is no overnight gap. This produces a continuous price path.
@@ -91,8 +154,8 @@ Over a week (5 trading days, 7 calendar days of gaps), total variance would be a
 To maintain consistency with the simtick configuration, adding overnight gaps would require either:
 
 1. Recalibrating `vol` to account for the additional overnight variance
-2. Introducing a separate overnight volatility parameter with careful documentation
-3. Splitting variance budget between intraday and overnight components
+2. Introducing a separate overnight volatility parameter
+3. Splitting variance between intraday and overnight components
 
 For now, we keep the simpler approach where the configured `vol` governs the entire price path. Future versions may address overnight gaps with proper variance accounting.
 

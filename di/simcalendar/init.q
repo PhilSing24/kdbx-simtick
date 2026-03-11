@@ -11,19 +11,19 @@ validate:{[calendar]
   / validate calendar input
   / calendar: list of dates
   / returns: calendar if valid, throws error otherwise
-  
+
   / must be date list
   if[not 14h=type calendar; '"validate: calendar must be a date list"];
-  
+
   / non-empty
   if[0=count calendar; '"validate: calendar cannot be empty"];
-  
+
   / no duplicates
   if[count[calendar]<>count distinct calendar; '"validate: calendar contains duplicates"];
-  
+
   / sorted ascending
   if[not calendar~asc calendar; '"validate: calendar must be sorted ascending"];
-  
+
   calendar
   }
 
@@ -35,62 +35,93 @@ runday:{[cfg;date]
   / run single day simulation
   / cfg: simtick configuration (with seed:0 to prevent RNG reset)
   / date: trading date
-  / returns: trades table for this day
-  
+  / returns: trade table, or dict with `trade`quote if generatequotes=1b
+
   / update config for this day
   daycfg:cfg;
   daycfg[`tradingdate]:date;
   daycfg[`seed]:0;  / prevent simtick from resetting RNG
-  
-  / run simtick
-  result:simtick.run[daycfg];
-  
-  / handle generatequotes case - extract trades
-  $[99h=type result; result`trade; result]
+
+  / run simtick - return full result (trade only or trade+quote dict)
+  simtick.run[daycfg]
   }
 
-run:{[cfg;calendar]
+persist:{[dst;date;result]
+  daypath:hsym`$string[dst],"/",string date;
+
+  $[99h=type result;
+    [
+      .Q.dd[daypath;`$"trade/"] set .Q.en[dst] result`trade;
+      .Q.dd[daypath;`$"quote/"] set .Q.en[dst] result`quote
+    ];
+    .Q.dd[daypath;`$"trade/"] set .Q.en[dst] result
+  ]
+  }
+
+  
+run:{[cfg;calendar;dbpath]
   / main simulation entry point
   / cfg: simtick configuration dictionary
   / calendar: list of trading dates
-  / returns: concatenated trades table across all days
+  / dbpath: file handle for disk persistence (e.g. `:/home/philippe/mydb), or (::) for in-memory
+  / returns: trades table if in-memory, dbpath if persisting to disk
   /
-  / Example:
-  /   simtick:use`di.simtick
-  /   simcalendar:use`di.simcalendar
-  /   cfg:simtick.loadconfig[`:di/simtick/presets.csv]`default
-  /   calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
-  /   trades:simcalendar.run[cfg;calendar]
-  
+  / Example (in-memory):
+  /   trades:simcalendar.run[cfg;calendar;(::)]
+  /
+  / Example (persist to disk):
+  /   simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
+
   / validate calendar
   calendar:.z.m.validate[calendar];
-  
+
+  / resolve whether to persist
+  topersist:not (::)~dbpath;
+  dst:$[topersist; hsym`$string dbpath; (::)];
+
   / set seed once at start - RNG flows naturally across days
   if[cfg[`seed]>0; system "S ",string cfg`seed];
-  
-  / initialize accumulator
+
+  / initialize in-memory accumulators (only used if not persisting)
   allTrades:([]sym:`symbol$();time:`timestamp$();price:`float$();qty:`long$());
+  allQuotes:([]sym:`symbol$();time:`timestamp$();bid:`float$();ask:`float$();bidsize:`long$();asksize:`long$());
   currentprice:cfg`startprice;
-  
+
   / iterate through trading days
   i:0;
   while[i<count calendar;
     / update start price for this day
     cfg[`startprice]:currentprice;
-    
+
     / run this day
-    trades:.z.m.runday[cfg;calendar i];
-    
-    / append trades
-    allTrades,:trades;
-    
+    result:.z.m.runday[cfg;calendar i];
+
+    / extract trades for price carry-forward
+    trades:$[99h=type result; result`trade; result];
+
+    $[topersist;
+      / write to disk
+      .z.m.persist[dst;calendar i;result];
+      / accumulate in memory
+      [
+        allTrades,:trades;
+        if[99h=type result; allQuotes,:result`quote]
+      ]
+    ];
+
     / carry forward closing price (if any trades occurred)
     if[count trades; currentprice:last trades`price];
-    
+
     i+:1
   ];
-  
-  allTrades
+
+  / return dbpath or in-memory result
+  $[topersist;
+    dbpath;
+    $[cfg`generatequotes;
+      `trade`quote!(allTrades;allQuotes);
+      allTrades]
+  ]
   }
 
 / ============================================================
@@ -121,7 +152,7 @@ describe:{[]
   ([]
     function:`run`loadcalendar`validate;
     description:(
-      "Run multi-day simulation: run[cfg;calendar] -> trades table";
+      "Run multi-day simulation: run[cfg;calendar;dbpath] -> trades table or dbpath";
       "Load calendar from CSV: loadcalendar[filepath] -> date list";
       "Validate calendar: validate[calendar] -> calendar or error"
     )
