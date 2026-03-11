@@ -54,14 +54,13 @@ q)count trades
 ```
 
 ### Disk persistence
-
 ```q
 / Persist to date-partitioned kdb+ database
-q)simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
-`:/home/philippe/mydb
+q)simcalendar.run[cfg;calendar;`:/tmp/mydb]
+`:/tmp/mydb
 
 / Load and query
-q)\l /home/philippe/mydb
+q)\l /tmp/mydb
 q)5#select from trade where date=2026.01.20
 date       sym  time                          price    qty
 ----------------------------------------------------------
@@ -71,6 +70,7 @@ date       sym  time                          price    qty
 2026.01.20 NVDA 2026.01.20D09:30:02.233927676 181.8648 63
 2026.01.20 NVDA 2026.01.20D09:30:02.484859713 181.8648 446
 ```
+
 
 ### With quotes
 
