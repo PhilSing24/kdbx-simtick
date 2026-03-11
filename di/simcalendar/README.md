@@ -6,6 +6,14 @@ Multi-day tick simulation over a trading calendar.
 
 This module orchestrates `di.simtick` over multiple trading days, producing a **coherent price path** where each day's closing price becomes the next day's opening price.
 
+## Module Hierarchy
+
+```
+simtick ← simcalendar ← simbasket
+```
+
+This module sits between `simtick` (single instrument, single day) and `simbasket` (multiple correlated instruments). It can be used standalone or as the building block for `simbasket`.
+
 ## Installation
 
 Requires `di.simtick` as a sibling module:
@@ -76,7 +84,7 @@ q)result`trade
 q)result`quote
 
 / On disk - writes both trade/ and quote/ partitions
-q)simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
+q)simcalendar.run[cfg;calendar;`:/tmp/mydb]
 ```
 
 ## API
@@ -154,8 +162,8 @@ Over a week (5 trading days, 7 calendar days of gaps), total variance would be a
 To maintain consistency with the simtick configuration, adding overnight gaps would require either:
 
 1. Recalibrating `vol` to account for the additional overnight variance
-2. Introducing a separate overnight volatility parameter
-3. Splitting variance between intraday and overnight components
+2. Introducing a separate overnight volatility parameter with careful documentation
+3. Splitting variance budget between intraday and overnight components
 
 For now, we keep the simpler approach where the configured `vol` governs the entire price path. Future versions may address overnight gaps with proper variance accounting.
 
