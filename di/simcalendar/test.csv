@@ -11,6 +11,7 @@ fail,0,0,q,simcalendar.validate[`date$()],1,Empty date list throws error
 fail,0,0,q,simcalendar.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
 fail,0,0,q,simcalendar.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
 comment,0,0,q,,1,=== loadcalendar Tests ===
+fail,0,0,q,simcalendar.loadcalendar["/not/a/handle"],1,String filepath throws error
 true,0,0,q,14h=type calendar,1,loadcalendar returns date list
 true,0,0,q,0<count calendar,1,Calendar is non-empty
 true,0,0,q,(asc calendar)~calendar,1,Calendar is sorted ascending
@@ -40,6 +41,11 @@ before,0,0,q,qresult:simcalendar.run[qcfg;calendar;(::)],1,Run with quotes
 true,0,0,q,99h=type qresult,1,Result with quotes is dict
 true,0,0,q,`trade`quote~key qresult,1,Dict has trade and quote keys
 true,0,0,q,`sym`time`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
+comment,0,0,q,,1,=== Describe Tests ===
+before,0,0,q,caldesc:simcalendar.describe[],1,Get module description
+true,0,0,q,98h=type caldesc,1,describe returns a table
+true,0,0,q,`function`description~cols caldesc,1,describe has correct columns
+true,0,0,q,`run`loadcalendar`validate~caldesc`function,1,describe lists all public functions
 comment,0,0,q,,1,=== Disk Persistence Tests ===
 before,0,0,q,dbpath:`:/tmp/simcalendar_test,1,Set test database path
 before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up any existing test database
@@ -49,6 +55,9 @@ true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test",1,Database root exists on dis
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20",1,First date partition exists
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.22",1,Last date partition exists
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20/trade",1,Trade table exists in partition
+before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up before quotes disk test
+before,0,0,q,qdiskresult:simcalendar.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20/quote",1,Quote table exists in partition
 after,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up test database
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simcalendar.run[cfg;calendar;(::)],1,First run

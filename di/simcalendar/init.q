@@ -33,14 +33,14 @@ validate:{[calendar]
 
 runday:{[cfg;date]
   / run single day simulation
-  / cfg: simtick configuration (with seed:0 to prevent RNG reset)
+  / cfg: simtick configuration (with seed:0N to prevent RNG reset)
   / date: trading date
   / returns: trade table, or dict with `trade`quote if generatequotes=1b
 
   / update config for this day
   daycfg:cfg;
   daycfg[`tradingdate]:date;
-  daycfg[`seed]:0;  / prevent simtick from resetting RNG
+  daycfg[`seed]:0N;  / prevent simtick from resetting RNG (0N = no seed)
 
   / run simtick - return full result (trade only or trade+quote dict)
   simtick.run[daycfg]
@@ -63,14 +63,14 @@ run:{[cfg;calendar;dbpath]
   / main simulation entry point
   / cfg: simtick configuration dictionary
   / calendar: list of trading dates
-  / dbpath: file handle for disk persistence (e.g. `:/home/philippe/mydb), or (::) for in-memory
+  / dbpath: file handle for disk persistence (e.g. `:/tmp/mydb), or (::) for in-memory
   / returns: trades table if in-memory, dbpath if persisting to disk
   /
   / Example (in-memory):
   /   trades:simcalendar.run[cfg;calendar;(::)]
   /
   / Example (persist to disk):
-  /   simcalendar.run[cfg;calendar;`:/home/philippe/mydb]
+  /   simcalendar.run[cfg;calendar;`:/tmp/mydb]
 
   / validate calendar
   calendar:.z.m.validate[calendar];
@@ -79,12 +79,13 @@ run:{[cfg;calendar;dbpath]
   topersist:not (::)~dbpath;
   dst:$[topersist; hsym`$string dbpath; (::)];
 
-  / set seed once at start - RNG flows naturally across days
-  if[cfg[`seed]>0; system "S ",string cfg`seed];
+  / set seed once at start - RNG flows naturally across days (0N = no seed)
+  if[not null cfg`seed; system "S ",string cfg`seed];
 
   / initialize in-memory accumulators (only used if not persisting)
-  allTrades:([]sym:`symbol$();time:`timestamp$();price:`float$();qty:`long$());
-  allQuotes:([]sym:`symbol$();time:`timestamp$();bid:`float$();ask:`float$();bidsize:`long$();asksize:`long$());
+  / collect daily tables as a list, raze once at end to avoid O(n^2) row copies
+  allTradesList:();
+  allQuotesList:();
   currentprice:cfg`startprice;
 
   / iterate through trading days
@@ -104,8 +105,8 @@ run:{[cfg;calendar;dbpath]
       .z.m.persist[dst;calendar i;result];
       / accumulate in memory
       [
-        allTrades,:trades;
-        if[99h=type result; allQuotes,:result`quote]
+        allTradesList,:enlist trades;
+        if[99h=type result; allQuotesList,:enlist result`quote]
       ]
     ];
 
@@ -119,8 +120,8 @@ run:{[cfg;calendar;dbpath]
   $[topersist;
     dbpath;
     $[cfg`generatequotes;
-      `trade`quote!(allTrades;allQuotes);
-      allTrades]
+      `trade`quote!(raze allTradesList;raze allQuotesList);
+      raze allTradesList]
   ]
   }
 
@@ -131,14 +132,14 @@ run:{[cfg;calendar;dbpath]
 loadcalendar:{[filepath]
   / load trading calendar from CSV file
   / filepath: file handle to CSV (e.g., `:calendar.csv)
-  / returns: list of dates
+  / returns: validated list of dates (errors on malformed input)
   /
   / CSV format: single column named 'date' with dates
   /
   / Example:
   /   calendar:loadcalendar`:di/simcalendar/calendar.csv
   if[not -11h=type filepath; '"loadcalendar: filepath must be a file handle"];
-  "D"$1_read0 filepath
+  .z.m.validate "D"$1_read0 filepath
   }
 
 / ============================================================
@@ -160,4 +161,4 @@ describe:{[]
   }
 
 / export public interface
-export:([run;loadcalendar;describe])
+export:([run;loadcalendar;describe;validate])
