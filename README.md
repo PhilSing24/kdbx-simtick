@@ -4,10 +4,21 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 
 ## Modules
 
-| Module | Description |
-|--------|-------------|
-| [di.simtick](di/simtick/) | Realistic intraday tick data simulator with configurable market microstructure |
-| [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over trading calendar |
+| Module | Description | Status |
+|--------|-------------|--------|
+| [di.simtick](di/simtick/) | Realistic intraday tick data simulator with configurable market microstructure | ✅ Ready |
+| [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar | ✅ Ready |
+| [di.simbasket](di/simbasket/) | Multi-instrument correlated tick simulation using a factor model | 🚧 In progress |
+| [di.simbook](di/simbook/) | L2 order book simulator | 🚧 In progress |
+
+### Module hierarchy
+
+```
+simtick ← simcalendar ← simbasket
+simbook                              ← standalone (future: integration with simcalendar)
+```
+
+`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`), multiple instruments (`simbasket`). `simbook` is a separate bottom-up simulator that models individual order flow events rather than deriving quotes from a price process.
 
 ## Quick Start
 
@@ -57,10 +68,18 @@ kdbx-modules/
     ├── simtick/           # 1 instrument, 1 day (atomic unit)
     │   ├── init.q
     │   ├── presets.csv
-    │   └── test.csv
-    └── simcalendar/       # 1 instrument, N days (uses di.simtick)
+    │   ├── test.csv
+    │   └── README.md
+    ├── simcalendar/       # 1 instrument, N days (uses di.simtick)
+    │   ├── init.q
+    │   ├── calendar.csv
+    │   └── README.md
+    ├── simbasket/         # M instruments, N days (uses di.simcalendar) [WIP]
+    │   ├── init.q
+    │   └── README.md
+    └── simbook/           # L2 order book simulator, Gillespie algorithm [WIP]
         ├── init.q
-        └── calendar.csv
+        └── README.md
 ```
 
 ## Creating New Modules
