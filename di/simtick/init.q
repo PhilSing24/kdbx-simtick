@@ -183,32 +183,37 @@ gbm:{[s;r;eps;t]
 pricegbm:{[cfg;dts]
   / generate price path using geometric Brownian motion
   / cfg: config dict with `startprice`vol`drift`rngmodel
-  / dts: list of time deltas in years (first element is time to first trade)
+  / dts: list of time deltas in years (first element is time from session
+  /   open to first trade - startprice represents the price AT session
+  /   open, so this first interval is diffused like every other step,
+  /   matching the technical paper's eq(17))
   / returns: list of prices corresponding to each time point
-  eps:.z.m.rng.normal[-1+count dts;cfg];
-  cfg[`startprice]*prds 1.0,.z.m.gbm[cfg`vol;cfg`drift;eps;1_ dts]
+  eps:.z.m.rng.normal[count dts;cfg];
+  cfg[`startprice]*prds .z.m.gbm[cfg`vol;cfg`drift;eps;dts]
   };
 
 pricejump:{[cfg;dts]
   / generate price path using Merton jump-diffusion model
   / dS/S = μdt + σdW + J·dN where J is lognormal, N is Poisson
   / cfg: config dict with `startprice`vol`drift`tradingdays`jumpintensity`jumpmean`jumpvol`rngmodel
-  / dts: list of time deltas in years
+  / dts: list of time deltas in years (first element is time from session
+  /   open to first trade - startprice represents the price AT session
+  /   open, so this first interval is diffused/jumped like every other
+  /   step, matching the technical paper's eq(17) treatment of GBM)
   / returns: list of prices corresponding to each time point
-  n:-1+count dts;
-  stepdts:1_ dts;
+  n:count dts;
 
   / diffusion component
   eps:.z.m.rng.normal[n;cfg];
-  diffusion:.z.m.gbm[cfg`vol;cfg`drift;eps;stepdts];
+  diffusion:.z.m.gbm[cfg`vol;cfg`drift;eps;dts];
 
   / jump component: Poisson arrivals with lognormal sizes
-  dtdays:stepdts*cfg`tradingdays;
+  dtdays:dts*cfg`tradingdays;
   hasjump:(n?1.0)<1-exp neg cfg[`jumpintensity]*dtdays;
   epsj:.z.m.rng.normal[n;cfg];
   jumps:exp hasjump*(cfg[`jumpmean]+cfg[`jumpvol]*epsj);
 
-  cfg[`startprice]*prds 1.0,diffusion*jumps
+  cfg[`startprice]*prds diffusion*jumps
   };
 
 price:{[cfg;times]

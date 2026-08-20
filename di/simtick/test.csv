@@ -49,7 +49,7 @@ before,0,0,q,times:1+til 100,1,,Setup times
 before,0,0,q,prices:simtick.price[cfg;times],1,,Generate prices
 true,0,0,q,(count times)=count prices,1,,Price count matches input
 true,0,0,q,all 0<prices,1,,All prices positive
-true,0,0,q,cfg[`startprice]=first prices,1,,First price equals startprice
+true,0,0,q,(abs cfg[`startprice]-first prices)<0.05*cfg`startprice,1,,First price close to startprice (small initial diffusion step)
 before,0,0,q,longtimes:1+til 10000,1,,Setup longer times for vol test
 before,0,0,q,longprices:simtick.price[cfg;longtimes],1,,Generate more prices
 before,0,0,q,logreturns:1_log longprices%prev longprices,1,,Calculate log returns
