@@ -25,11 +25,11 @@ Built to sit directly on top of `di.simtick`'s NVDA/NASDAQ presets — an order'
 
 ### Use Cases
 
-**TCA demos** — the primary use case. Run the same order twice (good vs. bad presets) against one day of simulated market data, then compare VWAP slippage and implementation shortfall between the two in ClickHouse (or any downstream SQL engine).
+**TCA demos** — the primary use case. Run the same order twice (good vs. bad presets) against one day of simulated market data, then compare VWAP slippage and implementation shortfall between the two using any downstream SQL or analytics engine.
 
 **Algo behavior comparison** — vary `pacing`/`spreadcapture` independently to isolate the cost contribution of *timing* urgency vs. *aggression* (spread crossing), rather than conflating the two.
 
-**Pipeline/schema testing** — generates a small, realistic `orders`/`executions` pair of tables to validate downstream ingestion (e.g. Parquet export, ClickHouse load) alongside `di.simtick`'s `trades`/`quotes`.
+**Pipeline/schema testing** — generates a small, realistic `orders`/`executions` pair of tables to validate downstream ingestion (e.g. Parquet export, database loading) alongside `di.simtick`'s `trades`/`quotes`.
 
 ### Limitations
 
@@ -39,6 +39,7 @@ This module models execution **outcome**, not execution **mechanics**. It does n
 - **Multi-venue routing** — all executions are implicitly single-venue; there's no NBBO, no smart order routing, no venue-level price improvement modeling
 - **Order book mechanics** — no queue position, no partial-fill-at-a-price-level dynamics; pricing is a direct function of `spreadcapture` against the prevailing quote, not a matching-engine simulation
 - **Multiple concurrent orders** — one order at a time; no portfolio-level or cross-order interaction
+- **Tape inclusion** — `trades` represents the market independent of this order; an order's own executions are not folded back into `trades`. This matches the standard "exclusive VWAP" TCA convention (benchmarking against the market rather than partly against yourself), but means anyone wanting an "inclusive" benchmark needs to union `trades` and `executions` themselves downstream.
 
 For these, a proper limit order book simulator (see `di.simbook`) or a multi-venue market model would be needed.
 
