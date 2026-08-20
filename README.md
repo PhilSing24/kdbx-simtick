@@ -8,6 +8,7 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 |--------|-------------|--------|
 | [di.simtick](di/simtick/) | Realistic intraday tick data simulator with configurable market microstructure | ✅ Ready |
 | [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar | ✅ Ready |
+| [di.simorder](di/simorder/) | Order execution simulator - generates a parent order + child executions against `di.simtick` market data, for TCA demos | ✅ Ready |
 | [di.simbasket](di/simbasket/) | Multi-instrument correlated tick simulation using a factor model | 🚧 In progress |
 | [di.simbook](di/simbook/) | L2 order book simulator | 🚧 In progress |
 
@@ -15,10 +16,13 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 
 ```
 simtick ← simcalendar ← simbasket
+simtick ← simorder                   (order execution against a single day's market)
 simbook                              ← standalone (future: integration with simcalendar)
 ```
 
-`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`), multiple instruments (`simbasket`). `simbook` is a separate bottom-up simulator that models individual order flow events rather than deriving quotes from a price process.
+`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`), multiple instruments (`simbasket`), or a parent order worked against that day's market (`simorder`). `simbook` is a separate bottom-up simulator that models individual order flow events rather than deriving quotes from a price process.
+
+Together, `simtick` + `simorder` generate the four datasets (`trades`, `quotes`, `orders`, `executions`) needed to build Transaction Cost Analysis (TCA) — realistic market data plus a realistic, internally consistent order trading against it, with configurable execution quality for good-vs-bad comparisons.
 
 ## Quick Start
 
@@ -31,6 +35,7 @@ make repl
 ```q
 q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
+q)simorder:use`di.simorder
 ```
 
 ## Installation
@@ -73,6 +78,12 @@ kdbx-modules/
     ├── simcalendar/       # 1 instrument, N days (uses di.simtick)
     │   ├── init.q
     │   ├── calendar.csv
+    │   └── README.md
+    ├── simorder/          # 1 order, 1 day (uses di.simtick's trades/quotes)
+    │   ├── init.q
+    │   ├── presets.csv
+    │   ├── test.csv
+    │   ├── testing.q
     │   └── README.md
     ├── simbasket/         # M instruments, N days (uses di.simcalendar) [WIP]
     │   ├── init.q
