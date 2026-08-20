@@ -8,3 +8,4 @@ __pycache__/
 .vscode/
 db/
 di/simtick/testing.q
+data/*.parquet
