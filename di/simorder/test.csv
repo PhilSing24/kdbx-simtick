@@ -1,0 +1,96 @@
+action,ms,bytes,lang,code,repeat,comment
+before,0,0,q,simtick:use`di.simtick,1,,Initialize simtick module
+before,0,0,q,simorder:use`di.simorder,1,,Initialize simorder module
+before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,,Load simtick presets
+before,0,0,q,tickcfg:cfgs`default,1,,Get default tick config
+before,0,0,q,tickcfg[`seed]:42,1,,Set seed for reproducibility
+before,0,0,q,tickcfg[`generatequotes]:1b,1,,Enable quotes
+before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
+before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
+before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
+before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!(`ORD001;`NVDA;`BUY;10000;2026.01.20D09:35:00.000000000;2026.01.20D09:45:00.000000000;20;`even;0.1;1),1,,Base order config fixture
+comment,0,0,q,,1,,=== Validation Tests ===
+before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
+before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
+fail,0,0,q,simorder.run[badcfg1;trades;quotes],1,,starttime>=endtime throws error
+before,0,0,q,badcfg2:basecfg,1,,Setup bad config for zero orderqty
+before,0,0,q,badcfg2[`orderqty]:0,1,,Set orderqty to zero
+fail,0,0,q,simorder.run[badcfg2;trades;quotes],1,,Zero orderqty throws error
+before,0,0,q,badcfg3:basecfg,1,,Setup bad config for zero numfills
+before,0,0,q,badcfg3[`numfills]:0,1,,Set numfills to zero
+fail,0,0,q,simorder.run[badcfg3;trades;quotes],1,,Zero numfills throws error
+before,0,0,q,badcfg4:basecfg,1,,Setup bad config for invalid side
+before,0,0,q,badcfg4[`side]:`HOLD,1,,Set invalid side
+fail,0,0,q,simorder.run[badcfg4;trades;quotes],1,,Invalid side throws error
+before,0,0,q,badcfg5:basecfg,1,,Setup bad config for invalid pacing
+before,0,0,q,badcfg5[`pacing]:`random,1,,Set invalid pacing
+fail,0,0,q,simorder.run[badcfg5;trades;quotes],1,,Invalid pacing throws error
+before,0,0,q,badcfg6:basecfg,1,,Setup bad config for spreadcapture above 1
+before,0,0,q,badcfg6[`spreadcapture]:1.5,1,,Set spreadcapture above 1
+fail,0,0,q,simorder.run[badcfg6;trades;quotes],1,,spreadcapture above 1 throws error
+before,0,0,q,badcfg7:basecfg,1,,Setup bad config for negative spreadcapture
+before,0,0,q,badcfg7[`spreadcapture]:-0.1,1,,Set negative spreadcapture
+fail,0,0,q,simorder.run[badcfg7;trades;quotes],1,,Negative spreadcapture throws error
+comment,0,0,q,,1,,=== Schedule Tests ===
+before,0,0,q,filltimes:simorder.schedule[basecfg],1,,Generate even-pacing fill schedule
+true,0,0,q,(count filltimes)=basecfg`numfills,1,,Schedule returns numfills timestamps
+true,0,0,q,(asc filltimes)~filltimes,1,,Schedule times sorted ascending
+true,0,0,q,all filltimes>basecfg`starttime,1,,All fill times after starttime
+true,0,0,q,all filltimes<basecfg`endtime,1,,All fill times before endtime
+before,0,0,q,frontcfg:basecfg,1,,Setup frontloaded config
+before,0,0,q,frontcfg[`pacing]:`frontloaded,1,,Set frontloaded pacing
+before,0,0,q,frontfilltimes:simorder.schedule[frontcfg],1,,Generate frontloaded fill schedule
+before,0,0,q,frontgaps:1_deltas frontfilltimes,1,,Real gaps between consecutive frontloaded fills (drop spurious first delta)
+true,0,0,q,(last frontgaps)>first frontgaps,1,,Frontloaded gaps widen over time (rushed start)
+comment,0,0,q,,1,,=== Sizing Tests ===
+before,0,0,q,sizes:simorder.sizing[basecfg;trades;filltimes],1,,Generate even-pacing sizes
+true,0,0,q,(sum sizes)=basecfg`orderqty,1,,Even sizing sums exactly to orderqty
+true,0,0,q,all sizes>=1,1,,All even sizes at least 1
+true,0,0,q,(count sizes)=basecfg`numfills,1,,Even sizing returns numfills quantities
+before,0,0,q,frontsizes:simorder.sizing[frontcfg;trades;frontfilltimes],1,,Generate frontloaded sizes
+true,0,0,q,(sum frontsizes)=frontcfg`orderqty,1,,Frontloaded sizing sums exactly to orderqty
+true,0,0,q,all frontsizes>=1,1,,All frontloaded sizes at least 1
+true,0,0,q,(first frontsizes)>last frontsizes,1,,Frontloaded sizing concentrates quantity early
+comment,0,0,q,,1,,=== Pricing Tests ===
+before,0,0,q,midcfg:basecfg,1,,Setup mid-price config
+before,0,0,q,midcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
+before,0,0,q,midprices:simorder.pricing[midcfg;quotes;filltimes],1,,Generate mid prices
+true,0,0,q,all midprices>0,1,,All mid prices positive
+before,0,0,q,farcfg:basecfg,1,,Setup far-touch config
+before,0,0,q,farcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
+before,0,0,q,farprices:simorder.pricing[farcfg;quotes;filltimes],1,,Generate far-touch prices
+true,0,0,q,(avg farprices)>avg midprices,1,,BUY: far-touch prices average higher than mid
+before,0,0,q,sellmidcfg:basecfg,1,,Setup SELL mid config
+before,0,0,q,sellmidcfg[`side]:`SELL,1,,Set side to SELL
+before,0,0,q,sellmidcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
+before,0,0,q,sellmidprices:simorder.pricing[sellmidcfg;quotes;filltimes],1,,Generate SELL mid prices
+before,0,0,q,sellfarcfg:basecfg,1,,Setup SELL far-touch config
+before,0,0,q,sellfarcfg[`side]:`SELL,1,,Set side to SELL
+before,0,0,q,sellfarcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
+before,0,0,q,sellfarprices:simorder.pricing[sellfarcfg;quotes;filltimes],1,,Generate SELL far-touch prices
+true,0,0,q,(avg sellfarprices)<avg sellmidprices,1,,SELL: far-touch prices average lower than mid
+comment,0,0,q,,1,,=== Order Tests ===
+before,0,0,q,ordertbl:simorder.buildorder[basecfg;quotes],1,,Build parent order table
+true,0,0,q,98h=type ordertbl,1,,buildorder returns table
+true,0,0,q,1=count ordertbl,1,,Order table has exactly one row
+true,0,0,q,`orderid`sym`side`orderqty`starttime`endtime`arrivalprice~cols ordertbl,1,,Order table has correct columns
+true,0,0,q,0<first ordertbl`arrivalprice,1,,Arrival price is positive
+comment,0,0,q,,1,,=== Executions/Run Tests ===
+before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run full order simulation (even pacing)
+true,0,0,q,99h=type ordresult,1,,run returns a dict
+true,0,0,q,`order`executions~key ordresult,1,,Dict has order and executions keys
+before,0,0,q,executions:ordresult`executions,1,,Extract executions table
+true,0,0,q,`orderid`execid`sym`side`time`price`qty~cols executions,1,,Executions table has correct columns
+true,0,0,q,(sum executions`qty)=basecfg`orderqty,1,,Executions quantities sum exactly to orderqty
+true,0,0,q,(asc executions`time)~executions`time,1,,Executions sorted by time
+true,0,0,q,all executions[`time]>basecfg`starttime,1,,All executions after starttime
+true,0,0,q,all executions[`time]<basecfg`endtime,1,,All executions before endtime
+true,0,0,q,all executions[`price]>0,1,,All execution prices positive
+true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
+before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order simulation (frontloaded pacing)
+before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
+true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
+comment,0,0,q,,1,,=== Reproducibility Tests ===
+before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
+before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run
+true,0,0,q,run1~run2,1,,Same inputs produce identical output
