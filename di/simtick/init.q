@@ -305,6 +305,19 @@ quote.generate:{[cfg;trades]
   randoffsets:n?pretradeoffset;
   pretimes:tradetimes-`timespan$`long$(pretradeoffset+randoffsets)*nsperms;
 
+  / clip: a pre-trade quote must never precede the PREVIOUS trade's own
+  / execution. Without this, during tight Hawkes-clustered bursts (two
+  / trades firing within ~pretradeoffset of each other), independent
+  / per-trade random jitter can cause trade i+1's pre-trade quote
+  / (centered on trade i+1's price) to land chronologically before
+  / trade i even executes - corrupting the nearest-preceding-quote
+  / lookup for trade i with a neighboring trade's price. Since
+  / tradetimes is strictly ascending, clipping to the immediately
+  / prior trade's time transitively guarantees this quote can never
+  / precede ANY earlier trade, not just the adjacent one.
+  prevtradetimes:(first tradetimes),-1_tradetimes;
+  pretimes:pretimes|prevtradetimes;
+
   / spreads based on time of day (vectorized)
   / use pretimes (actual quote timestamps) not tradetimes - spread is evaluated
   / when the quote is posted, which is pretradeoffset ms before the trade
