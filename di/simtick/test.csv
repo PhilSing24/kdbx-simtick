@@ -1,7 +1,7 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize module
 before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,,Load presets
-before,0,0,q,cfg:cfgs`default,1,,Get default config
+before,0,0,q,cfg:cfgs`nvda_default,1,,Get default config
 before,0,0,q,duration:23400,1,,Session duration in seconds (6.5 hours)
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:cfg,1,,Setup bad config for alpha >= beta
@@ -55,7 +55,7 @@ before,0,0,q,longprices:simtick.price[cfg;longtimes],1,,Generate more prices
 before,0,0,q,logreturns:1_log longprices%prev longprices,1,,Calculate log returns
 before,0,0,q,realizedvol:(dev logreturns)*sqrt 252*23400,1,,Annualize realized vol
 true,0,0,q,realizedvol within 0.1 0.8,1,,Realized vol within tolerance of input vol
-before,0,0,q,jumpcfg:cfgs`jumpy,1,,Get jump config
+before,0,0,q,jumpcfg:cfgs`nvda_jumpy,1,,Get jump config
 before,0,0,q,jumpcfg[`seed]:42,1,,Set seed
 before,0,0,q,jumpprices:simtick.price[jumpcfg;times],1,,Generate jump prices
 true,0,0,q,(count times)=count jumpprices,1,,Jump model returns correct count
@@ -89,8 +89,8 @@ true,0,0,q,(first quotes`time)<first trades`time,1,,Quote exists before first tr
 comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
-true,0,0,q,99h=type cfgs`default,1,,Preset lookup returns dict
-true,0,0,q,32=count cfgs`default,1,,Config has 32 parameters (excluding key)
+true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
+true,0,0,q,32=count cfgs`nvda_default,1,,Config has 32 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
