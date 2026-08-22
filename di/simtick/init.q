@@ -315,8 +315,12 @@ quote.generate:{[cfg;trades]
   / tradetimes is strictly ascending, clipping to the immediately
   / prior trade's time transitively guarantees this quote can never
   / precede ANY earlier trade, not just the adjacent one.
+  / strict inequality: a non-strict clip (>=) can leave the quote
+  / tied EXACTLY at the previous trade's timestamp, which still lets
+  / ASOF-style nearest-quote lookups mismatch it to the wrong trade.
+  / +1 nanosecond guarantees genuine ordering, not just a tie.
   prevtradetimes:(first tradetimes),-1_tradetimes;
-  pretimes:pretimes|prevtradetimes;
+  pretimes:pretimes|(prevtradetimes+`timespan$1);
 
   / spreads based on time of day (vectorized)
   / use pretimes (actual quote timestamps) not tradetimes - spread is evaluated

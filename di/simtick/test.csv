@@ -86,6 +86,8 @@ true,0,0,q,all quotes[`bid]<quotes`ask,1,,Bid < ask for all quotes
 true,0,0,q,all 0<quotes`bidsize,1,,All bid sizes positive
 true,0,0,q,all 0<quotes`asksize,1,,All ask sizes positive
 true,0,0,q,(first quotes`time)<first trades`time,1,,Quote exists before first trade
+before,0,0,q,qidx:0|quotes[`time] bin trades[`time],1,,Find prevailing quote index for each trade
+true,0,0,q,(all trades[`price]>=quotes[`bid] qidx) and (all trades[`price]<=quotes[`ask] qidx),1,,All trades fall within their prevailing quote's bid-ask spread (regression test for pre-trade quote ordering bug)
 comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
