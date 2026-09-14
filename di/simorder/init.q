@@ -193,6 +193,101 @@ arrivalsizes:{[cfg;trades;n]
 
 
 / ============================================================
+/ MARKET IMPACT - transient impact of executions on the market they trade in
+/ ============================================================
+
+validateimpact:{[icfg]
+  / validate a market impact configuration dictionary
+  / icfg: `eta`beta`halflife`taper`closetime (see impact)
+  / returns: icfg if valid, throws error otherwise
+  .z.m.val.haskeys[icfg;`eta`beta`halflife`taper`closetime;"validateimpact"];
+  if[not 0<=icfg`eta; '"validateimpact: eta must be zero or positive"];
+  if[not 0<icfg`beta; '"validateimpact: beta must be positive"];
+  if[not -16h=type icfg`halflife; '"validateimpact: halflife must be a timespan"];
+  if[not 0D<icfg`halflife; '"validateimpact: halflife must be positive"];
+  if[not -16h=type icfg`taper; '"validateimpact: taper must be a timespan"];
+  if[0D>icfg`taper; '"validateimpact: taper must be zero or positive"];
+  if[not -16h=type icfg`closetime; '"validateimpact: closetime must be a timespan (time of day)"];
+  icfg
+  };
+
+dailyvol:{[quotes]
+  / daily volatility of the mid as a fraction, from the returns of the last mid in each 5-minute bucket
+  / quotes: one day's quotes for one instrument, `time`bid`ask
+  / returns: float
+  m:value exec last 0.5*bid+ask by 5 xbar time.minute from quotes;
+  r:1_ -1+ratios m;
+  $[1<count r; (dev r)*sqrt count r; 0f]
+  };
+
+childimpact:{[icfg;execs;trades;sigma]
+  / temporary impact of each child execution, as a fraction of the price: eta x sigma x p^beta, with p the
+  / child's participation, own / (own + market), in the market volume of an interval of the child's length
+  / centred on its time (for arrival pacing, the interval the child was sized in)
+  / execs: `time`qty`interval, interval a timespan
+  / trades: the day's trades for the instrument, `time`qty, time-sorted
+  / sigma: daily volatility as a fraction (see dailyvol)
+  / returns: float fraction per execution
+  csum:0f,sums `float$trades`qty;
+  half:`timespan$(`long$execs`interval) div 2;
+  vol:(csum trades[`time] binr execs[`time]+half)-csum trades[`time] binr execs[`time]-half;
+  own:`float$execs`qty;
+  p:0f^own%own+vol;
+  icfg[`eta]*sigma*xexp[p;icfg`beta]
+  };
+
+shiftat:{[icfg;times;moves]
+  / the market's price shift in currency at each of times (ascending, one day): the sum of every earlier or
+  / simultaneous child's signed impact, each halving every halflife and ignored after 20 halflives (below a
+  / millionth of it), tapered linearly to zero over the taper before closetime and rounded to whole cents,
+  / so bid and ask move by the same tick and nothing is left at the close
+  / icfg: impact configuration (see validateimpact)
+  / times: ascending timestamps of one day
+  / moves: `time`amount, amount in currency, positive pushing the price up
+  / returns: float shift per time
+  n:count times;
+  if[0=n; :`float$()];
+  h:`float$`long$icfg`halflife;
+  add:{[times;h;d;t;a]
+    j:(times binr t)_til times binr t+`timespan$`long$20*h;
+    @[d;j;+;a*xexp[0.5;(`float$`long$times[j]-t)%h]]};
+  d:add[times;h]/[n#0f;moves`time;moves`amount];
+  close:(`date$first times)+icfg`closetime;
+  w:$[0D<icfg`taper; 0f|1f&(`float$`long$close-times)%`float$`long$icfg`taper; `float$times<close];
+  0.01*`long$w*d%0.01
+  };
+
+impact:{[icfg;execs;trades;quotes]
+  / the market after the transient impact of child executions, for one instrument and one day. Quotes and
+  / prints move together by the shift in force (see shiftat), and a quote is added at each execution time,
+  / a copy of the quote in force then carrying the moved level, so an execution priced against the quote
+  / at its time sits inside it. Volumes, sizes and the order of events are unchanged; with eta 0 or no
+  / executions the market is returned as it is.
+  / icfg: impact configuration (see validateimpact)
+  / execs: `time`side`qty`interval, every child execution of every order in the instrument that day
+  / trades: `time`price`qty and any other columns (kept), time-sorted
+  / quotes: `time`bid`ask and any other columns (kept), time-sorted
+  / returns: `trades`quotes!(trades; quotes with the added rows)
+  icfg:.z.m.validateimpact icfg;
+  .z.m.val.hascols[execs;`time`side`qty`interval;"impact"];
+  if[(0=count execs) or 0=icfg`eta; :`trades`quotes!(trades;quotes)];
+  sigma:.z.m.dailyvol quotes;
+  frac:.z.m.childimpact[icfg;execs;trades;sigma];
+  q0:aj[`time;([] time:execs`time);quotes];
+  f:`time xasc ([] time:execs`time; amount:frac*(0.5*q0[`bid]+q0`ask)*?[execs[`side]=`BUY;1f;-1f]);
+  / a quote at each execution time, a copy of the one in force, placed after any quote at the same time
+  added:(cols quotes)#aj[`time;([] time:distinct f`time);quotes];
+  q:`time`isadded xasc (update isadded:0b from quotes),update isadded:1b from added;
+  dq:.z.m.shiftat[icfg;q`time;f];
+  q:delete isadded from update bid:bid+dq, ask:ask+dq from q;
+  / each print moves with the quote in force at its time, so it keeps its place inside that quote
+  t:aj[`time;trades;([] time:q`time; shift:dq)];
+  t:delete shift from update price:price+0f^shift from t;
+  `trades`quotes!(t;q)
+  };
+
+
+/ ============================================================
 / PRICING - where each child fill happens vs. the spread
 / ============================================================
 
@@ -339,4 +434,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;schedule;sizing;trajectory;capped;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;schedule;sizing;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])

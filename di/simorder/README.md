@@ -36,7 +36,7 @@ Built to sit directly on top of `di.simtick`'s NVDA/NASDAQ presets — an order'
 
 This module models execution **outcome**, not execution **mechanics**. It does not simulate:
 
-- **Market impact** — an order's own executions never move the simulated market's price path; the market in `trades`/`quotes` is generated independently and is unaffected by the order trading against it
+- **Market impact inside `run`** — `run` prices an order against the market it is given and never moves it. Transient impact across orders is a separate step, `impact` (see [Market impact](#market-impact)), which a caller runs after every order's schedule and sizes and before pricing; there is no permanent impact, so nothing carries past the close
 - **Multi-venue routing** — all executions are implicitly single-venue; there's no NBBO, no smart order routing, no venue-level price improvement modeling
 - **Order book mechanics** — no queue position, no partial-fill-at-a-price-level dynamics; pricing is a direct function of `spreadcapture` against the prevailing quote, not a matching-engine simulation
 - **Multiple concurrent orders** — one order at a time; no portfolio-level or cross-order interaction
@@ -161,7 +161,31 @@ On one simulated NVDA day, with 30 intervals over an hour and urgency 2:
 | 20% | 37% | 20.0% | 20.0% |
 | 30% (beyond the cap) | 47% | 23.1% | 23.1% |
 
-Prices are unchanged: each child is priced against the prevailing quote by `spreadcapture`, and the order still has no market impact (see Limitations).
+Prices are unchanged: each child is priced against the prevailing quote by `spreadcapture`. Market impact is the separate step below.
+
+### Market impact
+
+`simorder.impact[icfg;execs;trades;quotes]` moves one instrument's day of market data by the transient impact of child executions. Pass every order's executions in that instrument, not one order's: impact acts across orders, so it runs after all their schedules and sizes and before any of their prices.
+
+- **Child impact** — each execution's temporary impact, as a fraction of the price, is `eta × sigma × p^beta`. `sigma` is the day's volatility (`dailyvol`, from 5-minute mids), and `p` is the child's participation, own / (own + market), in the market volume of an interval of the child's length centred on its time (`execs` column `interval`). In currency it is that fraction of the mid in force.
+- **Shift** — the price shift in force at any time is the sum of every earlier execution's signed impact (a buy pushes up), each halving every `halflife`. The sum is tapered linearly to zero over `taper` before `closetime` and rounded to whole cents (`shiftat`), so bid and ask move by the same tick, a quote is never locked or crossed, and nothing is left at the close. The close, and the next day that `di.simcalendar` starts from it, are unmoved.
+- **Market** — quotes and prints move by the shift in force at their time (a print by the shift of the quote in force, so it keeps its place inside that quote), and a quote is added at each execution time carrying the moved level. Volumes, sizes and the order of events are unchanged; with `eta` 0 or no executions the market is returned as it is.
+- **Prices** — price each order against the moved quotes, with `pricing` for its executions and `buildorder` for its arrival price. Each execution then sits inside the quote in force at its time (the added one), and its arrival price includes earlier orders' impact but not its own.
+
+```q
+q)icfg:`eta`beta`halflife`taper`closetime!(0.5;0.5;0D00:05;0D00:05;0D16:00)
+q)execs:update interval:0D00:00:30 from `time`side`qty#arrresult`executions
+q)moved:simorder.impact[icfg;execs;trades;quotes]
+q)prices:simorder.pricing[arrcfg;moved`quotes;execs`time]
+```
+
+| Key | Description |
+|---|---|
+| `eta` | Impact coefficient, zero or positive; 0 turns impact off |
+| `beta` | Participation exponent, positive (0.5 is the square-root law) |
+| `halflife` | Timespan over which an execution's impact halves |
+| `taper` | Timespan before `closetime` over which the shift falls linearly to zero |
+| `closetime` | Time of day (timespan) of the close |
 
 ## API
 
@@ -172,6 +196,11 @@ Prices are unchanged: each child is priced against the prevailing quote by `spre
 | `simorder.sizing[cfg;trades;filltimes]` | Generate child execution quantities only |
 | `simorder.trajectory[urgency;n]` | Arrival pacing: share of the order left at each of n+1 interval boundaries |
 | `simorder.capped[want;cap]` | Arrival pacing: quantities per interval under a cap, shortfalls carried forward |
+| `simorder.impact[icfg;execs;trades;quotes]` | Market impact: one instrument's day of quotes and prints moved by its executions' transient impact |
+| `simorder.shiftat[icfg;times;moves]` | Market impact: the price shift in force at each time |
+| `simorder.childimpact[icfg;execs;trades;sigma]` | Market impact: each execution's impact as a fraction of the price |
+| `simorder.dailyvol[quotes]` | Daily volatility of the mid, from 5-minute returns |
+| `simorder.validateimpact[icfg]` | Validate an impact configuration |
 | `simorder.pricing[cfg;quotes;filltimes]` | Generate child execution prices only |
 | `simorder.buildorder[cfg;quotes]` | Build the 1-row parent order table only |
 | `simorder.buildexecutions[cfg;trades;quotes]` | Build the child executions table only |
@@ -222,11 +251,12 @@ q)k4unit.moduletest`di.simorder
 | Schedule | 5 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
+| Market impact | 17 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, executions priced against the moved market inside the NBBO, eta 0 leaves the market as it is |
 | Pricing | 5 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid |
 | Order | 4 | Correct schema, single row, positive arrival price |
 | Executions/Run | 12 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **55** | |
+| **Total** | **72** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset; order windows are set on that day's date.
 
