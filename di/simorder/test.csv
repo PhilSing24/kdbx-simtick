@@ -82,6 +82,39 @@ before,0,0,q,bnds:bigcfg[`starttime]+`timespan$`long$(`long$bigcfg[`endtime]-big
 before,0,0,q,ivol:1_deltas {sum trades[`qty] where trades[`time]<=x} each bnds,1,,Market volume per interval
 true,0,0,q,(max bigsizes%bigsizes+ivol)<=0.2+1e-3,1,,Participation per interval stays within maxpct
 true,0,0,q,(sum bigsizes)=bigcfg`orderqty,1,,Large arrival order sums exactly to orderqty
+comment,0,0,q,,1,,=== Market Impact Tests ===
+before,0,0,q,icfg:`eta`beta`halflife`taper`closetime!(1f;0.5;0D00:05;0D00:10;0D16:00),1,,Impact config
+fail,0,0,q,simorder.validateimpact[`eta`beta!(1f;0.5)],1,,Missing impact keys throw error
+fail,0,0,q,simorder.validateimpact[@[icfg;`halflife;:;0D]],1,,Zero halflife throws error
+fail,0,0,q,simorder.validateimpact[@[icfg;`eta;:;-1f]],1,,Negative eta throws error
+before,0,0,q,imptimes:d+0D10:00 0D10:05 0D10:10 0D15:55 0D15:59:59,1,,Times to read the shift at
+before,0,0,q,moves:([] time:enlist d+0D10:00; amount:enlist 1.28),1,,One move of 1.28 up at 10:00
+before,0,0,q,sh:simorder.shiftat[icfg;imptimes;moves],1,,Shift at those times
+true,0,0,q,(sh 0)=1.28,1,,The move is in force at its own time
+true,0,0,q,(sh 1)=0.64,1,,Half of it is left after one halflife
+true,0,0,q,(sh 2)=0.32,1,,A quarter is left after two halflives
+true,0,0,q,0f=last sh,1,,Nothing is left at the close
+before,0,0,q,lateshift:simorder.shiftat[icfg;d+0D15:55 0D15:57:30;([] time:enlist d+0D15:55; amount:enlist 1f)],1,,A move 5 minutes before the close with a 10-minute taper
+true,0,0,q,(lateshift 0)=0.5,1,,The taper halves a move 5 minutes before the close
+before,0,0,q,sig:simorder.dailyvol quotes,1,,Daily volatility of the fixture
+true,0,0,q,(sig>0) & sig<1,1,,Daily volatility is a positive fraction
+before,0,0,q,bigres:simorder.run[bigcfg;trades;quotes],1,,Run the large arrival order
+before,0,0,q,impexecs:update interval:0D00:00:30 from `time`side`qty#bigres`executions,1,,Its executions with their 30-second intervals
+true,0,0,q,all 0<simorder.childimpact[icfg;impexecs;trades;sig],1,,Every child has a positive impact
+before,0,0,q,moved:simorder.impact[icfg;impexecs;trades;quotes],1,,Move the market by the large order's impact
+before,0,0,q,mq:moved`quotes,1,,Moved quotes
+before,0,0,q,mt:moved`trades,1,,Moved trades
+true,0,0,q,(count mq)=(count quotes)+count distinct impexecs`time,1,,One quote is added at each execution time
+true,0,0,q,all mq[`bid]<mq`ask,1,,No locked or crossed quote after the move
+before,0,0,q,mta:aj[`time;mt;`time`bid`ask#mq],1,,Moved prints with the quote in force at their time
+true,0,0,q,all (mta[`price]>=mta`bid) & mta[`price]<=mta`ask,1,,Every moved print stays inside the quote in force
+true,0,0,q,(sum mt`qty)=sum trades`qty,1,,Volumes are unchanged
+before,0,0,q,t1:first impexecs`time,1,,First execution time
+true,0,0,q,((exec last bid from mq where time<=t1)-exec last bid from quotes where time<=t1)>0,1,,A buy moves the quote up at its first execution
+before,0,0,q,mprices:simorder.pricing[bigcfg;mq;impexecs`time],1,,Price the executions against the moved quotes
+before,0,0,q,mpa:aj[`time;([] time:impexecs`time; price:mprices);`time`bid`ask#mq],1,,Each execution with the quote in force at its time
+true,0,0,q,all (mpa[`price]>=mpa`bid) & mpa[`price]<=mpa`ask,1,,Executions priced against the moved market sit inside the NBBO
+true,0,0,q,(simorder.impact[@[icfg;`eta;:;0f];impexecs;trades;quotes])~`trades`quotes!(trades;quotes),1,,eta 0 leaves the market as it is
 comment,0,0,q,,1,,=== Pricing Tests ===
 before,0,0,q,midcfg:basecfg,1,,Setup mid-price config
 before,0,0,q,midcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
