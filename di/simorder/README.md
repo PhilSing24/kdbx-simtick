@@ -173,7 +173,7 @@ Prices are unchanged: each child is priced against the prevailing quote by `spre
 - **Prices** — price each order against the moved quotes, with `pricing` for its executions and `buildorder` for its arrival price. Each execution then sits inside the quote in force at its time (the added one), and its arrival price includes earlier orders' impact but not its own.
 
 ```q
-q)icfg:`eta`beta`halflife`taper`closetime!(0.5;0.5;0D00:05;0D00:05;0D16:00)
+q)icfg:`eta`beta`halflife`taper`closetime!(0.01;0.5;0D00:05;0D00:05;0D16:00)
 q)execs:update interval:0D00:00:30 from `time`side`qty#arrresult`executions
 q)moved:simorder.impact[icfg;execs;trades;quotes]
 q)prices:simorder.pricing[arrcfg;moved`quotes;execs`time]
