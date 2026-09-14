@@ -2,13 +2,14 @@ action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize simtick module
 before,0,0,q,simorder:use`di.simorder,1,,Initialize simorder module
 before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,,Load simtick presets
-before,0,0,q,tickcfg:cfgs`default,1,,Get default tick config
+before,0,0,q,tickcfg:cfgs`nvda_default,1,,Get the NVDA default tick config
 before,0,0,q,tickcfg[`seed]:42,1,,Set seed for reproducibility
 before,0,0,q,tickcfg[`generatequotes]:1b,1,,Enable quotes
 before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
-before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!(`ORD001;`NVDA;`BUY;10000;2026.01.20D09:35:00.000000000;2026.01.20D09:45:00.000000000;20;`even;0.1;1),1,,Base order config fixture
+before,0,0,q,d:`date$first trades`time,1,,Date of the simulated day
+before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;1),1,,Base order config fixture
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
 before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
@@ -51,6 +52,36 @@ before,0,0,q,frontsizes:simorder.sizing[frontcfg;trades;frontfilltimes],1,,Gener
 true,0,0,q,(sum frontsizes)=frontcfg`orderqty,1,,Frontloaded sizing sums exactly to orderqty
 true,0,0,q,all frontsizes>=1,1,,All frontloaded sizes at least 1
 true,0,0,q,(first frontsizes)>last frontsizes,1,,Frontloaded sizing concentrates quantity early
+comment,0,0,q,,1,,=== Arrival Pacing Tests ===
+before,0,0,q,arrcfg:basecfg,1,,Setup arrival config
+before,0,0,q,arrcfg[`pacing]:`arrival,1,,Set arrival pacing
+before,0,0,q,arrcfg[`urgency]:2f,1,,Set urgency (Almgren-Chriss kappa x horizon)
+before,0,0,q,arrcfg[`maxpct]:0.2,1,,Set participation cap
+fail,0,0,q,simorder.run[`urgency`maxpct _ arrcfg;trades;quotes],1,,Arrival pacing without urgency and maxpct throws error
+fail,0,0,q,simorder.run[@[arrcfg;`urgency;:;0f];trades;quotes],1,,Zero urgency throws error
+fail,0,0,q,simorder.run[@[arrcfg;`maxpct;:;1f];trades;quotes],1,,maxpct of 1 throws error
+before,0,0,q,traj:simorder.trajectory[2f;10],1,,Trajectory for urgency 2 over 10 intervals
+true,0,0,q,(11=count traj) & (1f=first traj) & 0f=last traj,1,,Trajectory runs from the whole order to none
+true,0,0,q,all 0>1_deltas traj,1,,Trajectory decreases
+true,0,0,q,1e-9>abs (traj 5)-((exp 1)-exp -1)%(exp 2)-exp -2,1,,Trajectory at mid-window is sinh(1)/sinh(2)
+true,0,0,q,(simorder.trajectory[3f;10] 5)<simorder.trajectory[1f;10] 5,1,,Higher urgency leaves less to trade at mid-window
+true,0,0,q,1e-9>max abs simorder.trajectory[1e-9;4]-1-(til 5)%4,1,,Vanishing urgency trades evenly over time
+true,0,0,q,(simorder.capped[10 10 10f;15 5 15f])~10 5 15f,1,,A capped interval's shortfall is carried into the next
+true,0,0,q,(simorder.capped[10 10 10f;20 5 8f])~17 5 8f,1,,Shortfall left at the end goes into earlier unused capacity
+true,0,0,q,1e-9>max abs 10-simorder.capped[10 10 10f;5 5 5f],1,,Beyond the window's capacity the excess is spread over the intervals
+before,0,0,q,arrtimes:simorder.schedule[arrcfg],1,,Generate arrival schedule
+true,0,0,q,(count arrtimes)=arrcfg`numfills,1,,Arrival schedule returns numfills timestamps
+true,0,0,q,all (arrtimes>arrcfg`starttime) & arrtimes<arrcfg`endtime,1,,Arrival fills inside the window
+before,0,0,q,arrsizes:simorder.sizing[arrcfg;trades;arrtimes],1,,Generate arrival sizes
+true,0,0,q,(sum arrsizes)=arrcfg`orderqty,1,,Arrival sizing sums exactly to orderqty
+true,0,0,q,all arrsizes>=1,1,,All arrival sizes at least 1
+true,0,0,q,(first arrsizes)>last arrsizes,1,,Arrival sizing trades more early
+before,0,0,q,bigcfg:@[arrcfg;`orderqty;:;`long$0.15*exec sum qty from trades where time within arrcfg`starttime`endtime],1,,Arrival order of 15% of the window's volume
+before,0,0,q,bigsizes:simorder.sizing[bigcfg;trades;simorder.schedule bigcfg],1,,Sizes for the large arrival order
+before,0,0,q,bnds:bigcfg[`starttime]+`timespan$`long$(`long$bigcfg[`endtime]-bigcfg`starttime)*(til 21)%20,1,,Interval boundaries (20 fills)
+before,0,0,q,ivol:1_deltas {sum trades[`qty] where trades[`time]<=x} each bnds,1,,Market volume per interval
+true,0,0,q,(max bigsizes%bigsizes+ivol)<=0.2+1e-3,1,,Participation per interval stays within maxpct
+true,0,0,q,(sum bigsizes)=bigcfg`orderqty,1,,Large arrival order sums exactly to orderqty
 comment,0,0,q,,1,,=== Pricing Tests ===
 before,0,0,q,midcfg:basecfg,1,,Setup mid-price config
 before,0,0,q,midcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
@@ -90,6 +121,8 @@ true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
 before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order simulation (frontloaded pacing)
 before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
+before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
+true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run

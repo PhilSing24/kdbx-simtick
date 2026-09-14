@@ -10,10 +10,11 @@ The module is designed around a single core idea: **execution quality is a confi
 
 - **Good execution**: patient timing (`even` pacing), fills close to the mid (low `spreadcapture`)
 - **Bad execution**: rushed timing (`frontloaded` pacing, both in timestamp and in quantity), fills that cross toward the far touch (high `spreadcapture`)
+- **Arrival (implementation shortfall) algo**: `arrival` pacing, an Almgren-Chriss trajectory front-loaded by `urgency`, with the order's share of each interval's volume capped at `maxpct`
 
 ### Key Features
 
-- **Configurable pacing** — `even` (uniformly spaced, patient) or `frontloaded` (rushed, concentrated early — in both timing *and* quantity, so urgency has a real cost)
+- **Configurable pacing** — `even` (uniformly spaced, patient), `frontloaded` (rushed, concentrated early — in both timing *and* quantity; half the order fills in the first 1% of the window, so use it as a deliberately bad contrast, not as an algo) or `arrival` (an implementation-shortfall schedule under a participation cap, see [Arrival pacing](#arrival-pacing))
 - **Volume-aware sizing** — under `even` pacing, child execution sizes are weighted by real market volume in each time bucket (pulled from `trades`), not a naive flat split
 - **Spread-aware pricing** — each execution is priced relative to the prevailing bid/ask (from `quotes`) at its timestamp, placed between mid and the far touch according to `spreadcapture`
 - **Exact quantity conservation** — child execution quantities always sum exactly to the parent order's `orderqty`, regardless of rounding or minimum-size flooring
@@ -101,7 +102,7 @@ q)simorder:use`di.simorder
 q)simtick:use`di.simtick
 q)simorder:use`di.simorder
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
-q)tickcfg:cfgs`default
+q)tickcfg:cfgs`nvda_default
 q)tickcfg[`generatequotes]:1b
 q)result:simtick.run[tickcfg]
 q)trades:result`trade
@@ -136,6 +137,32 @@ q)goodvwap:{[e](sum e[`price]*e[`qty])%sum e`qty}ordresult`executions
 q)badvwap:{[e](sum e[`price]*e[`qty])%sum e`qty}badresult`executions
 ```
 
+### Arrival pacing
+
+`arrival` models an implementation shortfall (arrival price) algo: it trades faster early to reduce timing risk, but never takes more than a set share of the market's volume.
+
+- **Schedule** — the window is cut into `numfills` equal intervals, one child execution at the midpoint of each (as a slicing algo sends a child every interval).
+- **Trajectory** — the share of the order still to trade at time share `t` of the window is the Almgren-Chriss solution `sinh(k(1-t))/sinh(k)`, with `k` = `urgency` (kappa x horizon). Each interval wants the drop in that curve. At urgency 1 half the order is done 44% of the way through the window, at 2 at 32%, at 3 at 23%; as urgency tends to 0 the order trades evenly over time. `simorder.trajectory[urgency;n]` returns the curve.
+- **Participation cap** — an interval takes what it wants up to `maxpct` of its volume, measured as own / (own + market) against the interval's trades. What a capped interval could not take is carried into the next ones, so an algo that falls behind catches up when liquidity allows. Anything still left at the end goes into earlier intervals' unused capacity; only an order larger than the whole window can absorb under the cap exceeds it, every interval taking the excess in proportion to its capacity. `simorder.capped[want;cap]` does this step.
+
+```q
+q)arrcfg:ordcfg,`urgency`maxpct!(2f;0.2)
+q)arrcfg[`pacing]:`arrival
+q)arrresult:simorder.run[arrcfg;trades;quotes]
+```
+
+On one simulated NVDA day, with 30 intervals over an hour and urgency 2:
+
+| Order, % of the window's volume | Half done at | Participation, first interval | Highest interval |
+|---|---|---|---|
+| 1% | 33% of the window | 1.6% | 1.6% |
+| 5% | 33% | 7.4% | 7.4% |
+| 15% | 33% | 19.4% | 19.4% |
+| 20% | 37% | 20.0% | 20.0% |
+| 30% (beyond the cap) | 47% | 23.1% | 23.1% |
+
+Prices are unchanged: each child is priced against the prevailing quote by `spreadcapture`, and the order still has no market impact (see Limitations).
+
 ## API
 
 | Function | Description |
@@ -143,6 +170,8 @@ q)badvwap:{[e](sum e[`price]*e[`qty])%sum e`qty}badresult`executions
 | `simorder.run[cfg;trades;quotes]` | Full simulation - returns dict with `order`/`executions` |
 | `simorder.schedule[cfg]` | Generate child execution timestamps only |
 | `simorder.sizing[cfg;trades;filltimes]` | Generate child execution quantities only |
+| `simorder.trajectory[urgency;n]` | Arrival pacing: share of the order left at each of n+1 interval boundaries |
+| `simorder.capped[want;cap]` | Arrival pacing: quantities per interval under a cap, shortfalls carried forward |
 | `simorder.pricing[cfg;quotes;filltimes]` | Generate child execution prices only |
 | `simorder.buildorder[cfg;quotes]` | Build the 1-row parent order table only |
 | `simorder.buildexecutions[cfg;trades;quotes]` | Build the child executions table only |
@@ -157,6 +186,7 @@ Presets should be calibrated as good/bad execution style pairs, matched against 
 |--------|-------------|
 | `good` | Even pacing, tight spread capture (patient, low-impact) |
 | `bad` | Frontloaded pacing, wide spread capture (rushed, high-impact) |
+| `arrival` | Arrival pacing at urgency 2 under a 20% participation cap, moderate spread capture |
 
 ## Configuration Parameters
 
@@ -169,9 +199,13 @@ Presets should be calibrated as good/bad execution style pairs, matched against 
 | `starttime` | Execution window start (timestamp) | `2026.01.20D09:35:00.000000000` |
 | `endtime` | Execution window end (timestamp) | `2026.01.20D09:45:00.000000000` |
 | `numfills` | Number of child executions to generate | 20 |
-| `pacing` | `even` (patient) or `frontloaded` (rushed) | `` `even `` |
+| `pacing` | `even` (patient), `frontloaded` (rushed) or `arrival` (urgency trajectory under a participation cap) | `` `even `` |
 | `spreadcapture` | 0=fills at mid (best), 1=fills at far touch (worst) | 0.1 |
 | `seed` | Random seed (`0N` = no seed) | 1 |
+| `urgency` | Arrival pacing only (required there): Almgren-Chriss urgency, kappa x horizon, positive; higher trades earlier | 2 |
+| `maxpct` | Arrival pacing only (required there): participation cap per interval, own / (own + market), between 0 and 1 | 0.2 |
+
+`urgency` and `maxpct` are the last two columns of `presets.csv`; leave them empty for `even` and `frontloaded`.
 
 ## Testing
 
@@ -187,11 +221,14 @@ q)k4unit.moduletest`di.simorder
 | Validation | 7 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing, spreadcapture out of range) |
 | Schedule | 5 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
+| Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
 | Pricing | 5 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid |
 | Order | 4 | Correct schema, single row, positive arrival price |
-| Executions/Run | 11 | Dict shape, correct schema, exact quantity conservation end-to-end, time bounds, sorted, positive price/qty |
+| Executions/Run | 12 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **36** | |
+| **Total** | **55** | |
+
+The fixture is one simulated day from `di.simtick`'s `nvda_default` preset; order windows are set on that day's date.
 
 ## Project Structure
 

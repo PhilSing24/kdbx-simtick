@@ -40,8 +40,12 @@ validate:{[cfg]
   if[0>=cfg`orderqty; '"validate: orderqty must be positive"];
   if[0>=cfg`numfills; '"validate: numfills must be positive"];
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
-  if[not cfg[`pacing] in `even`frontloaded; '"validate: pacing must be even or frontloaded"];
+  if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
+  if[`arrival=cfg`pacing;
+    .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
+    if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
+    if[not (0<cfg`maxpct)&1>cfg`maxpct; '"validate: maxpct must be between 0 and 1, both excluded, for arrival pacing"]];
   cfg
   };
 
@@ -57,6 +61,8 @@ schedule:{[cfg]
   /
   / pacing `even: uniformly spaced (patient, low-impact execution)
   / pacing `frontloaded: skewed toward starttime (rushed, high-impact execution)
+  / pacing `arrival: one child per equal interval of the window, at the interval's midpoint; the urgency
+  /   shows in the sizes (see .z.m.arrivalsizes), as a slicing algo sends a child every interval
   start:cfg`starttime;
   end:cfg`endtime;
   n:cfg`numfills;
@@ -67,6 +73,7 @@ schedule:{[cfg]
 
   fracs:$[cfg[`pacing]=`even; fracs;
     cfg[`pacing]=`frontloaded; fracs xexp 3;
+    cfg[`pacing]=`arrival; (0.5+til n)%n;
     '"schedule: unknown pacing - ",string cfg`pacing];
 
   start+`timespan$`long$fracs*dur
@@ -110,6 +117,9 @@ sizing:{[cfg;trades;filltimes]
     cfg[`pacing]=`frontloaded;
       / decreasing weights: first fill weighted heaviest, last fill lightest
       (n-til n) xexp 2;
+    cfg[`pacing]=`arrival;
+      / quantities, not weights: the urgency's trajectory under the participation cap
+      .z.m.arrivalsizes[cfg;trades;n];
     '"sizing: unknown pacing - ",string cfg`pacing
   ];
 
@@ -123,6 +133,62 @@ sizing:{[cfg;trades;filltimes]
   resid:qty-sum sizes;
   sizes[first idesc weights]+:resid;
   1|sizes
+  };
+
+
+/ ============================================================
+/ ARRIVAL PACING - an implementation shortfall trajectory under a participation cap
+/ ============================================================
+
+trajectory:{[urgency;n]
+  / share of the order still to trade at each boundary of n equal intervals of the window, from the
+  / Almgren-Chriss solution sinh(k(1-t))/sinh(k), k the urgency (kappa x horizon): trading faster early
+  / lowers timing risk at the cost of impact. At urgency 1 half the order is done at 44% of the window,
+  / at 2 at 32%, at 3 at 23%; as urgency tends to 0 the trajectory is a straight line
+  / urgency: positive float
+  / n: number of intervals
+  / returns: n+1 floats, from 1 at starttime down to 0 at endtime
+  t:(til n+1)%n;
+  sinh:{0.5*(exp x)-exp neg x};
+  $[urgency<1e-6; 1-t; sinh[urgency*1-t]%sinh urgency]
+  };
+
+capped:{[want;cap]
+  / quantity per interval under a cap: each interval takes what it wants plus any shortfall carried from
+  / earlier intervals, up to its cap, and carries the rest forward (an algo behind schedule catches up
+  / when liquidity allows). What is still left at the end goes into earlier intervals' unused capacity;
+  / only when the window's whole capacity is too small for the order is the cap exceeded, every interval
+  / taking the excess in proportion to its capacity
+  / want: wanted quantity per interval (floats)
+  / cap: capacity per interval (floats)
+  / returns: quantity per interval (floats), summing to sum want
+  step:{[st;wc] w:st[1]+wc 0; t:w&wc 1; (t;w-t)};
+  r:step\[(0f;0f);flip (want;cap)];
+  x:r[;0];
+  left:last r[;1];
+  room:cap-x;
+  if[(left>0)&0<sum room; add:left&sum room; x+:add*room%sum room; left-:add];
+  if[left>0; x+:left*$[0<sum cap; cap%sum cap; (count x)#1%count x]];
+  x
+  };
+
+arrivalsizes:{[cfg;trades;n]
+  / child quantities for arrival pacing: the order follows its urgency's trajectory over n equal intervals
+  / of the window, and its share of each interval's volume, own / (own + market), stays within maxpct
+  / cfg: config dict with `orderqty`starttime`endtime`urgency`maxpct
+  / trades: market trades table (time-sorted) for the day
+  / n: number of intervals, one child each (numfills)
+  / returns: float quantities per interval, summing to orderqty
+  start:cfg`starttime;
+  dur:`long$cfg[`endtime]-start;
+  bounds:start+`timespan$`long$dur*(til n+1)%n;
+  ttimes:trades`time;
+  csum:sums `float$trades`qty;
+  volat:{[ttimes;csum;x] i:ttimes bin x; $[i<0; 0f; csum i]};
+  vol:0f|1_deltas volat[ttimes;csum] each bounds;
+  want:cfg[`orderqty]*neg 1_deltas .z.m.trajectory[cfg`urgency;n];
+  m:cfg`maxpct;
+  .z.m.capped[want;vol*m%1-m]
   };
 
 
@@ -243,9 +309,11 @@ schema[`orderqty]:        ("J";"total order quantity")
 schema[`starttime]:       ("P";"execution window start (timestamp, matches trades/quotes date)")
 schema[`endtime]:         ("P";"execution window end (timestamp)")
 schema[`numfills]:        ("J";"number of child fills to generate")
-schema[`pacing]:          ("S";"fill scheduling: `even (patient) or `frontloaded (rushed)")
+schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
 schema[`spreadcapture]:   ("F";"0=fills at mid (best), 1=fills at far touch (worst)")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
+schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
+schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
 
 / derive type string from schema
 csvtypes:raze first each value schema
@@ -271,4 +339,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;schedule;sizing;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;schedule;sizing;trajectory;capped;pricing;buildorder;buildexecutions;loadconfig;describe])
