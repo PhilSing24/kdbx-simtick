@@ -26,11 +26,11 @@ The module is designed around a single core idea: **execution quality is a confi
 
 ### Market Focus
 
-Built to sit directly on top of `di.simtick`'s presets. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simcalendar` in memory) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped presets are on the same date as `di.simtick`'s.
+Built to sit directly on top of `di.simtick`'s output. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simcalendar` in memory) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped order rows are on the market file's default date.
 
 ### Use Cases
 
-**TCA demos** — the primary use case. Run the same order twice (good vs. bad presets) against one day of simulated market data, then compare VWAP slippage and implementation shortfall between the two using any downstream SQL or analytics engine.
+**TCA demos** — the primary use case. Run the same order twice (the good and bad order rows) against one day of simulated market data, then compare VWAP slippage and implementation shortfall between the two using any downstream SQL or analytics engine.
 
 **Surveillance demos** — the event log carries every child's new, ack, replaces, cancels and fills with their timestamps, quantities and venues, so cancel ratios, message rates, time to fill and fill-to-order ratios per account or algo are one query away. A layering or spoofing scenario is a matter of planting children that cancel before they fill.
 
@@ -62,16 +62,15 @@ For these, a limit order book simulator or a multi-venue market model would be n
 
 ### Configuration
 
-Simulations are driven by a configuration dictionary. Rather than building one manually every time, the module reads configurations from a **CSV file** via `loadconfig`, following the same pattern as `di.simtick`.
+An order's configuration is composed from two layers, the same scheme as `di.simtick`: the market file's `orders` group (venues and their routing shares, latency, the sweep beyond the touch, re-pegs, jitter, capacity) and its `ticksize`, then an order row (what the order is: id, instrument, side, quantity, window, children, pacing, aggression, account, algo, seed). A row may override any market key. The market file also carries the algo menu and the defaults of a generated order flow, and the impact parameters.
 
 ```q
-q)cfgs:simorder.loadconfig`:di/simorder/presets.csv
-q)cfg:cfgs`good
+q)market:simorder.loadmarket simorder.files[]`market
+q)orders:simorder.loadorders simorder.files[]`orders
+q)cfg:simorder.compose[market;orders`good]
 ```
 
-`loadconfig` checks the header against the schema: columns may come in any order, and a missing, unknown or repeated column throws rather than parsing values into the wrong types.
-
-To see all available parameters and their descriptions:
+`compose` is strict: every value is cast to the schema's type, an unknown key throws, and a missing key throws naming its layer. `urgency` and `maxpct` are read for arrival pacing only. To see every parameter with its layer, group and description:
 ```q
 q)simorder.describe[]
 ```
@@ -105,13 +104,13 @@ q)simorder:use`di.simorder
 ```q
 q)simtick:use`di.simtick
 q)simorder:use`di.simorder
-q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
-q)result:simtick.run cfgs`nvda_default
+q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000]
 q)trades:result`trade
 q)quotes:result`quote
 
-q)ordcfgs:simorder.loadconfig`:di/simorder/presets.csv
-q)res:simorder.run[ordcfgs`good;trades;quotes]
+q)market:simorder.loadmarket simorder.files[]`market
+q)orders:simorder.loadorders simorder.files[]`orders
+q)res:simorder.run[simorder.compose[market;orders`good];trades;quotes]
 q)res`orders
 orderid account algo sym  side orderqty ordtype limitprice capacity starttime                     endtime                       arrivalprice filledqty avgpx    status
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -202,7 +201,8 @@ The sizes are the children's targets; each child then executes against the tape 
 - **Prices** — run each order again against the moved market (`run[cfg;moved`trades;moved`quotes]`). Its aggressive fills then take the moved touch, its passive children rest on the moved touch, and its arrival price includes earlier orders' impact but not its own.
 
 ```q
-q)icfg:`eta`beta`halflife`taper`closetime!(0.01;0.5;0D00:05;0D00:05;0D16:00)
+q)icfg:simorder.impactcfg market          / the market file's orderimpact keys and closing time
+q)icfg:`eta`beta`halflife`taper`closetime!(0.01;0.5;0D00:05;0D00:05;0D16:00)   / or by hand
 q)execs:`time`side`qty`interval#arrresult`executions
 q)moved:simorder.impact[icfg;execs;trades;quotes]
 q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
@@ -218,28 +218,31 @@ q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
 | `permanent` | Optional, default 0: share of each execution's impact that stays through the day |
 | `model` | Optional, default `participation`: `participation` (p^beta) or `sqrtlaw` (sqrt of own over daily volume) |
 
+`impactcfg` builds this dictionary from the market file: `orderimpacteta`, `orderimpactbeta`, `orderimpacthalflifeseconds`, `orderimpacttaperminutes`, `orderimpactpermanent`, `orderimpactmodel` and `closingtime`.
+
 ### Many orders and multiple days
 
 `generate` draws an order flow over every instrument and day in the market it is given, and `runmany` runs a table of order configs; `runflow` does both. `di.simcalendar`'s in-memory result serves as the market as it is, and so do the `trade` and `quote` tables of its database.
 
 ```q
 q)cal:simcalendar.run[cfg;calendar;(::)]
-q)flow:simorder.runflow[`norders`seed!(3;7);cal`trade;cal`quote]
+q)flow:simorder.runflow[market;`norders`seed!(3;7);cal`trade;cal`quote]
 q)select orderid,sym,side,orderqty,`date$starttime,algo,account,filledqty,avgpx,arrivalprice from flow`orders
 q)select orders:count i,cancels:sum event=`cancel,replaces:sum event=`replace by account from flow`events lj 1!select orderid,account from flow`orders
 ```
 
-The spec is a dictionary; any key left out takes its default:
+The spec is a dictionary of overrides; any key left out takes the market file's value (its `orders` group, shown for the shipped US large-cap market):
 
-| Key | Default | Meaning |
+| Key | Market default | Meaning |
 |---|---|---|
 | `norders` | 5 | Orders per instrument and day |
 | `accounts` | `` `ACC1`ACC2`ACC3 `` | Accounts drawn uniformly |
-| `algos` | `` `VWAP`IS`AGGRESSIVE`PASSIVE `` | Algos drawn uniformly from the menu `algos`, which sets each one's pacing and aggression (and urgency and cap for `IS`) |
+| `algos` | `` `VWAP`IS`AGGRESSIVE`PASSIVE `` | Algos drawn uniformly; the market's menu (`algos`, `algopacings`, `algospreadcaptures`, `algourgencies`, `algomaxpcts`) sets each one's pacing and aggression (and urgency and cap for `IS`). An algo off the menu throws |
 | `sizepct` | `0.005 0.05` | Order size as a share of the day's volume, uniform in the range, in round lots |
-| `windowminutes` | `10 60` | Window length, uniform in the range; the window sits inside the session with five minutes clear of the open and the close, one child every 30 seconds |
-| `seed` | `0N` | Seeds the draws and gives every order its own seed; `0N` leaves everything unseeded |
-| `ticksize`, `jitter`, `latencyms`, `maxreplaces`, `capacity` | 0.01, 0.3, 2.0, 20, `A` | Passed to every order |
+| `windowminutes` | `10 60` | Window length, uniform in the range; the window sits inside the session with five minutes clear of the open and the close |
+| `childrenperminute` | 2 | Children per minute of window, at least 5 |
+| `seed` | 42 (the market's run seed) | Seeds the draws and gives every order its own seed; `0N` leaves everything unseeded |
+| `ticksize`, `jitter`, `latencyms`, `maxreplaces`, `capacity`, `ordervenues`, `ordervenueshares`, `sweepticks` | 0.01, 0.3, 2.0, 20, `A`, four lit venues, 0.4 0.2 0.2 0.2, 1 | Passed to every order |
 
 Orders on the same instrument and day do not interact: each runs against the market as given. For impact across them, run the flow, move the market with `impact` from all its executions on that instrument and day, and run the same configs again with `runmany` against the moved market.
 
@@ -249,8 +252,14 @@ Orders on the same instrument and day do not interact: each runs against the mar
 |----------|-------------|
 | `simorder.run[cfg;trades;quotes]` | One order: returns a dict `orders`children`events`executions |
 | `simorder.runmany[cfgs;trades;quotes]` | A table of order configs, each on its own instrument and day, gathered into the same four tables |
-| `simorder.generate[spec;trades;quotes]` | An order flow over every instrument and day in the market, as a table of order configs |
-| `simorder.runflow[spec;trades;quotes]` | `generate` then `runmany`; returns `configs and the four tables |
+| `simorder.generate[market;spec;trades;quotes]` | An order flow over every instrument and day in the market, as a table of order configs; the market file gives the defaults and the algo menu |
+| `simorder.runflow[market;spec;trades;quotes]` | `generate` then `runmany`; returns `configs and the four tables |
+| `simorder.menu[market]` | The market's algo menu as a keyed table |
+| `simorder.compose[market;order]` | The flat configuration of an order from the market's keys and an order row |
+| `simorder.files[]` | The paths of the shipped market file and order rows |
+| `simorder.loadmarket[filepath]` | The market file as a flat dictionary (`simtick.loadmarket`) |
+| `simorder.loadorders[filepath]` | Order rows from a CSV, keyed by `name` |
+| `simorder.impactcfg[market]` | The impact configuration from the market file's `orderimpact` keys and closing time |
 | `simorder.marketday[cfg;t;name]` | Rows of a trades or quotes table for the order's instrument and day, time-sorted; throws if none |
 | `simorder.schedule[cfg]` | The exact child schedule |
 | `simorder.jittered[cfg;times]` | The schedule moved by the seeded jitter |
@@ -269,12 +278,13 @@ Orders on the same instrument and day do not interact: each runs against the mar
 | `simorder.childimpact[icfg;execs;trades;sigma]` | Market impact: each execution's impact as a fraction of the price |
 | `simorder.dailyvol[quotes]` | Market impact: the day's volatility from 5-minute mids |
 | `simorder.validateimpact[icfg]` | Validate an impact configuration |
-| `simorder.loadconfig[filepath]` | Load presets from CSV |
-| `simorder.describe[]` | Return configuration schema as table |
+| `simorder.describe[]` | Every parameter with its type, layer, group and description: the order schema, then the market's other `orders` keys |
 
-## Presets
+## Order rows
 
-| Preset | Description |
+`di/simconfig/orders.csv` ships three rows:
+
+| Row | Description |
 |--------|-------------|
 | `good` | Even pacing, one child in ten aggressive (patient, mostly resting at the touch), account ACC1, algo VWAP |
 | `bad` | Frontloaded pacing, nine children in ten aggressive (rushed, crossing the spread), account ACC2, algo AGGRESSIVE |
@@ -282,29 +292,32 @@ Orders on the same instrument and day do not interact: each runs against the mar
 
 ## Configuration Parameters
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `orderid` | Unique order identifier | `` `ORD001 `` |
-| `account` | The account the order is for | `` `ACC1 `` |
-| `algo` | The algorithm working the order, a label | `` `VWAP `` |
-| `capacity` | `A` (agency) or `P` (principal), carried on the fills | `` `A `` |
-| `sym` | Ticker symbol - must match the trades/quotes tables | `` `NVDA `` |
-| `side` | `BUY` or `SELL` | `` `BUY `` |
-| `orderqty` | Total order quantity | 10000 |
-| `starttime` | Execution window start (timestamp, on the market data's date) | `2026.08.18D09:35:00.000000000` |
-| `endtime` | Execution window end (timestamp, same day as `starttime`) | `2026.08.18D09:45:00.000000000` |
-| `numfills` | Number of child orders to send | 20 |
-| `pacing` | `even` (patient), `frontloaded` (rushed) or `arrival` (urgency trajectory under a participation cap) | `` `even `` |
-| `spreadcapture` | Probability a child is aggressive (a marketable order crossing the spread) rather than passive (a limit at the near touch): 0=best, 1=worst | 0.1 |
-| `jitter` | Random shift of each child's time as a share of half the gap to its neighbours; 0 = exact schedule | 0.3 |
-| `latencyms` | Milliseconds from a child's send to its arrival at the market (half of it to its ack) | 2.0 |
-| `maxreplaces` | Times a passive child re-pegs to the near touch when it moves away, before resting where it is | 20 |
-| `ticksize` | Minimum price increment; fill prices sit on the tick or exactly at the midpoint | 0.01 |
-| `seed` | Random seed (`0N` = no seed) for the jitter, the aggression and the venues | 1 |
-| `urgency` | Arrival pacing only (required there): Almgren-Chriss urgency, kappa x horizon, positive; higher trades earlier | 2 |
-| `maxpct` | Arrival pacing only (required there): participation cap per interval, own / (own + market), between 0 and 1 | 0.2 |
+| Parameter | Layer | Description | Example |
+|-----------|-------|-------------|---------|
+| `orderid` | order | Unique order identifier | `` `ORD001 `` |
+| `sym` | order | Ticker symbol - must match the trades/quotes tables | `` `NVDA `` |
+| `side` | order | `BUY` or `SELL` | `` `BUY `` |
+| `orderqty` | order | Total order quantity | 10000 |
+| `starttime` | order | Execution window start (timestamp, on the market data's date) | `2026.08.18D09:35:00.000000000` |
+| `endtime` | order | Execution window end (timestamp, same day as `starttime`) | `2026.08.18D09:45:00.000000000` |
+| `numchildren` | order | Number of child orders to send (a cleanup child may follow) | 20 |
+| `pacing` | order | `even` (patient), `frontloaded` (rushed) or `arrival` (urgency trajectory under a participation cap) | `` `even `` |
+| `spreadcapture` | order | Probability a child is aggressive (a marketable order crossing the spread) rather than passive (a limit at the near touch): 0=best, 1=worst | 0.1 |
+| `account` | order | The account the order is for | `` `ACC1 `` |
+| `algo` | order | The algorithm working the order, a label | `` `VWAP `` |
+| `seed` | order | Random seed (`0N` = no seed) for the jitter, the aggression and the venues | 1 |
+| `urgency` | order, arrival pacing only | Almgren-Chriss urgency, kappa x horizon, positive; higher trades earlier | 2 |
+| `maxpct` | order, arrival pacing only | Participation cap per interval, own / (own + market), between 0 and 1 | 0.2 |
+| `ticksize` | market | Minimum price increment; fill prices sit on the tick or exactly at the midpoint | 0.01 |
+| `latencyms` | market | Milliseconds from a child's send to its arrival at the market (half of it to its ack) | 2.0 |
+| `maxreplaces` | market | Times a passive child re-pegs to the near touch when it moves away, before resting where it is | 20 |
+| `jitter` | market | Random shift of each child's time as a share of half the gap to its neighbours; 0 = exact schedule | 0.3 |
+| `capacity` | market | `A` (agency) or `P` (principal), carried on the fills | `` `A `` |
+| `ordervenues` | market | Lit venues (MIC codes) the children are routed to | `` `XNAS`ARCX`BATS`EDGX `` |
+| `ordervenueshares` | market | Their routing shares, summing to 1 | `0.4 0.2 0.2 0.2` |
+| `sweepticks` | market | Ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken | 1 |
 
-`urgency` and `maxpct` are the last two columns of `presets.csv`; leave them empty for `even` and `frontloaded`.
+The market file's `orders` group also holds the algo menu, the order-flow defaults and the impact parameters; every key is listed with its description in [docs/parameters.md](docs/parameters.md), generated from `simorder.describe[]`.
 
 ## Testing
 
@@ -323,29 +336,31 @@ q)k4unit.moduletest`di.simorder
 
 | Group | Tests | Description |
 |-------|-------|-------------|
-| Validation | 15 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing/capacity, spreadcapture, jitter, latency out of range, zero ticksize, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
+| Validation | 15 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numchildren, invalid side/pacing/capacity, spreadcapture, jitter, latency out of range, zero ticksize, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
 | Schedule | 10 | Correct count, sorted, within window, frontloaded gaps widen over time; jitter moves children off the schedule, keeps their order and the window, within its bound, and is exact at 0 |
-| Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
+| Sizing | 6 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
-| Market impact | 31 | Missing keys, zero halflife, negative eta, permanent above 1 and an unknown model throw; the optional keys default; with a permanent share the move stays in full at its time, keeps its permanent half after one and two halflives and still vanishes at the close; the square-root law gives eta x sigma x sqrt(own / daily volume) and moves the market without locking a quote; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, aggressive fills against the moved market at its ask or one tick beyond, eta 0 leaves the market as it is |
-| Execution | 41 | Result shape; the parent order's columns, arrival price at the mid, filled in full, avgpx; the children's columns, numbering, order types and limits, lit venues, statuses; the executions' columns, quantity conservation, order, window, half-tick grid, liquidity flags, capacity, fills per child; aggressive fills at the ask in force or one tick beyond, passive fills at the child's limit in force and on its venue |
-| Events | 14 | Columns, event kinds, order; one new and one ack per child, replaces matching the children, fill events matching the executions, a done per filled child and a cancel per cancelled one, nothing left at a done, ack before the first fill |
-| Aggression | 13 | spreadcapture 1: all children marketable, all fills removing liquidity, no replace or cancel; spreadcapture 0: scheduled children all limit orders adding liquidity; about spreadcapture of 400 children aggressive; SELL aggressive fills at the bid or one tick below and filled in full; frontloaded and arrival orders filled in full, frontloaded intervals tiling the window |
-| Rollover | 6 | A large passive order on the least liquid preset: cancels at expiry, a marketable cleanup child, the order still filled in full, cancels carrying the unfilled quantity, the cleanup carrying what the scheduled children left |
-| Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
+| Market impact | 28 | Missing keys, zero halflife, negative eta, permanent above 1 and an unknown model throw; the optional keys default; with a permanent share the move stays in full at its time, keeps its permanent half after one and two halflives and still vanishes at the close; the square-root law gives eta x sigma x sqrt(own / daily volume) and moves the market without locking a quote; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, aggressive fills against the moved market at its ask or one tick beyond, eta 0 leaves the market as it is |
+| Execution | 34 | Result shape; the parent order's columns, arrival price at the mid, filled in full, avgpx; the children's columns, numbering, order types and limits, lit venues, statuses; the executions' columns, quantity conservation, order, window, half-tick grid, liquidity flags, capacity, fills per child; aggressive fills at the ask in force or one tick beyond, passive fills at the child's limit in force and on its venue |
+| Events | 12 | Columns, event kinds, order; one new and one ack per child, replaces matching the children, fill events matching the executions, a done per filled child and a cancel per cancelled one, nothing left at a done, ack before the first fill |
+| Aggression | 11 | spreadcapture 1: all children marketable, all fills removing liquidity, no replace or cancel; spreadcapture 0: scheduled children all limit orders adding liquidity; about spreadcapture of 400 children aggressive; SELL aggressive fills at the bid or one tick below and filled in full; frontloaded and arrival orders filled in full, frontloaded intervals tiling the window |
+| Rollover | 6 | A large passive order on PG made less liquid still: cancels at expiry, a marketable cleanup child, the order still filled in full, cancels carrying the unfilled quantity, the cleanup carrying what the scheduled children left |
+| Config | 23 | The order rows load and compose with the market's keys (ticksize, latency, capacity, venues), a row overrides a market key, an even order carries no urgency, missing essential and unknown keys throw; describe lists the order schema and the market's orders keys; the impact configuration from the market file; sweeps walk `sweepticks` beyond the touch |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
-| Order flow | 30 | generate: norders per instrument and day, the schema's keys, windows inside the sessions and within a day, round-lot sizes, sides, accounts and algos from the menu with IS the arrival algo, a seed per order, the same flow from the same seed and none without; runmany: the four tables, every order filled for its quantity, unique execution ids, fills on their order's instrument and day; runflow returns the configs and the same orders |
+| Order flow | 29 | generate: norders per instrument and day, the schema's keys, windows inside the sessions and within a day, round-lot sizes, sides, accounts and algos from the menu with IS the arrival algo, a seed per order, the same flow from the same seed, none with a null seed and the market's run seed by default, an algo off the menu or an unknown spec key throws; runmany: the four tables, every order filled for its quantity, unique execution ids, fills on their order's instrument and day; runflow returns the configs and the same orders |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **173** | |
+| **Total** | **195** | |
 
-The fixture is one simulated day from `di.simtick`'s `nvda_default` preset (and `pg_default` for the rollover tests); order windows are set on that day's date.
+The fixture is one simulated day of NVDA on the shipped market file and the normal scenario (and PG, made less liquid, for the rollover tests); order windows are set on that day's date.
 
 ## Project Structure
 
 ```
+di/simconfig/
+├── markets/us_largecap.json   # its orders group: venues, latency, sweep, re-pegs, jitter, capacity, algo menu, flow defaults, impact
+└── orders.csv                 # order rows (good / bad / arrival)
 di/simorder/
 ├── init.q           # Module code
-├── presets.csv      # Order presets (good / bad / arrival)
 ├── test.csv         # Unit tests (k4unit format)
 ├── testing.q        # Manual test script
 └── README.md        # This file

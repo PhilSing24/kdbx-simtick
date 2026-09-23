@@ -15,11 +15,13 @@
 /   type   S symbol, F float, J long, B boolean, D date, U minute,
 /          P timestamp, and SL FL JL for lists of those; * keeps the value
 /   layer  essential (the instrument's required keys), market, instrument,
-/          scenario, run or derived (computed by the module's compose)
+/          order (di.simorder's per-order keys), scenario, run, optional
+/          (cast when present, never required) or derived (computed by the
+/          module's compose)
 /   group  a short label for the reference page
 
 
-layers:`essential`market`instrument`scenario`run`derived
+layers:`essential`market`instrument`order`scenario`run`optional`derived
 
 path:{[relative]
   / the first file at di/simconfig/<relative> in the module search path,
@@ -139,14 +141,16 @@ compose:{[schema;market;instrument;scenario;run]
   / the flat configuration: market, then the instrument's filled entries,
   / then the scenario's, then the run's; every value cast by the schema;
   / an unknown key throws; a missing key throws naming its layer. Keys of
-  / the derived layer are left to the module's own compose
+  / the derived layer are left to the module's own compose, and optional
+  / keys are not required. A row's name (its key in its table) is dropped
   ins:.z.m.nonnull instrument;
   sce:.z.m.nonnull scenario;
+  if[`name in key ins; ins:delete name from ins];
   if[`name in key sce; sce:delete name from sce];
   cfg:(,/) (market;ins;sce;run);
   if[count unknown:(key cfg) except key schema; '"compose: unknown keys - ",", " sv string unknown];
   cfg:key[cfg]!.z.m.cast'[schema[key cfg][;0];value cfg];
-  need:(key schema) where not (value[schema][;1]) in `derived;
+  need:(key schema) where not (value[schema][;1]) in `optional`derived;
   if[count missing:need where not need in key cfg;
     '"compose: missing keys - ",", " sv {[schema;k] string[k]," (",string[schema[k;1]]," layer)"}[schema] each missing];
   cfg
@@ -176,7 +180,7 @@ describe:{[schema]
   / the schema as a table, the essential keys first, then by layer
   / group is a q keyword, so the column is built under another name and renamed
   t:([]param:key schema;typ:value[schema][;0];layer:value[schema][;1];grp:value[schema][;2];description:value[schema][;3]);
-  t:update ord:(`essential`market`instrument`scenario`run`derived)?layer from t;
+  t:update ord:(`essential`market`instrument`order`scenario`run`optional`derived)?layer from t;
   `param`typ`layer`group`description xcol delete ord from `ord xasc t
   };
 

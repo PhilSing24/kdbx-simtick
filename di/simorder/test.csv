@@ -1,15 +1,18 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize simtick module
 before,0,0,q,simorder:use`di.simorder,1,,Initialize simorder module
-before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,,Load simtick presets
-before,0,0,q,tickcfg:cfgs`nvda_default,1,,Get the NVDA default tick config
-before,0,0,q,tickcfg[`seed]:42,1,,Set seed for reproducibility
-before,0,0,q,tickcfg[`generatequotes]:1b,1,,Enable quotes
+before,0,0,q,f:simtick.files[],1,,The shipped layer files
+before,0,0,q,market:simtick.loadmarket f`market,1,,Load the market layer (its orders group holds this module's defaults)
+before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,,Load the instruments
+before,0,0,q,scenarios:simtick.loadscenarios f`scenarios,1,,Load the scenarios
+before,0,0,q,tickrun:`seed`generatequotes!(42;1b),1,,Seeded with quotes
+before,0,0,q,tickcfg:simtick.compose[market;instruments`NVDA;scenarios`normal;tickrun],1,,The NVDA normal day
 before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
 before,0,0,q,d:`date$first trades`time,1,,Date of the simulated day
-before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`jitter`account`algo`capacity`latencyms`maxreplaces`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;0.01;0.3;`ACC1;`VWAP;`A;2.0;20;1),1,,Base order config fixture
+before,0,0,q,baserow:`orderid`sym`side`orderqty`starttime`endtime`numchildren`pacing`spreadcapture`account`algo`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;`ACC1;`VWAP;1),1,,Base order row fixture
+before,0,0,q,basecfg:simorder.compose[market;baserow],1,,Base order config: the row composed with the market's orders keys
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
 before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
@@ -17,9 +20,9 @@ fail,0,0,q,simorder.run[badcfg1;trades;quotes],1,,starttime>=endtime throws erro
 before,0,0,q,badcfg2:basecfg,1,,Setup bad config for zero orderqty
 before,0,0,q,badcfg2[`orderqty]:0,1,,Set orderqty to zero
 fail,0,0,q,simorder.run[badcfg2;trades;quotes],1,,Zero orderqty throws error
-before,0,0,q,badcfg3:basecfg,1,,Setup bad config for zero numfills
-before,0,0,q,badcfg3[`numfills]:0,1,,Set numfills to zero
-fail,0,0,q,simorder.run[badcfg3;trades;quotes],1,,Zero numfills throws error
+before,0,0,q,badcfg3:basecfg,1,,Setup bad config for zero numchildren
+before,0,0,q,badcfg3[`numchildren]:0,1,,Set numchildren to zero
+fail,0,0,q,simorder.run[badcfg3;trades;quotes],1,,Zero numchildren throws error
 before,0,0,q,badcfg4:basecfg,1,,Setup bad config for invalid side
 before,0,0,q,badcfg4[`side]:`HOLD,1,,Set invalid side
 fail,0,0,q,simorder.run[badcfg4;trades;quotes],1,,Invalid side throws error
@@ -59,7 +62,7 @@ before,0,0,q,badcfg11[`starttime]:d+0D09:00,1,,Set starttime before the open
 fail,0,0,q,simorder.run[badcfg11;trades;quotes],1,,Start before the first quote of the day throws error
 comment,0,0,q,,1,,=== Schedule Tests ===
 before,0,0,q,filltimes:simorder.schedule[basecfg],1,,Generate even-pacing fill schedule
-true,0,0,q,(count filltimes)=basecfg`numfills,1,,Schedule returns numfills timestamps
+true,0,0,q,(count filltimes)=basecfg`numchildren,1,,Schedule returns numchildren timestamps
 true,0,0,q,(asc filltimes)~filltimes,1,,Schedule times sorted ascending
 true,0,0,q,all filltimes>basecfg`starttime,1,,All fill times after starttime
 true,0,0,q,all filltimes<basecfg`endtime,1,,All fill times before endtime
@@ -80,7 +83,7 @@ comment,0,0,q,,1,,=== Sizing Tests ===
 before,0,0,q,sizes:simorder.sizing[basecfg;trades;filltimes],1,,Generate even-pacing sizes
 true,0,0,q,(sum sizes)=basecfg`orderqty,1,,Even sizing sums exactly to orderqty
 true,0,0,q,all sizes>=1,1,,All even sizes at least 1
-true,0,0,q,(count sizes)=basecfg`numfills,1,,Even sizing returns numfills quantities
+true,0,0,q,(count sizes)=basecfg`numchildren,1,,Even sizing returns numchildren quantities
 before,0,0,q,frontsizes:simorder.sizing[frontcfg;trades;frontfilltimes],1,,Generate frontloaded sizes
 true,0,0,q,(sum frontsizes)=frontcfg`orderqty,1,,Frontloaded sizing sums exactly to orderqty
 true,0,0,q,all frontsizes>=1,1,,All frontloaded sizes at least 1
@@ -103,7 +106,7 @@ true,0,0,q,(simorder.capped[10 10 10f;15 5 15f])~10 5 15f,1,,A capped interval's
 true,0,0,q,(simorder.capped[10 10 10f;20 5 8f])~17 5 8f,1,,Shortfall left at the end goes into earlier unused capacity
 true,0,0,q,1e-9>max abs 10-simorder.capped[10 10 10f;5 5 5f],1,,Beyond the window's capacity the excess is spread over the intervals
 before,0,0,q,arrtimes:simorder.schedule[arrcfg],1,,Generate arrival schedule
-true,0,0,q,(count arrtimes)=arrcfg`numfills,1,,Arrival schedule returns numfills timestamps
+true,0,0,q,(count arrtimes)=arrcfg`numchildren,1,,Arrival schedule returns numchildren timestamps
 true,0,0,q,all (arrtimes>arrcfg`starttime) & arrtimes<arrcfg`endtime,1,,Arrival fills inside the window
 before,0,0,q,arrsizes:simorder.sizing[arrcfg;trades;arrtimes],1,,Generate arrival sizes
 true,0,0,q,(sum arrsizes)=arrcfg`orderqty,1,,Arrival sizing sums exactly to orderqty
@@ -163,7 +166,8 @@ true,0,0,q,all (mpa[`price]>=mpa`ask)&mpa[`price]<=mpa[`ask]+bigcfg`ticksize,1,,
 true,0,0,q,(simorder.impact[@[icfg;`eta;:;0f];impexecs;trades;quotes])~`trades`quotes!(trades;quotes),1,,eta 0 leaves the market as it is
 before,0,0,q,sqrtmoved:simorder.impact[@[icfg;`model;:;`sqrtlaw];impexecs;trades;quotes],1,,Move the market under the square-root law
 true,0,0,q,all (sqrtmoved[`quotes]`bid)<sqrtmoved[`quotes]`ask,1,,Under the square-root law no quote is locked or crossed
-true,0,0,q,((exec last bid from sqrtmoved`quotes where time<=t1)-exec last bid from quotes where time<=t1)>0,1,,And a buy still moves the quote up
+before,0,0,q,tn:last impexecs`time,1,,Last execution time
+true,0,0,q,((exec last bid from sqrtmoved`quotes where time<=tn)-exec last bid from quotes where time<=tn)>0,1,,And a buy still moves the quote up by its last execution (a single small fill's impact can round to no cent)
 comment,0,0,q,,1,,=== Execution Tests ===
 before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run the order (even pacing)
 true,0,0,q,99h=type ordresult,1,,run returns a dict
@@ -181,7 +185,7 @@ true,0,0,q,(first ordertbl`filledqty)=basecfg`orderqty,1,,The order is filled in
 true,0,0,q,`filled=first ordertbl`status,1,,And its status says so
 true,0,0,q,1e-9>abs (first ordertbl`avgpx)-(sum executions[`price]*executions`qty)%sum executions`qty,1,,avgpx is the volume-weighted fill price
 true,0,0,q,`childid`orderid`sym`side`qty`ordtype`limitprice`venue`sendtime`expiry`filledqty`status`replaces`interval~cols children,1,,Children table has correct columns
-true,0,0,q,(count children) within basecfg[`numfills]+0 1,1,,One child per scheduled time plus at most a cleanup child
+true,0,0,q,(count children) within basecfg[`numchildren]+0 1,1,,One child per scheduled time plus at most a cleanup child
 true,0,0,q,(1+til count children)~children`childid,1,,Children are numbered in order
 true,0,0,q,(sum children`filledqty)=basecfg`orderqty,1,,The children's fills sum to orderqty
 true,0,0,q,all children[`ordtype] in `MKT`LMT,1,,Children are marketable or limit orders
@@ -236,10 +240,10 @@ true,0,0,q,0=count select from aggres`events where event in `replace`cancel,1,,M
 before,0,0,q,pascfg:basecfg,1,,Setup all-passive config
 before,0,0,q,pascfg[`spreadcapture]:0f,1,,Every child passive
 before,0,0,q,pasres:simorder.run[pascfg;trades;quotes],1,,Run it
-true,0,0,q,all `LMT=exec ordtype from pasres`children where childid<=pascfg`numfills,1,,With spreadcapture 0 every scheduled child is a limit order
-true,0,0,q,all `A=exec liquidity from pasres`executions where childid<=pascfg`numfills,1,,And their fills add liquidity
+true,0,0,q,all `LMT=exec ordtype from pasres`children where childid<=pascfg`numchildren,1,,With spreadcapture 0 every scheduled child is a limit order
+true,0,0,q,all `A=exec liquidity from pasres`executions where childid<=pascfg`numchildren,1,,And their fills add liquidity
 before,0,0,q,mixcfg:basecfg,1,,Setup config for the aggression mixture
-before,0,0,q,mixcfg[`numfills]:400,1,,Many children to see the share
+before,0,0,q,mixcfg[`numchildren]:400,1,,Many children to see the share
 before,0,0,q,mixcfg[`spreadcapture]:0.3,1,,Three children in ten aggressive
 before,0,0,q,mixchildren:(simorder.run[mixcfg;trades;quotes])`children,1,,Its children
 true,0,0,q,(avg `MKT=exec ordtype from mixchildren where childid<=400) within 0.2 0.4,1,,About spreadcapture of the children are aggressive
@@ -254,11 +258,13 @@ before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order 
 before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
 before,0,0,q,frontchildren:frontresult`children,1,,Its children
-true,0,0,q,(sum exec interval from frontchildren where childid<=frontcfg`numfills)=(last exec sendtime from frontchildren where childid<=frontcfg`numfills)-frontcfg`starttime,1,,Frontloaded pacing: the children's intervals tile the window from starttime to the last child
+true,0,0,q,(sum exec interval from frontchildren where childid<=frontcfg`numchildren)=(last exec sendtime from frontchildren where childid<=frontcfg`numchildren)-frontcfg`starttime,1,,Frontloaded pacing: the children's intervals tile the window from starttime to the last child
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
 comment,0,0,q,,1,,=== Rollover Tests ===
-before,0,0,q,pgresult:simtick.run[cfgs`pg_default],1,,A less liquid instrument
+before,0,0,q,pgins:instruments`PG,1,,PG for a less liquid instrument
+before,0,0,q,pgins[`tradesperday]:20000,1,,Made less liquid still
+before,0,0,q,pgresult:simtick.run simtick.compose[market;pgins;scenarios`normal;tickrun],1,,Its day
 before,0,0,q,pgtrades:pgresult`trade,1,,Its trades
 before,0,0,q,pgquotes:pgresult`quote,1,,Its quotes
 before,0,0,q,pgcfg:basecfg,1,,Setup a large passive order on it
@@ -268,33 +274,55 @@ before,0,0,q,pgcfg[`endtime]:d+0D09:40,1,,Over five minutes
 before,0,0,q,pgcfg[`spreadcapture]:0f,1,,All passive
 before,0,0,q,pgres:simorder.run[pgcfg;pgtrades;pgquotes],1,,Run it
 true,0,0,q,0<count select from pgres`events where event=`cancel,1,,Some children are cancelled at expiry with quantity left
-true,0,0,q,(1+pgcfg`numfills)=count pgres`children,1,,A cleanup child completes the order
+true,0,0,q,(1+pgcfg`numchildren)=count pgres`children,1,,A cleanup child completes the order
 true,0,0,q,`MKT=last pgres[`children]`ordtype,1,,The cleanup child is marketable
 true,0,0,q,(sum pgres[`executions]`qty)=pgcfg`orderqty,1,,The order still fills in full
 true,0,0,q,(exec qty-filledqty from pgres`children where status=`cancelled)~exec qty from pgres`events where event=`cancel,1,,A cancel carries the child's unfilled quantity
-true,0,0,q,(last pgres[`children]`qty)=pgcfg[`orderqty]-sum exec filledqty from pgres`children where childid<=pgcfg`numfills,1,,The cleanup child carries what the scheduled children left
+true,0,0,q,(last pgres[`children]`qty)=pgcfg[`orderqty]-sum exec filledqty from pgres`children where childid<=pgcfg`numchildren,1,,The cleanup child carries what the scheduled children left
 comment,0,0,q,,1,,=== Config Tests ===
-before,0,0,q,ordcfgs:simorder.loadconfig`:di/simorder/presets.csv,1,,Load the order presets
-true,0,0,q,`good`bad`arrival~exec name from ordcfgs,1,,The three presets load
-before,0,0,q,fullordcfgs:0!ordcfgs,1,,Presets as a plain table
-before,0,0,q,`:/tmp/simorder_reordered.csv 0: csv 0: (reverse cols fullordcfgs) xcols fullordcfgs,1,,Presets written with the columns in reverse order
-true,0,0,q,(simorder.loadconfig`:/tmp/simorder_reordered.csv)~ordcfgs,1,,Columns in any order load to the same presets
-before,0,0,q,`:/tmp/simorder_missing.csv 0: csv 0: delete side from fullordcfgs,1,,Presets written without the side column
-fail,0,0,q,simorder.loadconfig`:/tmp/simorder_missing.csv,1,,A missing column throws error instead of parsing values into the wrong types
-before,0,0,q,`:/tmp/simorder_unknown.csv 0: csv 0: update foo:1 from fullordcfgs,1,,Presets written with an extra column
-fail,0,0,q,simorder.loadconfig`:/tmp/simorder_unknown.csv,1,,An unknown column throws error
-after,0,0,q,system"rm -f /tmp/simorder_reordered.csv /tmp/simorder_missing.csv /tmp/simorder_unknown.csv",1,,Clean up preset files
+before,0,0,q,of:simorder.files[],1,,The shipped market file and order rows
+before,0,0,q,orders:simorder.loadorders of`orders,1,,Load the order rows
+true,0,0,q,`good`bad`arrival~exec name from orders,1,,The three order rows load
+before,0,0,q,good:simorder.compose[market;orders`good],1,,Compose the good order
+true,0,0,q,good~basecfg,1,,The good row composes to the base config
+true,0,0,q,0.01=good`ticksize,1,,ticksize comes from the market's session group
+true,0,0,q,2f=good`latencyms,1,,latencyms from its orders group
+true,0,0,q,`A=good`capacity,1,,capacity from its orders group
+true,0,0,q,`XNAS`ARCX`BATS`EDGX~good`ordervenues,1,,The venues from its orders group
+true,0,0,q,not `urgency in key good,1,,An even order carries no urgency
+true,0,0,q,2f=(simorder.compose[market;orders`arrival])`urgency,1,,The arrival row carries its urgency
+true,0,0,q,5f=(simorder.compose[market;(orders`good) upsert (enlist `latencyms)!enlist 5f])`latencyms,1,,An order row overrides a market key
+fail,0,0,q,simorder.compose[market;delete side from orders`good],1,,A row without an essential key throws error
+fail,0,0,q,simorder.compose[market;(orders`good) upsert (enlist `foo)!enlist 1],1,,An unknown key throws error
+fail,0,0,q,simorder.compose[market;(orders`good) upsert (enlist `pacing)!enlist `arrival],1,,Arrival pacing without urgency throws error
+before,0,0,q,`:/tmp/simorder_noside.csv 0: csv 0: (cols[0!orders] except `id`side)#0!orders,1,,Order rows written without the side column
+fail,0,0,q,simorder.loadorders`:/tmp/simorder_noside.csv,1,,A missing essential column throws error
+before,0,0,q,`:/tmp/simorder_unknown.csv 0: csv 0: update foo:1 from (cols[0!orders] except `id)#0!orders,1,,Order rows written with an extra column
+fail,0,0,q,simorder.loadorders`:/tmp/simorder_unknown.csv,1,,An unknown column throws error
+true,0,0,q,`param`typ`layer`group`description~cols simorder.describe[],1,,describe has the layer and group columns
+true,0,0,q,all (key simorder.schema) in exec param from simorder.describe[],1,,It lists the order schema
+true,0,0,q,all `algos`norders`orderimpacteta in exec param from simorder.describe[],1,,And the market's other orders keys
+before,0,0,q,mimp:simorder.impactcfg market,1,,The market's impact configuration
+true,0,0,q,(asc key mimp)~asc `eta`beta`halflife`taper`closetime`permanent`model,1,,impactcfg has the impact keys
+true,0,0,q,0D00:05=mimp`halflife,1,,halflife from orderimpacthalflifeseconds
+true,0,0,q,0D16:00=mimp`closetime,1,,closetime from the market's closingtime
+true,0,0,q,`participation=mimp`model,1,,model from orderimpactmodel
+before,0,0,q,sweepcfg:basecfg upsert (enlist `sweepticks)!enlist 3,1,,An order whose sweeps walk three ticks
+before,0,0,q,sweepfills:simorder.aggressivefills[sweepcfg;quotes;d+0D10:00;1000000],1,,A huge aggressive child
+true,0,0,q,2=count sweepfills,1,,Fills at the touch and beyond
+true,0,0,q,1e-9>abs 0.03-(last sweepfills`price)-first sweepfills`price,1,,The rest fills sweepticks beyond the touch
+after,0,0,q,system"rm -f /tmp/simorder_noside.csv /tmp/simorder_unknown.csv",1,,Clean up order files
 comment,0,0,q,,1,,=== Mixed Market Tests ===
-before,0,0,q,xomresult:simtick.run[cfgs`xom_default],1,,Generate a second instrument for the same day
+before,0,0,q,xomresult:simtick.run simtick.compose[market;instruments`XOM;scenarios`normal;tickrun],1,,Generate a second instrument for the same day
 before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table
 before,0,0,q,mixedquotes:`time xasc raze(quotes;xomresult`quote),1,,Quotes of both instruments in one table
 true,0,0,q,(simorder.run[basecfg;mixedtrades;mixedquotes])~simorder.run[basecfg;trades;quotes],1,,An order against mixed-instrument tables matches the single-instrument run
 true,0,0,q,(simorder.marketday[basecfg;mixedquotes;"quotes"])~quotes,1,,marketday returns the order's instrument and day only
 comment,0,0,q,,1,,=== Order Flow Tests ===
 before,0,0,q,flowspec:`norders`seed!(2;7),1,,Two orders per instrument and day with a seed
-before,0,0,q,flowcfgs:simorder.generate[flowspec;mixedtrades;mixedquotes],1,,Generate the flow over the two-instrument market
+before,0,0,q,flowcfgs:simorder.generate[market;flowspec;mixedtrades;mixedquotes],1,,Generate the flow over the two-instrument market
 true,0,0,q,4=count flowcfgs,1,,norders orders per instrument and day: two instruments x one day x 2
-true,0,0,q,(cols flowcfgs)~1_exec param from simorder.describe[],1,,A generated config has the schema's keys
+true,0,0,q,(asc cols flowcfgs)~asc key simorder.schema,1,,A generated config has the schema's keys
 true,0,0,q,all flowcfgs[`sym] in `NVDA`XOM,1,,Orders are on the market's instruments
 true,0,0,q,2=count select from flowcfgs where sym=`XOM,1,,norders per instrument
 true,0,0,q,all (`date$flowcfgs`starttime)=`date$flowcfgs`endtime,1,,Each window is within one day
@@ -310,8 +338,11 @@ true,0,0,q,all flowcfgs[`algo] in `VWAP`IS`AGGRESSIVE`PASSIVE,1,,Algos from the 
 true,0,0,q,all (flowcfgs[`pacing]=`arrival)=flowcfgs[`algo]=`IS,1,,IS is the arrival-pacing algo
 true,0,0,q,all (not null flowcfgs`urgency)=flowcfgs[`algo]=`IS,1,,Only IS carries an urgency
 true,0,0,q,(count flowcfgs)=count distinct flowcfgs`seed,1,,Every order has its own seed
-true,0,0,q,flowcfgs~simorder.generate[flowspec;mixedtrades;mixedquotes],1,,The same spec seed generates the same flow
-true,0,0,q,all null (simorder.generate[`norders`seed!(1;0N);mixedtrades;mixedquotes])`seed,1,,Without a spec seed the orders are unseeded
+true,0,0,q,flowcfgs~simorder.generate[market;flowspec;mixedtrades;mixedquotes],1,,The same spec seed generates the same flow
+true,0,0,q,all null (simorder.generate[market;`norders`seed!(1;0N);mixedtrades;mixedquotes])`seed,1,,With a null spec seed the orders are unseeded
+true,0,0,q,(count flowcfgs)=count simorder.generate[market;(enlist `norders)!enlist 2;mixedtrades;mixedquotes],1,,The market's run seed is the flow's default
+fail,0,0,q,simorder.generate[market;(enlist `algos)!enlist `VWAP`FOO;mixedtrades;mixedquotes],1,,An algo off the market's menu throws error
+fail,0,0,q,simorder.generate[market;(enlist `foo)!enlist 1;mixedtrades;mixedquotes],1,,An unknown spec key throws error
 before,0,0,q,flowres:simorder.runmany[flowcfgs;mixedtrades;mixedquotes],1,,Run the flow
 true,0,0,q,`orders`children`events`executions~key flowres,1,,runmany returns the four tables
 true,0,0,q,(count flowcfgs)=count flowres`orders,1,,One parent order per config
@@ -322,7 +353,7 @@ before,0,0,q,ordersym:exec first sym by orderid from flowcfgs,1,,Each order's in
 before,0,0,q,orderday:exec first `date$starttime by orderid from flowcfgs,1,,Each order's day
 true,0,0,q,all flowres[`executions][`sym]=ordersym flowres[`executions]`orderid,1,,Each fill is on its order's instrument
 true,0,0,q,all (`date$flowres[`executions]`time)=orderday flowres[`executions]`orderid,1,,And on its order's day
-before,0,0,q,flowall:simorder.runflow[flowspec;mixedtrades;mixedquotes],1,,Generate and run in one call
+before,0,0,q,flowall:simorder.runflow[market;flowspec;mixedtrades;mixedquotes],1,,Generate and run in one call
 true,0,0,q,`configs`orders`children`events`executions~key flowall,1,,runflow returns the configs and the four tables
 true,0,0,q,(flowall`orders)~flowres`orders,1,,runflow gives the same orders as generate then runmany
 comment,0,0,q,,1,,=== Reproducibility Tests ===

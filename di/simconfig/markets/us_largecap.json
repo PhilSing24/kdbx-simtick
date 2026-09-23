@@ -27,5 +27,14 @@
     "primaryvenue": "XNAS"
   },
   "impact": { "impactticks": 0.25, "impacthalflifeseconds": 30, "impactpermanent": 0.3 },
+  "orders": {
+    "ordervenues": ["XNAS", "ARCX", "BATS", "EDGX"], "ordervenueshares": [0.4, 0.2, 0.2, 0.2],
+    "latencyms": 2.0, "sweepticks": 1, "maxreplaces": 20, "jitter": 0.3, "capacity": "A",
+    "algos": ["VWAP", "IS", "AGGRESSIVE", "PASSIVE"], "algopacings": ["even", "arrival", "frontloaded", "even"],
+    "algospreadcaptures": [0.1, 0.35, 0.9, 0.0], "algourgencies": [null, 2, null, null], "algomaxpcts": [null, 0.2, null, null],
+    "norders": 5, "accounts": ["ACC1", "ACC2", "ACC3"], "sizepct": [0.005, 0.05], "windowminutes": [10, 60], "childrenperminute": 2,
+    "orderimpactmodel": "participation", "orderimpacteta": 0.01, "orderimpactbeta": 0.5,
+    "orderimpacthalflifeseconds": 300, "orderimpacttaperminutes": 5, "orderimpactpermanent": 0.3
+  },
   "run": { "tradingdate": "2026.08.18", "seed": 42, "generatequotes": true }
 }

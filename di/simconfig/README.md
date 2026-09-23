@@ -57,7 +57,7 @@ q)cfg:simconfig.loadconfig[schema;`:run.json]
 | `simconfig.nonnull[dict]` | The entries of a row that carry a value |
 | `simconfig.path[relative]` | A shipped file's handle |
 
-A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol, `F` float, `J` long, `B` boolean, `D` date, `U` minute, `P` timestamp, `SL` `FL` `JL` lists of those, `*` as given. Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `derived`.
+A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol, `F` float, `J` long, `B` boolean, `D` date, `U` minute, `P` timestamp, `SL` `FL` `JL` lists of those, `*` as given. Layers: `essential`, `market`, `instrument`, `order` (`di.simorder`'s per-order keys), `scenario`, `run`, `optional` (cast when present, never required) and `derived` (left to the module's own compose). Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `derived`.
 
 ## Testing
 
