@@ -94,6 +94,8 @@ q)days
 | `simcalendar.seeds[cfg;dates]` | The per-day seeds: a regime seed per date shared across instruments, the instrument's day seed and gap seed |
 | `simcalendar.regimes[cfg;calendar]` | The calendar with the day-level regime resolved: seeds, AR(1) state, volatility and volume multipliers, closing time, jump intensity |
 | `simcalendar.loadcalendar[filepath]` | Load a calendar from CSV, returns a calendar table |
+| `simcalendar.savecalendar[filepath;calendar]` | Write a calendar table to CSV |
+| `simcalendar.nysecalendar[from;to]` | The NYSE trading days between two dates, early closes at 13:00 |
 | `simcalendar.loadconfig[filepath]` | Load the calendar presets from CSV, returns keyed table |
 | `simcalendar.validate[calendar]` | Validate a calendar (a date list or a table) and return it as a table |
 | `simcalendar.validatecfg[cfg]` | Validate the calendar keys of a config |
@@ -142,7 +144,21 @@ date,closingtime,volmult,volumemult,jumpintensity
 q)calendar:update volmult:2f,volumemult:3f,jumpintensity:3f from calendar where date=2026.08.19
 ```
 
-You can generate the dates from the NYSE official calendar, the `pandas_market_calendars` Python package, or a manual list of trading days.
+### Generating an NYSE calendar
+
+```q
+q)calendar:simcalendar.nysecalendar[2026.01.01;2026.12.31]
+q)count calendar
+251
+q)select from calendar where closingtime=13:00
+date       closingtime volmult volumemult jumpintensity
+-------------------------------------------------------
+2026.11.27 13:00
+2026.12.24 13:00
+q)simcalendar.savecalendar[`:mycalendar.csv;calendar]
+```
+
+The generator applies the NYSE rules: weekdays less New Year's Day (not observed on the Friday when it falls on a Saturday), Martin Luther King Jr. Day, Presidents' Day, Good Friday, Memorial Day, Juneteenth (from 2022), Independence Day, Labor Day, Thanksgiving and Christmas, with a Saturday holiday observed on the Friday and a Sunday one on the Monday; early closes on the day after Thanksgiving, July 3 and Christmas Eve when they are trading days. Special closures (days of mourning, disasters) are not modelled: check against the official calendar for a past year. Edit the table for event days before running, or save it and edit the CSV.
 
 ## Behavior
 
@@ -194,9 +210,10 @@ q)k4unit:use`local.k4unit
 q)k4unit.moduletest`di.simcalendar
 ```
 
+The suite covers calendar validation and loading, the config keys, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, disk persistence and reproducibility.
+
 ## Future Extensions
 
-- **Holiday calendar generator**: NYSE-rule trading days for a date range
 - **A market factor across instruments**: the shared regime seed is the hook for a common day and, later, a common intraday path
 
 ## License

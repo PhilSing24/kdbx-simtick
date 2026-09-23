@@ -7,7 +7,7 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 | Module | Description | Status |
 |--------|-------------|--------|
 | [di.simtick](di/simtick/) | Realistic intraday tick data simulator: Hawkes arrivals, quotes first and trades against the quote in force with an aggressor side, order-flow impact, spread in ticks, transaction-time volatility, auction prints and tape attributes | ✅ Ready |
-| [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar: overnight gaps with a shared variance budget and a per-day summary table | ✅ Ready |
+| [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar: overnight gaps with a shared variance budget, day-level regimes, half days and event days, a seed per day, an NYSE calendar generator and a per-day summary table | ✅ Ready |
 | [di.simorder](di/simorder/) | Order execution simulator - generates a parent order + child executions against `di.simtick` market data, for TCA demos | ✅ Ready |
 
 ### Module hierarchy

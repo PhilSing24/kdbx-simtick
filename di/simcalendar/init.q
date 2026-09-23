@@ -271,6 +271,103 @@ loadcalendar:{[filepath]
   .z.m.validate (types hdr;enlist csv) 0: filepath
   };
 
+savecalendar:{[filepath;calendar]
+  / write a calendar table to a CSV file that loadcalendar reads back
+  / filepath: file handle
+  / calendar: a calendar (see validate)
+  / returns: filepath
+  if[not -11h=type filepath; '"savecalendar: filepath must be a file handle"];
+  filepath 0: csv 0: .z.m.validate calendar
+  };
+
+
+/ ============================================================
+/ NYSE CALENDAR
+/ ============================================================
+/ q dates count from 2000.01.01, a Saturday: d mod 7 is 0 Saturday, 1 Sunday, 2 Monday ... 6 Friday
+
+nyse.ymd:{[y;m;d]
+  / the date of a year, month and day
+  (`date$`month$(12*y-2000)+m-1)+d-1
+  };
+
+nyse.easter:{[y]
+  / Easter Sunday of a year (anonymous Gregorian algorithm)
+  / the sums are spelled out with neg: q evaluates right to left, so a
+  / chain like b-f+1 is b-(f+1)
+  a:y mod 19; b:y div 100; c:y mod 100; d:b div 4; e:b mod 4;
+  f:(b+8) div 25;
+  g:(sum (b;1;neg f)) div 3;
+  h:(sum (19*a;b;15;neg d;neg g)) mod 30;
+  i:c div 4; k:c mod 4;
+  l:(sum (32;2*e;2*i;neg h;neg k)) mod 7;
+  m:(sum (a;11*h;22*l)) div 451;
+  n:sum (h;l;114;neg 7*m);
+  .z.m.nyse.ymd[y;n div 31;1+n mod 31]
+  };
+
+nyse.nthweekday:{[y;m;wd;n]
+  / the nth weekday wd (2 Monday ... 5 Thursday) of month m of year y
+  d0:.z.m.nyse.ymd[y;m;1];
+  d0+(7*n-1)+(wd-d0 mod 7) mod 7
+  };
+
+nyse.lastweekday:{[y;m;wd]
+  / the last weekday wd of month m of year y
+  dl:.z.m.nyse.ymd[y;m+1;1]-1;
+  dl-((dl mod 7)-wd) mod 7
+  };
+
+nyse.observed:{[d]
+  / the weekday on which a holiday falling on d is observed: Friday before a
+  / Saturday, Monday after a Sunday
+  $[0=d mod 7; d-1; 1=d mod 7; d+1; d]
+  };
+
+nyse.holidays:{[y]
+  / the NYSE full-day holidays of a year: New Year's Day (not observed on the
+  / Friday when it falls on a Saturday), Martin Luther King Jr. Day,
+  / Presidents' Day, Good Friday, Memorial Day, Juneteenth (from 2022),
+  / Independence Day, Labor Day, Thanksgiving and Christmas. Special
+  / closures (days of mourning, disasters) are not modelled
+  ny:.z.m.nyse.ymd[y;1;1];
+  ny:$[1=ny mod 7; ny+1; ny];
+  h:ny,.z.m.nyse.nthweekday[y;1;2;3],.z.m.nyse.nthweekday[y;2;2;3],.z.m.nyse.easter[y]-2;
+  h,:.z.m.nyse.lastweekday[y;5;2];
+  if[y>=2022; h,:.z.m.nyse.observed .z.m.nyse.ymd[y;6;19]];
+  h,:.z.m.nyse.observed .z.m.nyse.ymd[y;7;4];
+  h,:.z.m.nyse.nthweekday[y;9;2;1],.z.m.nyse.nthweekday[y;11;5;4];
+  h,:.z.m.nyse.observed .z.m.nyse.ymd[y;12;25];
+  asc h where not (h mod 7) in 0 1
+  };
+
+nyse.halfdays:{[y]
+  / the NYSE early closes (13:00) of a year: the day after Thanksgiving,
+  / July 3 and Christmas Eve when they are trading days
+  hol:.z.m.nyse.holidays y;
+  h:(1+.z.m.nyse.nthweekday[y;11;5;4]),.z.m.nyse.ymd[y;7;3],.z.m.nyse.ymd[y;12;24];
+  asc h where (not (h mod 7) in 0 1)&not h in hol
+  };
+
+nysecalendar:{[from;to]
+  / the NYSE trading calendar between two dates: weekdays that are not
+  / holidays, with the closing time 13:00 on early-close days and 16:00
+  / otherwise, the other columns null (the config's values). Rules as of
+  / 2024; check special closures against the official calendar
+  / from: first date
+  / to: last date, at or after from
+  / returns: calendar table (see validate)
+  if[not (-14h=type from)&-14h=type to; '"nysecalendar: from and to must be dates"];
+  if[from>to; '"nysecalendar: from must be at or before to"];
+  years:(`year$from)+til 1+(`year$to)-`year$from;
+  hol:raze .z.m.nyse.holidays each years;
+  half:raze .z.m.nyse.halfdays each years;
+  d:from+til 1+to-from;
+  d:d where (not (d mod 7) in 0 1)&not d in hol;
+  .z.m.validate ([]date:d;closingtime:?[d in half;13:00;16:00])
+  };
+
+
 / configuration schema: column name -> (type; description)
 schema:()!()
 schema[`name]:("S";"preset name (key)")
@@ -303,4 +400,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runstep;daycfg;overnight;seeds;regimes;loadcalendar;loadconfig;validate;validatecfg;describe])
+export:([run;runstep;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;loadconfig;validate;validatecfg;describe])
