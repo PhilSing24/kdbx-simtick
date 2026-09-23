@@ -123,6 +123,8 @@ Day 2: starts at P1, ends at P2
 Day 3: starts at P2, ends at P3
 ```
 
+Each day's closing print is the next day's price at the open, from which that day's first trade diffuses over the interval to its time (as in `di.simtick`), so the first print of a day is close to, not equal to, the last print of the day before.
+
 ### Disk Persistence
 
 Pass a file handle as the third argument to persist to a date-partitioned kdb+ database:
