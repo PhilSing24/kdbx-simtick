@@ -221,7 +221,7 @@ q)k4unit.moduletest`di.simtick
 | Group | Tests | Description |
 |-------|-------|-------------|
 | Validation | 7 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers, zero/negative vol, zero/negative startprice) |
-| Arrivals | 5 | Output properties: non-empty, sorted, positive, within duration, correct type |
+| Arrivals | 7 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9 |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
 | Trades | 8 | Correct schema, sorted times, positive prices/qty, integer qty, within session |
@@ -230,7 +230,7 @@ q)k4unit.moduletest`di.simtick
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **50** | |
+| **Total** | **53** | |
 
 ## Documentation
 
@@ -238,6 +238,8 @@ The `docs/` folder contains:
 
 - **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
 - **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
+
+The technical paper describes the arrivals as simulated by Ogata thinning. The module simulates the same process through its cluster representation instead (Hawkes and Oakes, 1974): immigrants arrive as an inhomogeneous Poisson process at the seasonal baseline, and every event spawns Poisson(`alpha`/`beta`) children at exponential delays, generation after generation. The two are equal in distribution, but the cluster form needs no upper bound on the intensity, so bursts are never capped (a fixed bound under-produced arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and it runs as vector operations.
 
 ## Notebooks
 

@@ -33,6 +33,15 @@ true,0,0,q,(asc arr)~arr,1,,Arrivals sorted
 true,0,0,q,all 0<=arr,1,,All arrivals positive
 true,0,0,q,all arr<duration,1,,All arrivals within duration
 true,0,0,q,9h=type arr,1,,Arrivals type is float list
+before,0,0,q,flatcfg3:cfg,1,,Setup flat-baseline config for count tests (before rows all run ahead of the checks: one config per check)
+before,0,0,q,flatcfg3[`openmult`midmult`closemult]:1 1 1f,1,,Flat intraday profile so the Hawkes mean is analytic
+before,0,0,q,flatcfg3[`baseintensity]:1f,1,,One immigrant per second
+before,0,0,q,flatcfg3[`alpha]:0.3,1,,Branching ratio 0.3
+before,0,0,q,flatcfg3[`beta]:1.0,1,,Decay 1
+before,0,0,q,flatcfg9:flatcfg3,1,,Setup config for heavy clustering
+before,0,0,q,flatcfg9[`alpha]:0.9,1,,Branching ratio 0.9
+true,0,0,q,(abs (count simtick.arrivals flatcfg3)-duration%0.7)<0.05*duration%0.7,1,,Count within 5% of the Hawkes mean duration/(1-alpha/beta) at branching ratio 0.3
+true,0,0,q,(abs (count simtick.arrivals flatcfg9)-duration%0.1)<0.1*duration%0.1,1,,Count within 10% of the Hawkes mean at branching ratio 0.9 (a capped intensity bound gave a third of it)
 comment,0,0,q,,1,,=== Shape Tests ===
 before,0,0,q,shapecfg:cfg,1,,Setup config for shape test
 before,0,0,q,shapecfg[`baseintensity]:5.0,1,,Higher intensity for clearer pattern
