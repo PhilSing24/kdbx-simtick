@@ -108,8 +108,12 @@ regimes:{[cfg;calendar]
   / x (persistence regimepersistence, unit stationary variance) whose
   / innovations are drawn from the per-date regime seeds, so a date's
   / innovation is the same in any calendar that contains it, and the
-  / volatility and volume multipliers exp(sd*x-sd^2/2) times the calendar's
-  / own; volume and volatility move together, as they do in markets
+  / volatility and volume multipliers times the calendar's own. The volume
+  / multiplier is exp(sd*x-sd^2/2), mean 1; the volatility multiplier is
+  / exp(sd*x-sd^2), whose square has mean 1, since volatility enters the
+  / day as variance: the close-to-close variance then averages the
+  / configured vol^2/tradingdays instead of exceeding it by exp(sd^2).
+  / Volume and volatility move together, as they do in markets
   / cfg: config dict (see validatecfg)
   / calendar: a calendar (see validate)
   / returns: the calendar table with `regimeseed`dayseed`gapseed`x and
@@ -125,7 +129,7 @@ regimes:{[cfg;calendar]
   volsd:cfg`volregimesd;
   volumesd:cfg`volumeregimesd;
   r:calendar,'sd;
-  r:update x:x,volmult:(1f^volmult)*exp (volsd*x)-0.5*volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*x)-0.5*volumesd*volumesd from r;
+  r:update x:x,volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*x)-0.5*volumesd*volumesd from r;
   update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r
   };
 
@@ -374,7 +378,7 @@ schema[`name]:("S";"preset name (key)")
 schema[`overnightshare]:("F";"share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded); the intraday vol is reduced to the rest so the close-to-close vol stays the configured vol")
 schema[`gapdayweight]:("F";"weight of each calendar day beyond the first in an overnight gap's variance (0.25: a weekend carries 1.5 nights' worth)")
 schema[`regimepersistence]:("F";"AR(1) persistence of the day-level regime, between 0 and 1 (1 excluded): 0 = independent days, 0.7 = quiet and busy spells of a few days")
-schema[`volregimesd]:("F";"standard deviation of the log volatility multiplier across days (0 = every day at the configured vol)")
+schema[`volregimesd]:("F";"standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one (0 = every day at the configured vol)")
 schema[`volumeregimesd]:("F";"standard deviation of the log volume multiplier across days, driven by the same regime as the volatility (0 = every day at the configured intensity)")
 
 csvtypes:raze first each value schema

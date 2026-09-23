@@ -133,6 +133,26 @@ true,0,0,q,0.9<(log reg`volmult) cor log reg`volumemult,1,Volume and volatility 
 true,0,0,q,reg~simcalendar.regimes[cfg;longcal],1,Same seed gives the same regimes
 before,0,0,q,shortcal:20#longcal,1,The first twenty days of the long calendar
 true,0,0,q,(20#reg`regimeseed)~(simcalendar.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in
+before,0,0,q,cc2cfg:cfgs[`pg_default] upsert calcfgs`default,1,Config for a two-year close-to-close vol check
+before,0,0,q,cc2cfg[`baseintensity]:0.2,1,A quiet instrument so two years run fast (the transaction clock keeps the daily variance)
+before,0,0,q,cc2cfg[`quotespertrade]:2f,1,And few quotes
+before,0,0,q,cc2cfg[`seed]:42,1,Seed
+before,0,0,q,cc2cfg[`generatequotes]:0b,1,Trades only
+before,0,0,q,cc2days:(simcalendar.run[cc2cfg;longcal;(::)])`days,1,Two years of days under the default regime
+before,0,0,q,cc2ret:1_log cc2days[`close]%prev cc2days`close,1,Close-to-close log returns
+true,0,0,q,(abs ((dev cc2ret)*sqrt 252)-cc2cfg`vol)<0.05*cc2cfg`vol,1,Over two years the close-to-close vol is within 5% of the configured vol under the default regime
+before,0,0,q,turbcfg:cc2cfg upsert calcfgs`turbulent,1,The same under the turbulent regime
+before,0,0,q,turbdays:(simcalendar.run[turbcfg;longcal;(::)])`days,1,Two years of turbulent days
+before,0,0,q,turbret:1_log turbdays[`close]%prev turbdays`close,1,Their close-to-close log returns
+true,0,0,q,(abs ((dev turbret)*sqrt 252)-turbcfg`vol)<0.15*turbcfg`vol,1,Under the turbulent regime (persistence 0.8 and log-spread 0.6) two years hold about 60 independent days so the estimate's standard error is near 10%: within 15%
+before,0,0,q,centurycal:2000.01.03+asc where not ((2000.01.03+til 36525) mod 7) in 0 1,1,A century of weekdays for the normalization on the regimes alone
+before,0,0,q,normcfg:cc2cfg,1,Config for the normalization check
+before,0,0,q,normcfg[`regimepersistence]:0f,1,Independent days so the century is a full sample
+before,0,0,q,normreg:simcalendar.regimes[normcfg;centurycal],1,A century of default regimes
+true,0,0,q,(abs 1-avg normreg[`volmult]*normreg`volmult)<0.05,1,The squared volatility multiplier averages 1 (the mean daily variance is the configured one) at log-spread 0.3
+true,0,0,q,(abs 1-avg normreg`volumemult)<0.05,1,The volume multiplier averages 1
+before,0,0,q,normturb:simcalendar.regimes[@[normcfg;`volregimesd;:;0.6];centurycal],1,A century of regimes at the turbulent log-spread
+true,0,0,q,(abs 1-avg normturb[`volmult]*normturb`volmult)<0.05,1,The squared volatility multiplier averages 1 at log-spread 0.6 too
 before,0,0,q,steadycfg:cfgs[`nvda_default] upsert calcfgs`steady,1,Config with no regime variation
 true,0,0,q,all 1f=(simcalendar.regimes[steadycfg;calendar])`volmult,1,With zero regime sds every day is at the configured vol
 before,0,0,q,evcal:update volumemult:3f from calendar where date=2026.08.19,1,Calendar with a triple-volume day
