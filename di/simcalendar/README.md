@@ -60,7 +60,7 @@ date       closingtime volmult   volumemult dayseed  open     close  overnightre
 2026.08.20 13:00       1.325001  1.325001   10612852 212.5223 221.48 -0.007956562 196695 32583884
 ```
 
-`generatequotes:0b` in the config returns `trade` and `days` only. The `days` table starts with the calendar and regime columns (`closingtime`, `volmult`, `volumemult`, `jumpintensity`, the seeds and the regime state `x`) and ends with the day's open, close, overnight return, trades and volume.
+`generatequotes:0b` in the config returns `trade` and `days` only. The `days` table starts with the calendar and regime columns (`closingtime`, `volmult`, `volumemult`, `jumpintensity`, the seeds and the regime states `volstate` and `volumestate`) and ends with the day's open, close, overnight return, trades and volume.
 
 ### Disk persistence
 ```q
@@ -109,16 +109,17 @@ All tick parameters come from `di.simtick`'s configuration; `tradingdate` and `s
 |-----------|-------------|---------|
 | `overnightshare` | Share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
 | `gapdayweight` | Weight of each calendar day beyond the first in a gap's variance; 0.25 gives a weekend 1.5 nights' worth | 0.25 |
-| `regimepersistence` | AR(1) persistence of the day-level regime, between 0 and 1: 0 gives independent days, 0.7 quiet and busy spells of a few days | 0.7 |
+| `regimepersistence` | AR(1) persistence of the day-level regimes, between 0 and 1: 0 gives independent days, 0.7 quiet and busy spells of a few days | 0.7 |
+| `regimecorr` | Correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |
 | `volregimesd` | Standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one; 0 keeps every day at the configured vol | 0.3 |
 | `volumeregimesd` | Standard deviation of the log volume multiplier across days, driven by the same regime as the volatility | 0.3 |
 
 | Preset | Description |
 |--------|-------------|
-| `default` | 30% of the daily variance overnight, weekends at 1.5 nights, regimes with persistence 0.7 and 30% spread |
+| `default` | 30% of the daily variance overnight, weekends at 1.5 nights, regimes with persistence 0.7, 30% spread and correlation 0.7 |
 | `nogap` | As default but no overnight return: each day opens exactly at the previous close |
 | `steady` | Overnight gaps but no regime: every day at the configured vol and intensity |
-| `turbulent` | Long spells (persistence 0.8) with 60% spread in vol and volume |
+| `turbulent` | Long spells (persistence 0.8) with 60% spread in vol and volume, correlation 0.8 |
 
 ## Calendar Format
 
@@ -176,7 +177,7 @@ The `days` table records, per session, the open, the close (the last print, the 
 
 ### Day-level regimes
 
-Days differ. A standardized AR(1) state `x` with persistence `regimepersistence` gives each day a volatility multiplier `exp(volregimesd * x - volregimesd^2)` and a volume multiplier `exp(volumeregimesd * x - volumeregimesd^2 / 2)` from the same `x`, so busy days are volatile days and spells of a few days cluster, as they do in markets. The volume multiplier averages 1; the volatility multiplier is normalized on its square instead, since volatility enters a day as variance, so the close-to-close variance averages the configured `vol^2 / tradingdays` rather than exceeding it by `exp(volregimesd^2)`. The calendar's own `volmult` and `volumemult` multiply on top, for event days. `simcalendar.regimes[cfg;calendar]` returns the resolved multipliers, and the `days` table carries them.
+Days differ. Two standardized AR(1) states with persistence `regimepersistence`, `volstate` for volatility and `volumestate` for volume, are driven by daily shocks with correlation `regimecorr`. They give each day a volatility multiplier `exp(volregimesd * volstate - volregimesd^2)` and a volume multiplier `exp(volumeregimesd * volumestate - volumeregimesd^2 / 2)`, so busy days tend to be volatile days (at 0.7 they are strongly related without being one thing, as in markets) and spells of a few days cluster. The volume multiplier averages 1; the volatility multiplier is normalized on its square instead, since volatility enters a day as variance, so the close-to-close variance averages the configured `vol^2 / tradingdays` rather than exceeding it by `exp(volregimesd^2)`. The calendar's own `volmult` and `volumemult` multiply on top, for event days. `simcalendar.regimes[cfg;calendar]` returns the resolved multipliers, and the `days` table carries them.
 
 ### Seeds: one per day, shared across instruments
 

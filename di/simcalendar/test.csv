@@ -17,6 +17,9 @@ fail,0,0,q,simcalendar.validate[([]date:2026.01.20 2026.01.21;foo:1 2)],1,A tabl
 before,0,0,q,listcal:simcalendar.validate[2026.01.20 2026.01.21],1,A date list validated
 true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols listcal,1,A date list becomes a calendar table with the optional columns
 true,0,0,q,all null listcal`closingtime,1,Its optional columns are null (the config's values)
+before,0,0,q,badcfg4:cfg,1,Setup bad config for a regime correlation above 1
+before,0,0,q,badcfg4[`regimecorr]:1.5,1,Set regimecorr above 1
+fail,0,0,q,simcalendar.run[badcfg4;calendar;(::)],1,regimecorr above 1 throws error
 before,0,0,q,badcfg3:cfg,1,Setup bad config for a regime persistence of 1
 before,0,0,q,badcfg3[`regimepersistence]:1f,1,Set regimepersistence to 1
 fail,0,0,q,simcalendar.run[badcfg3;calendar;(::)],1,regimepersistence of 1 throws error
@@ -87,7 +90,7 @@ comment,0,0,q,,1,=== Multi-Day Tests ===
 before,0,0,q,daycounts:select count i by "d"$time from trades,1,Count trades per day
 true,0,0,q,(count calendar)=count daycounts,1,All calendar days have trades
 true,0,0,q,all 0<exec x from daycounts,1,Each day has at least one trade
-true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`x`open`close`overnightret`trades`volume~cols days,1,Days table has the regime columns then the day's results
+true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`trades`volume~cols days,1,Days table has the regime columns then the day's results
 true,0,0,q,(calendar`date)~days`date,1,One row per calendar day
 true,0,0,q,all (exec time from trades where ("d"$time)=2026.08.20)<=2026.08.20D13:00,1,The half day's trades end by its closing time
 true,0,0,q,2026.08.20D13:00=last exec time from trades where ("d"$time)=2026.08.20,1,The half day's closing print is at 13:00
@@ -128,8 +131,18 @@ before,0,0,q,reg:simcalendar.regimes[cfg;longcal],1,Regimes over two years
 true,0,0,q,(count longcal)=count reg,1,One regime row per day
 true,0,0,q,(avg reg`volmult) within 0.85 1.15,1,The volatility multiplier averages about 1
 true,0,0,q,(dev log reg`volmult) within 0.6 1.4*cfg`volregimesd,1,The log volatility multiplier's spread is about volregimesd
-true,0,0,q,((1_reg`x) cor -1_reg`x) within 0.5 0.85,1,The regime persists from day to day (AR(1) at regimepersistence)
-true,0,0,q,0.9<(log reg`volmult) cor log reg`volumemult,1,Volume and volatility regimes move together
+true,0,0,q,((1_reg`volstate) cor -1_reg`volstate) within 0.5 0.85,1,The volatility regime persists from day to day (AR(1) at regimepersistence)
+true,0,0,q,((1_reg`volumestate) cor -1_reg`volumestate) within 0.5 0.85,1,So does the volume regime
+true,0,0,q,(abs ((log reg`volmult) cor log reg`volumemult)-cfg`regimecorr)<0.15,1,Volume and volatility regimes move together at about regimecorr
+before,0,0,q,uncorcfg:cfg,1,Config with independent regimes
+before,0,0,q,uncorcfg[`regimecorr]:0f,1,No correlation
+before,0,0,q,uncorreg:simcalendar.regimes[uncorcfg;longcal],1,Two years of independent regimes
+true,0,0,q,0.15>abs (log uncorreg`volmult) cor log uncorreg`volumemult,1,With regimecorr 0 the two regimes are independent
+before,0,0,q,onecfg:cfg,1,Config with one regime for both
+before,0,0,q,onecfg[`regimecorr]:1f,1,Full correlation
+before,0,0,q,onereg:simcalendar.regimes[onecfg;longcal],1,Two years of a shared regime
+true,0,0,q,0.99<(log onereg`volmult) cor log onereg`volumemult,1,With regimecorr 1 the two regimes are one
+true,0,0,q,(uncorreg`volstate)~onereg`volstate,1,The volatility regime does not depend on regimecorr
 true,0,0,q,reg~simcalendar.regimes[cfg;longcal],1,Same seed gives the same regimes
 before,0,0,q,shortcal:20#longcal,1,The first twenty days of the long calendar
 true,0,0,q,(20#reg`regimeseed)~(simcalendar.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in

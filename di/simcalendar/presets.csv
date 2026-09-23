@@ -1,5 +1,5 @@
-name,overnightshare,gapdayweight,regimepersistence,volregimesd,volumeregimesd
-default,0.3,0.25,0.7,0.3,0.3
-nogap,0.0,0.0,0.7,0.3,0.3
-steady,0.3,0.25,0.0,0.0,0.0
-turbulent,0.3,0.25,0.8,0.6,0.6
+name,overnightshare,gapdayweight,regimepersistence,regimecorr,volregimesd,volumeregimesd
+default,0.3,0.25,0.7,0.7,0.3,0.3
+nogap,0.0,0.0,0.7,0.7,0.3,0.3
+steady,0.3,0.25,0.0,0.0,0.0,0.0
+turbulent,0.3,0.25,0.8,0.8,0.6,0.6

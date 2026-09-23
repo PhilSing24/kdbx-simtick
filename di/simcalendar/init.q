@@ -66,13 +66,14 @@ validatecfg:{[cfg]
   / with a row of this module's presets, see loadconfig)
   / cfg: configuration dictionary
   / returns: cfg if valid, throws error otherwise
-  reqkeys:`overnightshare`gapdayweight`regimepersistence`volregimesd`volumeregimesd;
+  reqkeys:`overnightshare`gapdayweight`regimepersistence`regimecorr`volregimesd`volumeregimesd;
   reqkeys,:`vol`tradingdays`startprice`seed`sym`baseintensity`jumpintensity;
   .z.m.val.haskeys[cfg;reqkeys;"validatecfg"];
   if[not (0<=cfg`overnightshare)&1>cfg`overnightshare; '"validatecfg: overnightshare must be between 0 and 1, 1 excluded"];
   if[0>cfg`gapdayweight; '"validatecfg: gapdayweight must be zero or positive"];
   if[not (0<=cfg`regimepersistence)&1>cfg`regimepersistence; '"validatecfg: regimepersistence must be between 0 and 1, 1 excluded"];
   if[0>min cfg`volregimesd`volumeregimesd; '"validatecfg: volregimesd and volumeregimesd must be zero or positive"];
+  if[not cfg[`regimecorr] within -1 1; '"validatecfg: regimecorr must be between -1 and 1"];
   cfg
   };
 
@@ -98,38 +99,51 @@ seeds:{[cfg;dates]
   };
 
 innovation:{[seed]
-  / one standard normal from the stream seeded by seed (no reseed when null)
+  / two standard normals from the stream seeded by seed (no reseed when
+  / null): the day's volatility and volume shocks before their correlation
   if[not null seed; system "S ",string seed];
-  first .z.m.rng.normal 1
+  .z.m.rng.normal 2
+  };
+
+ar1:{[phi;eps]
+  / a standardized AR(1) path (persistence phi, unit stationary variance)
+  / driven by the standard normal innovations eps, started at the first
+  / innovation. The state carried through the scan is (phi;x), since a
+  / scan over a projection with a float atom as initial value is refused by q
+  (first eps),last each {[st;e] (st 0;(st[0]*st 1)+e*sqrt 1-st[0]*st 0)}\[(phi;first eps);1_eps]
   };
 
 regimes:{[cfg;calendar]
-  / the day-level regime of each calendar day: a standardized AR(1) state
-  / x (persistence regimepersistence, unit stationary variance) whose
-  / innovations are drawn from the per-date regime seeds, so a date's
-  / innovation is the same in any calendar that contains it, and the
-  / volatility and volume multipliers times the calendar's own. The volume
-  / multiplier is exp(sd*x-sd^2/2), mean 1; the volatility multiplier is
-  / exp(sd*x-sd^2), whose square has mean 1, since volatility enters the
-  / day as variance: the close-to-close variance then averages the
-  / configured vol^2/tradingdays instead of exceeding it by exp(sd^2).
-  / Volume and volatility move together, as they do in markets
+  / the day-level regime of each calendar day: two standardized AR(1)
+  / states (persistence regimepersistence, unit stationary variance), one
+  / for volatility and one for volume, driven by shocks with correlation
+  / regimecorr, both drawn from the per-date regime seeds, so a date's
+  / shocks are the same in any calendar that contains it; the volatility
+  / and volume multipliers come from their states times the calendar's
+  / own. The volume multiplier is exp(sd*y-sd^2/2), mean 1; the volatility
+  / multiplier is exp(sd*x-sd^2), whose square has mean 1, since volatility
+  / enters the day as variance: the close-to-close variance then averages
+  / the configured vol^2/tradingdays instead of exceeding it by exp(sd^2).
+  / Volume and volatility move together at regimecorr, as they do in
+  / markets, without being one thing
   / cfg: config dict (see validatecfg)
   / calendar: a calendar (see validate)
-  / returns: the calendar table with `regimeseed`dayseed`gapseed`x and
-  /   `volmult`volumemult resolved (never null), `closingtime and
-  /   `jumpintensity resolved to the config's value where null
+  / returns: the calendar table with `regimeseed`dayseed`gapseed`volstate
+  /   `volumestate and `volmult`volumemult resolved (never null),
+  /   `closingtime and `jumpintensity resolved to the config's value where null
   calendar:.z.m.validate calendar;
   sd:.z.m.seeds[cfg;calendar`date];
   eps:.z.m.innovation each sd`regimeseed;
   phi:cfg`regimepersistence;
-  / the state carried through the scan is (phi; x), since a scan over a
-  / projection with a float atom as initial value is refused by q
-  x:(first eps),last each {[st;e] (st 0;(st[0]*st 1)+e*sqrt 1-st[0]*st 0)}\[(phi;first eps);1_eps];
+  rho:cfg`regimecorr;
+  ev:eps[;0];
+  eq:(rho*ev)+eps[;1]*sqrt 1-rho*rho;
+  x:.z.m.ar1[phi;ev];
+  y:.z.m.ar1[phi;eq];
   volsd:cfg`volregimesd;
   volumesd:cfg`volumeregimesd;
   r:calendar,'sd;
-  r:update x:x,volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*x)-0.5*volumesd*volumesd from r;
+  r:update volstate:x,volumestate:y,volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd from r;
   update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r
   };
 
@@ -378,6 +392,7 @@ schema[`name]:("S";"preset name (key)")
 schema[`overnightshare]:("F";"share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded); the intraday vol is reduced to the rest so the close-to-close vol stays the configured vol")
 schema[`gapdayweight]:("F";"weight of each calendar day beyond the first in an overnight gap's variance (0.25: a weekend carries 1.5 nights' worth)")
 schema[`regimepersistence]:("F";"AR(1) persistence of the day-level regime, between 0 and 1 (1 excluded): 0 = independent days, 0.7 = quiet and busy spells of a few days")
+schema[`regimecorr]:("F";"correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 (0.7: busy days are volatile days, without being one thing)")
 schema[`volregimesd]:("F";"standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one (0 = every day at the configured vol)")
 schema[`volumeregimesd]:("F";"standard deviation of the log volume multiplier across days, driven by the same regime as the volatility (0 = every day at the configured intensity)")
 
