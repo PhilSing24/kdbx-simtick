@@ -11,9 +11,7 @@ cfg[`alpha]:0.0
 cfg[`beta]:1.0  / must be > alpha, but irrelevant when alpha=0
 
 / No intraday seasonality: equal multipliers
-cfg[`openmult]:1.0
-cfg[`midmult]:1.0
-cfg[`closemult]:1.0
+cfg[`profile]:"1"
 
 / Set a seed for reproducibility (optional)
 cfg[`seed]:42
