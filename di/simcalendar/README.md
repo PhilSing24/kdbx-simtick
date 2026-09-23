@@ -40,7 +40,7 @@ q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
 
 / Load tick configuration from simtick
-q)cfg:simtick.loadconfig[`:di/simtick/presets.csv]`default
+q)cfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
 
 / Load trading calendar
 q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
@@ -50,7 +50,7 @@ q)trades:simcalendar.run[cfg;calendar;(::)]
 q)cols trades
 `sym`time`seq`price`qty`aggressor`cond`venue
 q)count trades
-180778
+831718
 ```
 
 ### Disk persistence
@@ -61,14 +61,14 @@ q)simcalendar.run[cfg;calendar;`:/tmp/mydb]
 
 / Load and query
 q)\l /tmp/mydb
-q)5#select from trade where date=2026.01.20
-date       sym  time                          price    qty
-----------------------------------------------------------
-2026.01.20 NVDA 2026.01.20D09:30:01.243820237 181.9    85
-2026.01.20 NVDA 2026.01.20D09:30:01.923257449 181.903  102
-2026.01.20 NVDA 2026.01.20D09:30:02.222464786 181.8667 142
-2026.01.20 NVDA 2026.01.20D09:30:02.233927676 181.8648 63
-2026.01.20 NVDA 2026.01.20D09:30:02.484859713 181.8648 446
+q)5#select from trade where date=2026.08.18
+date       sym  time                          seq price   qty    aggressor cond venue
+-------------------------------------------------------------------------------------
+2026.08.18 NVDA 2026.08.18D09:30:00.000000000 2   215     424344           O    XNAS
+2026.08.18 NVDA 2026.08.18D09:30:00.100212953 7   215.011 7      S         I    TRF
+2026.08.18 NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
+2026.08.18 NVDA 2026.08.18D09:30:00.232009923 14  215     300    S         R    XNAS
+2026.08.18 NVDA 2026.08.18D09:30:00.309357209 15  215     300    S         R    EDGX
 ```
 
 
@@ -101,9 +101,9 @@ Simple CSV with a single `date` column:
 
 ```csv
 date
-2026.01.20
-2026.01.21
-2026.01.22
+2026.08.18
+2026.08.19
+2026.08.20
 ```
 
 You can generate this from:
@@ -137,10 +137,10 @@ The database structure on disk:
 ```
 /path/mydb/
 ├── sym                    / symbol enumeration file
-├── 2026.01.20/
+├── 2026.08.18/
 │   ├── trade/             / splayed trade table
 │   └── quote/             / splayed quote table (if generatequotes:1b)
-├── 2026.01.21/
+├── 2026.08.19/
 │   ├── trade/
 │   └── quote/
 ...
