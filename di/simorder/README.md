@@ -47,14 +47,14 @@ This module models the top of the book seen on the tape, not a matching engine. 
 - **The tape reacting to a resting child** — the quotes come from `di.simtick` and do not know about the child resting at the touch. When the market falls through a resting buy, the child fills at its limit on the seller-initiated prints, as it would, but the tape's ask may already be below that limit. Aggressive fills are always consistent with the quote in force
 - **Queue changes other than prints** — a passive child's queue position advances only with the prints ahead of it; cancels by others ahead of it are not modelled, so passive fills are on the slow side
 - **Multi-venue routing** — children are routed to lit venues by a fixed share; there is no per-venue book, no smart order routing, no venue-level price improvement
-- **Multiple concurrent orders** — one order at a time; no portfolio-level or cross-order interaction
+- **Orders interacting** — `runmany` runs each order against the market as given; orders on the same instrument and day do not see each other's fills except through the separate `impact` step
 - **Tape inclusion** — `trades` represents the market independent of this order; an order's own executions are not folded back into `trades`. A passive fill coincides in time and price with the print that filled it, so folding is a join away; this matches the standard "exclusive VWAP" TCA convention.
 
 For these, a limit order book simulator or a multi-venue market model would be needed.
 
 ### Next Steps
 
-`di.simorder` currently runs one order against one day. The natural extensions are many orders per day across accounts and instruments, wired into `di.simcalendar`'s days, and a permanent component in `impact`.
+`di.simorder` runs one order at a time, or a whole flow of them across instruments and days. The natural extensions are impact inside the run, so that orders on the same instrument interact as they execute, and a market that reacts to a resting child.
 
 **Note:** as with the other `di.*` modules, this uses absolute module paths (`use`di.simtick`) rather than relative sibling references, following the same convention noted in `di.simtick`'s README.
 
@@ -218,11 +218,39 @@ q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
 | `permanent` | Optional, default 0: share of each execution's impact that stays through the day |
 | `model` | Optional, default `participation`: `participation` (p^beta) or `sqrtlaw` (sqrt of own over daily volume) |
 
+### Many orders and multiple days
+
+`generate` draws an order flow over every instrument and day in the market it is given, and `runmany` runs a table of order configs; `runflow` does both. `di.simcalendar`'s in-memory result serves as the market as it is, and so do the `trade` and `quote` tables of its database.
+
+```q
+q)cal:simcalendar.run[cfg;calendar;(::)]
+q)flow:simorder.runflow[`norders`seed!(3;7);cal`trade;cal`quote]
+q)select orderid,sym,side,orderqty,`date$starttime,algo,account,filledqty,avgpx,arrivalprice from flow`orders
+q)select orders:count i,cancels:sum event=`cancel,replaces:sum event=`replace by account from flow`events lj 1!select orderid,account from flow`orders
+```
+
+The spec is a dictionary; any key left out takes its default:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `norders` | 5 | Orders per instrument and day |
+| `accounts` | `` `ACC1`ACC2`ACC3 `` | Accounts drawn uniformly |
+| `algos` | `` `VWAP`IS`AGGRESSIVE`PASSIVE `` | Algos drawn uniformly from the menu `algos`, which sets each one's pacing and aggression (and urgency and cap for `IS`) |
+| `sizepct` | `0.005 0.05` | Order size as a share of the day's volume, uniform in the range, in round lots |
+| `windowminutes` | `10 60` | Window length, uniform in the range; the window sits inside the session with five minutes clear of the open and the close, one child every 30 seconds |
+| `seed` | `0N` | Seeds the draws and gives every order its own seed; `0N` leaves everything unseeded |
+| `ticksize`, `jitter`, `latencyms`, `maxreplaces`, `capacity` | 0.01, 0.3, 2.0, 20, `A` | Passed to every order |
+
+Orders on the same instrument and day do not interact: each runs against the market as given. For impact across them, run the flow, move the market with `impact` from all its executions on that instrument and day, and run the same configs again with `runmany` against the moved market.
+
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `simorder.run[cfg;trades;quotes]` | Full simulation: returns a dict `orders`children`events`executions |
+| `simorder.run[cfg;trades;quotes]` | One order: returns a dict `orders`children`events`executions |
+| `simorder.runmany[cfgs;trades;quotes]` | A table of order configs, each on its own instrument and day, gathered into the same four tables |
+| `simorder.generate[spec;trades;quotes]` | An order flow over every instrument and day in the market, as a table of order configs |
+| `simorder.runflow[spec;trades;quotes]` | `generate` then `runmany`; returns `configs and the four tables |
 | `simorder.marketday[cfg;t;name]` | Rows of a trades or quotes table for the order's instrument and day, time-sorted; throws if none |
 | `simorder.schedule[cfg]` | The exact child schedule |
 | `simorder.jittered[cfg;times]` | The schedule moved by the seeded jitter |
@@ -306,8 +334,9 @@ q)k4unit.moduletest`di.simorder
 | Rollover | 6 | A large passive order on the least liquid preset: cancels at expiry, a marketable cleanup child, the order still filled in full, cancels carrying the unfilled quantity, the cleanup carrying what the scheduled children left |
 | Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
+| Order flow | 30 | generate: norders per instrument and day, the schema's keys, windows inside the sessions and within a day, round-lot sizes, sides, accounts and algos from the menu with IS the arrival algo, a seed per order, the same flow from the same seed and none without; runmany: the four tables, every order filled for its quantity, unique execution ids, fills on their order's instrument and day; runflow returns the configs and the same orders |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **147** | |
+| **Total** | **173** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset (and `pg_default` for the rollover tests); order windows are set on that day's date.
 

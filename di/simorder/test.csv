@@ -290,6 +290,41 @@ before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of bo
 before,0,0,q,mixedquotes:`time xasc raze(quotes;xomresult`quote),1,,Quotes of both instruments in one table
 true,0,0,q,(simorder.run[basecfg;mixedtrades;mixedquotes])~simorder.run[basecfg;trades;quotes],1,,An order against mixed-instrument tables matches the single-instrument run
 true,0,0,q,(simorder.marketday[basecfg;mixedquotes;"quotes"])~quotes,1,,marketday returns the order's instrument and day only
+comment,0,0,q,,1,,=== Order Flow Tests ===
+before,0,0,q,flowspec:`norders`seed!(2;7),1,,Two orders per instrument and day with a seed
+before,0,0,q,flowcfgs:simorder.generate[flowspec;mixedtrades;mixedquotes],1,,Generate the flow over the two-instrument market
+true,0,0,q,4=count flowcfgs,1,,norders orders per instrument and day: two instruments x one day x 2
+true,0,0,q,(cols flowcfgs)~1_exec param from simorder.describe[],1,,A generated config has the schema's keys
+true,0,0,q,all flowcfgs[`sym] in `NVDA`XOM,1,,Orders are on the market's instruments
+true,0,0,q,2=count select from flowcfgs where sym=`XOM,1,,norders per instrument
+true,0,0,q,all (`date$flowcfgs`starttime)=`date$flowcfgs`endtime,1,,Each window is within one day
+before,0,0,q,flowsess:?[mixedquotes;();`sym`date!(`sym;(`date$;`time));`open`close!((first;`time);(last;`time))],1,,The sessions (functional form: no commas in test code)
+before,0,0,q,flowkeys:([]sym:flowcfgs`sym;date:`date$flowcfgs`starttime),1,,Each order's instrument and day
+true,0,0,q,all flowcfgs[`starttime]>=(flowsess flowkeys)`open,1,,Windows start after the open
+true,0,0,q,all flowcfgs[`endtime]<=(flowsess flowkeys)`close,1,,Windows end before the close
+true,0,0,q,all (flowcfgs[`endtime]-flowcfgs`starttime) within 0D00:10 0D01:00,1,,Windows are 10 to 60 minutes long
+true,0,0,q,all (0=flowcfgs[`orderqty] mod 100)&flowcfgs[`orderqty]>=100,1,,Sizes are round lots
+true,0,0,q,all flowcfgs[`side] in `BUY`SELL,1,,Sides are BUY or SELL
+true,0,0,q,all flowcfgs[`account] in `ACC1`ACC2`ACC3,1,,Accounts from the defaults
+true,0,0,q,all flowcfgs[`algo] in `VWAP`IS`AGGRESSIVE`PASSIVE,1,,Algos from the menu
+true,0,0,q,all (flowcfgs[`pacing]=`arrival)=flowcfgs[`algo]=`IS,1,,IS is the arrival-pacing algo
+true,0,0,q,all (not null flowcfgs`urgency)=flowcfgs[`algo]=`IS,1,,Only IS carries an urgency
+true,0,0,q,(count flowcfgs)=count distinct flowcfgs`seed,1,,Every order has its own seed
+true,0,0,q,flowcfgs~simorder.generate[flowspec;mixedtrades;mixedquotes],1,,The same spec seed generates the same flow
+true,0,0,q,all null (simorder.generate[`norders`seed!(1;0N);mixedtrades;mixedquotes])`seed,1,,Without a spec seed the orders are unseeded
+before,0,0,q,flowres:simorder.runmany[flowcfgs;mixedtrades;mixedquotes],1,,Run the flow
+true,0,0,q,`orders`children`events`executions~key flowres,1,,runmany returns the four tables
+true,0,0,q,(count flowcfgs)=count flowres`orders,1,,One parent order per config
+true,0,0,q,all `filled=flowres[`orders]`status,1,,Every order fills
+true,0,0,q,(flowres[`orders]`filledqty)~flowcfgs`orderqty,1,,Each for its quantity
+true,0,0,q,(count flowres`executions)=count distinct flowres[`executions]`execid,1,,Execution ids are unique across the orders
+before,0,0,q,ordersym:exec first sym by orderid from flowcfgs,1,,Each order's instrument
+before,0,0,q,orderday:exec first `date$starttime by orderid from flowcfgs,1,,Each order's day
+true,0,0,q,all flowres[`executions][`sym]=ordersym flowres[`executions]`orderid,1,,Each fill is on its order's instrument
+true,0,0,q,all (`date$flowres[`executions]`time)=orderday flowres[`executions]`orderid,1,,And on its order's day
+before,0,0,q,flowall:simorder.runflow[flowspec;mixedtrades;mixedquotes],1,,Generate and run in one call
+true,0,0,q,`configs`orders`children`events`executions~key flowall,1,,runflow returns the configs and the four tables
+true,0,0,q,(flowall`orders)~flowres`orders,1,,runflow gives the same orders as generate then runmany
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run

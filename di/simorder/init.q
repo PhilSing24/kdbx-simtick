@@ -393,8 +393,9 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
     repeg:0b;
     if[pegging;
       j:1+qt bin s;
-      if[j<count qt;
-        later:j+til count[qt]-j;
+      jend:1+qt bin expiry;
+      if[j<jend;
+        later:j+til jend-j;
         moved:$[buy;(quotes[`bid] later)>L;(quotes[`ask] later)<L];
         k:first where moved;
         if[not null k; if[qt[later k]<expiry; segend:qt later k; repeg:1b]]]];
@@ -600,6 +601,77 @@ run:{[cfg;trades;quotes]
 
 
 / ============================================================
+/ MANY ORDERS - an order flow over instruments and days
+/ ============================================================
+
+/ the menu of algorithms generate draws from: the pacing and aggression
+/ each stands for, and the arrival-pacing keys where they apply
+algos:([algo:`VWAP`IS`AGGRESSIVE`PASSIVE]pacing:`even`arrival`frontloaded`even;spreadcapture:0.1 0.35 0.9 0f;urgency:0n 2 0n 0n;maxpct:0n 0.2 0n 0n)
+
+flowdefaults:`norders`accounts`algos`sizepct`windowminutes`seed`ticksize`jitter`latencyms`maxreplaces`capacity!(5;`ACC1`ACC2`ACC3;`VWAP`IS`AGGRESSIVE`PASSIVE;0.005 0.05;10 60;0N;0.01;0.3;2.0;20;`A)
+
+generate:{[spec;trades;quotes]
+  / an order flow: norders orders for every instrument and day in the
+  / market, each with a random side, account and algo (from the menu
+  / algos, which sets its pacing and aggression), a window of a random
+  / length inside the session, a size that is a random share of the day's
+  / volume in round lots, one child every 30 seconds, and its own seed
+  / spec: dict with any of `norders`accounts`algos`sizepct`windowminutes`seed`ticksize`jitter`latencyms`maxreplaces`capacity
+  /   (see flowdefaults for the rest): sizepct and windowminutes are (low;high) ranges,
+  /   seed seeds the draws and gives every order its own seed (0N: unseeded)
+  / trades, quotes: the market, any instruments and days (`sym`time`qty and `sym`time)
+  / returns: a table of order configs, one row per order, the schema's keys
+  spec:flowdefaults,spec;
+  if[not null spec`seed; system "S ",string spec`seed];
+  / one row per instrument and day: the session from the quotes, the volume from the trades
+  sessions:select open:first time,close:last time by sym,date:`date$time from `sym`time xasc quotes;
+  volumes:select volume:sum qty by sym,date:`date$time from trades;
+  days:0!sessions lj volumes;
+  n:spec`norders;
+  m:n*count days;
+  d:days (til m) div n;
+  w:`timespan$`long$60000000000*spec[`windowminutes][0]+m?1+spec[`windowminutes][1]-spec[`windowminutes][0];
+  room:(d[`close]-d`open)-w+`timespan$0D00:10;
+  start:d[`open]+`timespan$0D00:05+`timespan$`long$(m?1.0)*`long$0|room;
+  pct:spec[`sizepct][0]+(m?1.0)*spec[`sizepct][1]-spec[`sizepct][0];
+  qty:100*1|floor 0.5+(pct*d`volume)%100;
+  algo:spec[`algos] m?count spec`algos;
+  menu:algos ([]algo:algo);
+  seeds:$[null spec`seed; m#0N; 1+(til[m]+7919*spec`seed) mod 2147483647];
+  (1_key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;
+    sym:d`sym;side:`BUY`SELL m?2;orderqty:qty;starttime:start;endtime:start+w;
+    numfills:5|`long$2*w%0D00:01;
+    pacing:menu`pacing;spreadcapture:menu`spreadcapture;ticksize:m#spec`ticksize;jitter:m#spec`jitter;
+    account:spec[`accounts] m?count spec`accounts;algo:algo;capacity:m#spec`capacity;
+    latencyms:m#spec`latencyms;maxreplaces:m#spec`maxreplaces;seed:seeds;
+    urgency:menu`urgency;maxpct:menu`maxpct)
+  };
+
+runmany:{[cfgs;trades;quotes]
+  / run every order of a table of configs (see generate) against the
+  / market, each on its own instrument and day, and gather the results;
+  / execids are renumbered across the orders
+  / cfgs: table of order configs, one row per order
+  / trades, quotes: the market, any instruments and days
+  / returns: dict `orders`children`events`executions over all the orders
+  rs:{[t;q;c] .z.m.run[c;t;q]}[trades;quotes] each cfgs;
+  r:`orders`children`events`executions!{[rs;k] raze rs[;k]}[rs] each `orders`children`events`executions;
+  r[`executions]:update execid:1+til count r`executions from r`executions;
+  r
+  };
+
+runflow:{[spec;trades;quotes]
+  / generate an order flow over the market and run it
+  / spec: see generate
+  / trades, quotes: the market, any instruments and days (di.simcalendar's
+  /   in-memory result, or its database's tables, serve as they are)
+  / returns: dict `configs (the generated order configs) and the tables of runmany
+  cfgs:.z.m.generate[spec;trades;quotes];
+  (enlist[`configs]!enlist cfgs),.z.m.runmany[cfgs;trades;quotes]
+  };
+
+
+/ ============================================================
 / CONFIGURATION SCHEMA
 / ============================================================
 
@@ -660,4 +732,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;loadconfig;describe])
+export:([run;runmany;runflow;generate;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;loadconfig;describe])
