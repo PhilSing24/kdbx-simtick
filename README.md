@@ -6,21 +6,19 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 
 | Module | Description | Status |
 |--------|-------------|--------|
-| [di.simtick](di/simtick/) | Realistic intraday tick data simulator with configurable market microstructure | ✅ Ready |
+| [di.simtick](di/simtick/) | Realistic intraday tick data simulator: Hawkes arrivals, quotes first and trades against the quote in force with an aggressor side, order-flow impact, spread in ticks, transaction-time volatility, auction prints and tape attributes | ✅ Ready |
 | [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar | ✅ Ready |
 | [di.simorder](di/simorder/) | Order execution simulator - generates a parent order + child executions against `di.simtick` market data, for TCA demos | ✅ Ready |
 | [di.simbasket](di/simbasket/) | Multi-instrument correlated tick simulation using a factor model | 🚧 In progress |
-| [di.simbook](di/simbook/) | L2 order book simulator | 🚧 In progress |
 
 ### Module hierarchy
 
 ```
 simtick ← simcalendar ← simbasket
 simtick ← simorder                   (order execution against a single day's market)
-simbook                              ← standalone (future: integration with simcalendar)
 ```
 
-`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`), multiple instruments (`simbasket`), or a parent order worked against that day's market (`simorder`). `simbook` is a separate bottom-up simulator that models individual order flow events rather than deriving quotes from a price process.
+`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`), multiple instruments (`simbasket`), or a parent order worked against that day's market (`simorder`).
 
 Together, `simtick` + `simorder` generate the four datasets (`trades`, `quotes`, `orders`, `executions`) needed to build Transaction Cost Analysis (TCA) — realistic market data plus a realistic, internally consistent order trading against it, with configurable execution quality for good-vs-bad comparisons.
 
@@ -64,33 +62,57 @@ Then load modules:
 simcalendar:use`di.simcalendar
 ```
 
+## Testing
+
+Each module carries a `test.csv` in k4unit format, run by the `local.k4unit` module:
+
+```bash
+make test                # all suites
+make test-simtick        # one suite; exits non-zero when a check fails
+make test-simcalendar
+make test-simorder
+```
+
+Or from a q session:
+
+```q
+q)k4unit:use`local.k4unit
+q)k4unit.moduletest`di.simtick
+```
+
 ## Project Structure
 ```
 kdbx-modules/
 ├── Makefile
 ├── README.md
+├── local/
+│   └── k4unit.q           # test runner
 └── di/
     ├── simtick/           # 1 instrument, 1 day (atomic unit)
     │   ├── init.q
     │   ├── presets.csv
     │   ├── test.csv
-    │   └── README.md
+    │   ├── testing.q
+    │   ├── README.md
+    │   ├── docs/
+    │   └── notebooks/
     ├── simcalendar/       # 1 instrument, N days (uses di.simtick)
     │   ├── init.q
     │   ├── calendar.csv
+    │   ├── test.csv
     │   └── README.md
     ├── simorder/          # 1 order, 1 day (uses di.simtick's trades/quotes)
     │   ├── init.q
     │   ├── presets.csv
     │   ├── test.csv
     │   ├── testing.q
-    │   └── README.md
-    ├── simbasket/         # M instruments, N days (uses di.simcalendar) [WIP]
-    │   ├── init.q
-    │   └── README.md
-    └── simbook/           # L2 order book simulator, Gillespie algorithm [WIP]
+    │   ├── README.md
+    │   └── notebooks/
+    └── simbasket/         # M instruments, N days (uses di.simcalendar) [WIP]
         ├── init.q
-        └── README.md
+        ├── README.md
+        ├── docs/
+        └── notebooks/
 ```
 
 ## Creating New Modules
