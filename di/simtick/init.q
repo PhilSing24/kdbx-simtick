@@ -300,6 +300,21 @@ qty.gen:{[n;cfg]
     '"qty.gen: unknown qtymodel - ",string model]
   };
 
+quote.seeds:{[cfg;arrs]
+  / quote updates seeded by the trades: after each trade, Poisson
+  / (quotetradelink*quotespertrade*(1-alpha/beta)) immigrants at Exp(beta)
+  / delays, each with its usual cascade, so that quotetradelink of the
+  / quote updates follow the trades (a burst of trades brings a burst of
+  / quotes) and the rest arrive on the background quote clock
+  / cfg: config dict with `quotetradelink`quotespertrade`alpha`beta
+  / arrs: trade times in seconds from open
+  / returns: ascending times in seconds from open
+  n:count arrs;
+  k:count .z.m.poisson[1f;n*cfg[`quotetradelink]*cfg[`quotespertrade]*1-cfg[`alpha]%cfg`beta];
+  if[0=k; :`float$()];
+  asc arrs[k?n]+neg log[1-k?1.0]%cfg`beta
+  };
+
 quote.activity:{[cfg;quotearrs]
   / local quote activity relative to its expected level: the quotes in the
   / trailing minute over the number the intensity profile expects there,
@@ -318,12 +333,13 @@ quote.activity:{[cfg;quotearrs]
 
 quote.generate:{[cfg;times;mids;activity]
   / quote table from the mid path sampled on the quote clock
-  / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`ticksize`rngmodel
+  / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`quotesizevol`imbalancesignal`ticksize`rngmodel
   / times: quote timestamps, ascending, the first at the session open
   / mids: mid price at each time (the price path sampled on the quote clock)
   / activity: spread multiplier per quote from local activity (see quote.activity)
   / returns: quote table `time`bid`ask`bidsize`asksize; bid and ask on the
-  /   tick grid, the spread a whole number of ticks, at least one
+  /   tick grid, the spread a whole number of ticks, at least one; sizes in
+  /   round lots of 100
   n:count times;
   ticksize:cfg`ticksize;
 
@@ -336,8 +352,16 @@ quote.generate:{[cfg;times;mids;activity]
   bid:ticksize*floor 0.5+(mids-0.5*ticks*ticksize)%ticksize;
   ask:bid+ticks*ticksize;
 
-  bidsize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
-  asksize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
+  / sizes: lognormal around avgquotesize, in round lots, the bid side
+  / larger before the mid rises and the ask side before it falls
+  / (imbalancesignal: the book leans toward the next move, weakly)
+  lv:cfg`quotesizevol;
+  nextmove:signum (1_mids,last mids)-mids;
+  tilt:cfg[`imbalancesignal]*nextmove;
+  bidsize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])+tilt-0.5*lv*lv;
+  asksize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])-tilt+0.5*lv*lv;
+  bidsize:100*1|`long$0.5+bidsize%100;
+  asksize:100*1|`long$0.5+asksize%100;
   ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
   };
 
@@ -467,6 +491,10 @@ validate:{[cfg]
   if[0>=min cfg`spreadopenmult`spreadmidmult`spreadclosemult; '"validate: spread multipliers must be positive"];
   if[0>=cfg`spreaddecayminutes; '"validate: spreaddecayminutes must be positive"];
   if[0>=cfg`quotespertrade; '"validate: quotespertrade must be positive"];
+  .z.m.val.haskeys[cfg;`quotetradelink`quotesizevol`imbalancesignal;"validate"];
+  if[not cfg[`quotetradelink] within 0 1; '"validate: quotetradelink must be between 0 and 1"];
+  if[0>cfg`quotesizevol; '"validate: quotesizevol must be zero or positive"];
+  if[0>cfg`imbalancesignal; '"validate: imbalancesignal must be zero or positive"];
   if[not cfg[`sidepersistence] within 0 1; '"validate: sidepersistence must be between 0 and 1"];
   if[not all cfg[`midpointshare`improvementshare] within 0 1;
     '"validate: midpointshare and improvementshare must be between 0 and 1"];
@@ -493,8 +521,10 @@ run:{[cfg]
   / returns: trade table if generatequotes=0b, else dict with `trade`quote
   /
   / quotes come first: quote updates arrive on their own Hawkes clock at
-  / quotespertrade times the trade intensity (same clustering), starting
-  / with a quote at the open, and the price path is sampled on that clock
+  / quotespertrade times the trade intensity (same clustering), a share
+  / quotetradelink of them seeded by the trades themselves (see
+  / quote.seeds), starting with a quote at the open, and the price path is
+  / sampled on that clock
   / as the mid, shifted by the impact of the signed order flow before each
   / quote (see flow.impact); a jump seeds a burst on both clocks (see
   / hawkes.shock) and local activity widens the spread (see quote.activity).
@@ -520,11 +550,15 @@ run:{[cfg]
   tradeshock:.z.m.hawkes.shock[cfg;jumps`time;cfg`jumpburst];
   quoteshock:.z.m.hawkes.shock[cfg;jumps`time;`long$cfg[`jumpburst]*cfg`quotespertrade];
 
-  / the two clocks (seconds from open) and the order flow on the trade clock
-  quotearrs:0f,.z.m.hawkes.process[cfg;cfg[`baseintensity]*cfg`quotespertrade;quoteshock];
+  / the trade clock (seconds from open) and the order flow on it
   arrs:.z.m.hawkes.process[cfg;cfg`baseintensity;tradeshock];
   n:count arrs;
   flow:$[n; .z.m.flow.generate[cfg;n]; `sign`qty!(`long$();`long$())];
+
+  / the quote clock: a quote at the open, background updates at
+  / (1-quotetradelink) of the rate, and updates seeded by the trades
+  background:cfg[`baseintensity]*cfg[`quotespertrade]*1-cfg`quotetradelink;
+  quotearrs:0f,.z.m.hawkes.process[cfg;background;asc quoteshock,.z.m.quote.seeds[cfg;arrs]];
 
   / the mid on the quote clock: the price path (by the config's clock, with
   / the jumps) plus the order flow's impact
@@ -584,6 +618,9 @@ schema[`spreadactivity]:("F";"exponent of local quote activity (trailing minute 
 schema[`avgquotesize]:("J";"average quote size")
 schema[`ticksize]:("F";"minimum price increment; quotes are rounded to it, trades to a tenth of it (0.01 for US equities)")
 schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")
+schema[`quotetradelink]:("F";"share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1; the rest arrive on the background quote clock")
+schema[`quotesizevol]:("F";"log volatility of quote sizes (lognormal around avgquotesize, in round lots of 100)")
+schema[`imbalancesignal]:("F";"log tilt of the quote sizes toward the side of the next mid move (bid larger before a rise); 0 = none")
 schema[`sidepersistence]:("F";"probability a trade's aggressor side repeats the previous trade's (0.5 = independent sides)")
 schema[`midpointshare]:("F";"share of trades printing at the midpoint")
 schema[`improvementshare]:("F";"share of trades printing a tenth of a tick inside the touch")

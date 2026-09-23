@@ -172,6 +172,27 @@ before,0,0,q,flatsprun:simtick.run[flatspcfg],1,,Run with only activity moving t
 before,0,0,q,flatspn:exec count i by 1 xbar time.minute from flatsprun`quote,1,,Quotes per minute
 before,0,0,q,flatsps:exec avg (ask-bid)%cfg`ticksize by 1 xbar time.minute from flatsprun`quote,1,,Mean spread in ticks per minute
 true,0,0,q,0.3<(value flatspn) cor value flatsps,1,,With flat profiles the spread tracks activity minute by minute
+before,0,0,q,flatts:exec count i by 1 xbar time.second from flatsprun`trade,1,,Trades per second with flat profiles
+before,0,0,q,flatqs:exec count i by 1 xbar time.second from flatsprun`quote,1,,Quotes per second with flat profiles
+before,0,0,q,flatsecs:key[flatts] inter key flatqs,1,,Seconds with both
+true,0,0,q,0.15<(flatts flatsecs) cor flatqs flatsecs,1,,Quote bursts follow trade bursts: per-second counts correlate with the trade link on
+before,0,0,q,nolinkcfg:flatspcfg,1,,Setup flat config without the trade link
+before,0,0,q,nolinkcfg[`quotetradelink]:0f,1,,Trade link off
+before,0,0,q,nolinkrun:simtick.run[nolinkcfg],1,,Run without the trade link
+before,0,0,q,nolinkts:exec count i by 1 xbar time.second from nolinkrun`trade,1,,Trades per second without the link
+before,0,0,q,nolinkqs:exec count i by 1 xbar time.second from nolinkrun`quote,1,,Quotes per second without the link
+before,0,0,q,nolinksecs:key[nolinkts] inter key nolinkqs,1,,Seconds with both
+true,0,0,q,0.1>abs (nolinkts nolinksecs) cor nolinkqs nolinksecs,1,,Without the trade link the two clocks are independent
+true,0,0,q,all 0=(quotes[`bidsize] mod 100)|quotes[`asksize] mod 100,1,,Quote sizes are round lots of 100
+before,0,0,q,imbalance:(quotes[`bidsize]-quotes`asksize)%quotes[`bidsize]+quotes`asksize,1,,Size imbalance of each quote
+before,0,0,q,nextmove:0^signum (next qmid`mid)-qmid`mid,1,,Sign of the next mid change
+true,0,0,q,0.08<imbalance cor nextmove,1,,The size imbalance leans toward the next mid move
+before,0,0,q,nosigcfg:cfg,1,,Setup config without the imbalance signal
+before,0,0,q,nosigcfg[`imbalancesignal]:0f,1,,Imbalance signal off
+before,0,0,q,nosigquotes:(simtick.run nosigcfg)`quote,1,,Quotes without the signal
+before,0,0,q,nosigimb:(nosigquotes[`bidsize]-nosigquotes`asksize)%nosigquotes[`bidsize]+nosigquotes`asksize,1,,Their size imbalance
+before,0,0,q,nosigmid:0.5*nosigquotes[`bid]+nosigquotes`ask,1,,Their mid
+true,0,0,q,0.03>abs nosigimb cor 0^signum (next nosigmid)-nosigmid,1,,Without the signal the imbalance says nothing about the next move
 true,0,0,q,(count quotes)>=count trades,1,,At least one quote per trade
 true,0,0,q,all (quotes[`ask]-quotes`bid)>=cfg[`ticksize]-1e-9,1,,Every spread is at least one tick
 before,0,0,q,spreadticks:floor 0.5+(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Spread of each quote in ticks
@@ -187,7 +208,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,43=count cfgs`nvda_default,1,,Config has 43 parameters (excluding key)
+true,0,0,q,46=count cfgs`nvda_default,1,,Config has 46 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -203,7 +224,7 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,44=count schema,1,,Schema has 44 parameters
+true,0,0,q,47=count schema,1,,Schema has 47 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
