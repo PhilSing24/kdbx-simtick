@@ -4,7 +4,7 @@
 PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export QPATH := $(PROJECT_ROOT):$(QPATH)
 
-.PHONY: repl test test-simconfig test-simtick test-simcalendar test-simorder help
+.PHONY: repl test test-simconfig test-simtick test-simcalendar test-simorder params help
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  make test-simtick    - Run simtick tests only"
 	@echo "  make test-simcalendar - Run simcalendar tests only"
 	@echo "  make test-simorder   - Run simorder tests only"
+	@echo "  make params          - Regenerate the parameter reference pages (di/*/docs/parameters.md)"
 	@echo ""
 	@echo "Usage example:"
 	@echo "  make repl"
@@ -42,3 +43,7 @@ test-simcalendar:
 
 test-simorder:
 	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simorder;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+
+# The parameter reference pages, generated from each module's describe[] and the shipped configuration files
+params:
+	q genparams.q -q

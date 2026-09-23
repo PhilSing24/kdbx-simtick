@@ -15,7 +15,7 @@ A tick simulator has many knobs, and most of them describe a market and hardly e
 | Scenario | what makes a day type: multipliers on volatility, volume and spread, jump settings, the regimes of a multi-day run | CSV, one row per scenario, `scenarios.csv` |
 | Run | date or calendar, seed, whether to return quotes | a small dictionary |
 
-A later layer overrides an earlier one. The shipped files are examples; every loader takes any path.
+A later layer overrides an earlier one. The shipped files are examples; every loader takes any path. `di.simorder` composes an order the same way, from the market file's `orders` group and an order row of `orders.csv` (see its README).
 
 ## Usage
 

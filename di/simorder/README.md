@@ -83,7 +83,7 @@ A KDB-X module for simulating a parent order, its child orders and their fills a
 - **Order lifecycle events** for surveillance
 - **Volume-weighted sizing** derived from real market activity
 - **Nanosecond-precision timestamps**, consistent with `di.simtick`'s `trades`/`quotes`
-- **CSV-based presets** for repeatable good/bad scenarios
+- **Order rows in a CSV** (`di/simconfig/orders.csv`) for repeatable good/bad scenarios, composed with the market file's order keys
 
 ## Installation
 
