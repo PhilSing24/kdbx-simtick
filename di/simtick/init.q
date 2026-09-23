@@ -280,15 +280,54 @@ quote.generate:{[cfg;times;mids]
   ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
   };
 
-trade.generate:{[cfg;times;quotes]
+flow.generate:{[cfg;n]
+  / the order flow of n trades: aggressor signs and quantities
+  / cfg: config dict with `sidepersistence and the quantity model keys
+  / n: number of trades, positive
+  / returns: dict `sign`qty; sign +1 (buyer-initiated) or -1 (seller-initiated)
+  /
+  / signs follow a Markov chain, each repeating the previous one with
+  / probability sidepersistence (lag-1 autocorrelation 2*sidepersistence-1)
+  flips:(n?1.0)>cfg`sidepersistence;
+  flips[0]:0b;
+  sign:(1-2*first 1?2)*1-2*(sums flips) mod 2;
+  `sign`qty!(sign;.z.m.qty.gen[n;cfg])
+  };
+
+flow.impact:{[cfg;tradetimes;flow;quotetimes]
+  / the shift of the mid in force at each quote time from the signed trades
+  / before it (a propagator): each trade moves the mid by impactticks ticks
+  / times sqrt(qty/avgqty) in its direction; a share impactpermanent of that
+  / stays, the rest halves every impacthalflife seconds. With persistent
+  / signs this gives the tape price impact and partial reversion after a
+  / trade, what markout curves measure
+  / cfg: config dict with `impactticks`impacthalflife`impactpermanent`ticksize`avgqty
+  / tradetimes: trade times in seconds from open, ascending
+  / flow: `sign`qty of those trades (see flow.generate)
+  / quotetimes: quote times in seconds from open, ascending
+  / returns: float shift per quote time, in price units
+  n:count tradetimes;
+  if[(0=n) or 0=cfg`impactticks; :(count quotetimes)#0f];
+  imp:cfg[`impactticks]*cfg[`ticksize]*flow[`sign]*sqrt flow[`qty]%cfg`avgqty;
+  lam:log[2]%cfg`impacthalflife;
+  perm:cfg`impactpermanent;
+  / transient part in force just after each trade, and the permanent part
+  trans:{[e;dt;a] a+e*exp neg dt}\[0f;lam*deltas tradetimes;(1-perm)*imp];
+  permcum:sums perm*imp;
+  / at each quote time: the parts left from the last trade before it
+  j:tradetimes bin quotetimes;
+  0f^permcum[j]+trans[j]*exp neg lam*quotetimes-tradetimes j
+  };
+
+trade.generate:{[cfg;times;quotes;flow]
   / trades against the quote in force at their time: a buyer-initiated trade
-  / takes the ask, a seller-initiated one the bid, the aggressor side following
-  / a persistent sign process; a share of trades prints at the midpoint and a
-  / share a tenth of a tick inside the touch (price improvement)
-  / cfg: config dict with `sidepersistence`midpointshare`improvementshare`ticksize
-  /   and the quantity model keys
+  / takes the ask, a seller-initiated one the bid; a share of trades prints
+  / at the midpoint and a share a tenth of a tick inside the touch (price
+  / improvement)
+  / cfg: config dict with `midpointshare`improvementshare`ticksize
   / times: trade timestamps, ascending, none before the first quote
   / quotes: quote table (see quote.generate)
+  / flow: `sign`qty of the trades (see flow.generate)
   / returns: trade table `time`price`qty`aggressor, aggressor `B (buyer-
   /   initiated) or `S; prices on the tenth-of-a-tick grid
   n:count times;
@@ -296,12 +335,7 @@ trade.generate:{[cfg;times;quotes]
   bid:quotes[`bid] idx;
   ask:quotes[`ask] idx;
   mid:0.5*bid+ask;
-
-  / aggressor signs: a Markov chain, each sign repeating the previous one with
-  / probability sidepersistence (lag-1 autocorrelation 2*sidepersistence-1)
-  flips:(n?1.0)>cfg`sidepersistence;
-  flips[0]:0b;
-  sign:(1-2*first 1?2)*1-2*(sums flips) mod 2;
+  sign:flow`sign;
 
   / where the trade prints: touch, midpoint or a tenth of a tick inside the touch
   u:n?1.0;
@@ -312,7 +346,7 @@ trade.generate:{[cfg;times;quotes]
   grid:0.1*cfg`ticksize;
   price:grid*floor 0.5+price%grid;
 
-  ([]time:times;price:price;qty:.z.m.qty.gen[n;cfg];aggressor:?[sign>0;`B;`S])
+  ([]time:times;price:price;qty:flow`qty;aggressor:?[sign>0;`B;`S])
   };
 
 quote.spreadmults:{[cfg;times]
@@ -378,6 +412,11 @@ validate:{[cfg]
     '"validate: midpointshare and improvementshare must be between 0 and 1"];
   if[1<cfg[`midpointshare]+cfg`improvementshare;
     '"validate: midpointshare and improvementshare must not exceed 1 together"];
+  / order-flow impact
+  .z.m.val.haskeys[cfg;`impactticks`impacthalflife`impactpermanent;"validate"];
+  if[0>cfg`impactticks; '"validate: impactticks must be zero or positive"];
+  if[0>=cfg`impacthalflife; '"validate: impacthalflife must be positive"];
+  if[not cfg[`impactpermanent] within 0 1; '"validate: impactpermanent must be between 0 and 1"];
   cfg
   };
 
@@ -390,9 +429,10 @@ run:{[cfg]
   / quotes come first: quote updates arrive on their own Hawkes clock at
   / quotespertrade times the trade intensity (same clustering), starting
   / with a quote at the open, and the price path is sampled on that clock
-  / as the mid. Trades then arrive on the trade clock and execute against
-  / the quote in force (see trade.generate), so every trade sits inside its
-  / prevailing quote and carries an aggressor side
+  / as the mid, shifted by the impact of the signed order flow before each
+  / quote (see flow.impact). Trades arrive on the trade clock and execute
+  / against the quote in force (see trade.generate), so every trade sits
+  / inside its prevailing quote and carries an aggressor side
   /
   / Example:
   /   cfg:first loadconfig`:presets.csv
@@ -406,15 +446,20 @@ run:{[cfg]
 
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
 
-  / quote clock (seconds from open) and the mid path on it
+  / the two clocks (seconds from open) and the order flow on the trade clock
   quotearrs:0f,.z.m.arrivals[@[cfg;`baseintensity;*;cfg`quotespertrade]];
+  arrs:.z.m.arrivals[cfg];
+  n:count arrs;
+  flow:$[n; .z.m.flow.generate[cfg;n]; `sign`qty!(`long$();`long$())];
+
+  / the mid on the quote clock: the price path plus the order flow's impact
   mids:.z.m.price[cfg;quotearrs];
+  mids+:.z.m.flow.impact[cfg;arrs;flow;quotearrs];
   quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$quotearrs*nspersec;mids];
 
-  / trade clock, then trades against the quote in force
-  arrs:.z.m.arrivals[cfg];
-  trades:$[count arrs;
-    .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes];
+  / trades against the quote in force
+  trades:$[n;
+    .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes;flow];
     ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$())];
 
   addsym:{[s;t] update `p#sym from `sym`time xcols update sym:s from t};
@@ -461,6 +506,9 @@ schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive 
 schema[`sidepersistence]:("F";"probability a trade's aggressor side repeats the previous trade's (0.5 = independent sides)")
 schema[`midpointshare]:("F";"share of trades printing at the midpoint")
 schema[`improvementshare]:("F";"share of trades printing a tenth of a tick inside the touch")
+schema[`impactticks]:("F";"order-flow impact: ticks an average-size trade moves the mid in its direction (0 = none), scaled by sqrt(qty/avgqty)")
+schema[`impacthalflife]:("F";"order-flow impact: seconds over which the transient part of a trade's impact halves")
+schema[`impactpermanent]:("F";"order-flow impact: share of a trade's impact that never decays, between 0 and 1")
 
 / derive type string from schema
 csvtypes:raze first each value schema

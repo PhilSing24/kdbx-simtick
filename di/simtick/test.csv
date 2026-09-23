@@ -25,6 +25,9 @@ fail,0,0,q,simtick.run[badcfg6],1,,Zero startprice throws error
 before,0,0,q,badcfg7:cfg,1,,Setup bad config for negative startprice
 before,0,0,q,badcfg7[`startprice]:-1.0,1,,Set negative startprice
 fail,0,0,q,simtick.run[badcfg7],1,,Negative startprice throws error
+before,0,0,q,badcfg8:cfg,1,,Setup bad config for impactpermanent above 1
+before,0,0,q,badcfg8[`impactpermanent]:1.5,1,,Set impactpermanent above 1
+fail,0,0,q,simtick.run[badcfg8],1,,impactpermanent above 1 throws error
 comment,0,0,q,,1,,=== Arrivals Tests ===
 before,0,0,q,cfg[`seed]:42,1,,Set seed for reproducibility
 before,0,0,q,arr:simtick.arrivals[cfg],1,,Generate arrivals
@@ -121,6 +124,19 @@ before,0,0,q,signs:1-2*trades[`aggressor]=`S,1,,Aggressor signs (+1 buy / -1 sel
 true,0,0,q,((1_signs) cor -1_signs) within 0.3 0.5,1,,Aggressor signs persist: lag-1 autocorrelation about 2*sidepersistence-1 = 0.4
 true,0,0,q,((count quotes)%count trades) within 0.8 1.2*cfg`quotespertrade,1,,About quotespertrade quote updates per trade
 true,0,0,q,(first quotes`time)=opentime,1,,The first quote is at the open
+before,0,0,q,qmid:update mid:0.5*bid+ask from quotes,1,,Quotes with their mid
+before,0,0,q,mid0:(aj[`time;select time from trades;qmid])`mid,1,,Mid in force at each trade
+before,0,0,q,mid1:(aj[`time;update time:time+0D00:00:01 from select time from trades;qmid])`mid,1,,Mid in force one second after each trade
+true,0,0,q,(avg signs*mid1-mid0)>0.1*cfg`ticksize,1,,Order flow moves the mid: the signed 1-second markout is positive
+before,0,0,q,noimpcfg:cfg,1,,Setup config without order-flow impact
+before,0,0,q,noimpcfg[`impactticks]:0f,1,,Impact off
+before,0,0,q,noimp:simtick.run[noimpcfg],1,,Run without impact
+before,0,0,q,nitrades:noimp`trade,1,,Its trades
+before,0,0,q,niqmid:update mid:0.5*bid+ask from noimp`quote,1,,Its quotes with their mid
+before,0,0,q,nisigns:1-2*nitrades[`aggressor]=`S,1,,Its aggressor signs
+before,0,0,q,nimid0:(aj[`time;select time from nitrades;niqmid])`mid,1,,Mid in force at each trade without impact
+before,0,0,q,nimid1:(aj[`time;update time:time+0D00:00:01 from select time from nitrades;niqmid])`mid,1,,Mid one second later without impact
+true,0,0,q,(abs avg nisigns*nimid1-nimid0)<0.1*cfg`ticksize,1,,Without impact the signed 1-second markout is zero
 true,0,0,q,(count quotes)>=count trades,1,,At least one quote per trade
 true,0,0,q,all (quotes[`ask]-quotes`bid)>=cfg[`ticksize]-1e-9,1,,Every spread is at least one tick
 true,0,0,q,all 1e-6>abs (quotes[`bid]%cfg`ticksize)-floor 0.5+quotes[`bid]%cfg`ticksize,1,,Bids sit on the tick grid
@@ -129,7 +145,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,35=count cfgs`nvda_default,1,,Config has 35 parameters (excluding key)
+true,0,0,q,38=count cfgs`nvda_default,1,,Config has 38 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -145,7 +161,7 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,36=count schema,1,,Schema has 36 parameters
+true,0,0,q,39=count schema,1,,Schema has 39 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
