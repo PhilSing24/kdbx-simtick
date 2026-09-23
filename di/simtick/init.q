@@ -317,7 +317,7 @@ qty.mixture:{[n;cfg]
   isround:u<cfg`roundlotshare;
   isblock:(not isround)&u<cfg[`roundlotshare]+cfg`blockshare;
   rq:roundlots (sums roundlotweights) binr n?1.0;
-  bq:`long$0.5+cfg[`blockqty]*exp 0.5*.z.m.rng.normal[n;cfg];
+  bq:floor 0.5+cfg[`blockqty]*exp 0.5*.z.m.rng.normal[n;cfg];
   iq:.z.m.qty.lognormal[n;cfg];
   1|?[isround;rq;?[isblock;bq;iq]]
   };
@@ -406,8 +406,8 @@ quote.generate:{[cfg;times;mids;activity]
   tilt:cfg[`imbalancesignal]*nextmove;
   bidsize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])+tilt-0.5*lv*lv;
   asksize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])-tilt+0.5*lv*lv;
-  bidsize:100*1|`long$0.5+bidsize%100;
-  asksize:100*1|`long$0.5+asksize%100;
+  bidsize:100*1|floor 0.5+bidsize%100;
+  asksize:100*1|floor 0.5+asksize%100;
   ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
   };
 
@@ -509,7 +509,7 @@ auction.prints:{[cfg;quotes;volume]
   closet:(`date$opent)+`timespan$cfg`closingtime;
   mids:0.5*(q0[`bid]+q0`ask;q1[`bid]+q1`ask);
   t:([]time:(opent;closet);price:ts*floor 0.5+mids%ts;
-    qty:`long$0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C;venue:2#cfg`primaryvenue);
+    qty:floor 0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C;venue:2#cfg`primaryvenue);
   select from t where qty>0
   };
 

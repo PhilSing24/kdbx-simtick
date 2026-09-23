@@ -111,10 +111,10 @@ q)result:simtick.run[tickcfg]
 q)trades:result`trade
 q)quotes:result`quote
 
-q)ordcfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!
+q)ordcfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`seed!
   (`ORD001;`NVDA;`BUY;10000;
    2026.08.18D09:35:00.000000000;2026.08.18D09:45:00.000000000;
-   20;`even;0.1;1)
+   20;`even;0.1;0.01;1)
 q)ordresult:simorder.run[ordcfg;trades;quotes]
 q)ordresult`order
 orderid sym  side orderqty starttime                     endtime                       arrivalprice
@@ -235,6 +235,7 @@ Presets should be calibrated as good/bad execution style pairs, matched against 
 | `numfills` | Number of child executions to generate | 20 |
 | `pacing` | `even` (patient), `frontloaded` (rushed) or `arrival` (urgency trajectory under a participation cap) | `` `even `` |
 | `spreadcapture` | 0=fills at mid (best), 1=fills at far touch (worst) | 0.1 |
+| `ticksize` | Minimum price increment; fill prices are rounded to the nearest tick | 0.01 |
 | `seed` | Random seed (`0N` = no seed) | 1 |
 | `urgency` | Arrival pacing only (required there): Almgren-Chriss urgency, kappa x horizon, positive; higher trades earlier | 2 |
 | `maxpct` | Arrival pacing only (required there): participation cap per interval, own / (own + market), between 0 and 1 | 0.2 |
@@ -252,18 +253,18 @@ q)k4unit.moduletest`di.simorder
 
 | Group | Tests | Description |
 |-------|-------|--------------|
-| Validation | 11 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing, spreadcapture out of range, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
+| Validation | 12 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing, spreadcapture out of range, zero ticksize, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
 | Schedule | 5 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
 | Market impact | 18 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, executions priced against the moved market inside the NBBO, eta 0 leaves the market as it is |
-| Pricing | 5 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid |
+| Pricing | 15 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid, spreadcapture 1 exactly at the ask (BUY) and the bid (SELL), every execution inside the quote in force at spreadcapture 0, 0.5 and 1 for both sides, the midpoint of a two-tick spread filled exactly and of a one-tick spread rounded to the nearest tick inside the quote |
 | Order | 4 | Correct schema, single row, positive arrival price |
 | Executions/Run | 15 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty, every execution inside the quote in force, intervals per pacing |
 | Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **86** | |
+| **Total** | **97** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset; order windows are set on that day's date.
 

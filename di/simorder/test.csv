@@ -9,7 +9,7 @@ before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
 before,0,0,q,d:`date$first trades`time,1,,Date of the simulated day
-before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;1),1,,Base order config fixture
+before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;0.01;1),1,,Base order config fixture
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
 before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
@@ -32,6 +32,9 @@ fail,0,0,q,simorder.run[badcfg6;trades;quotes],1,,spreadcapture above 1 throws e
 before,0,0,q,badcfg7:basecfg,1,,Setup bad config for negative spreadcapture
 before,0,0,q,badcfg7[`spreadcapture]:-0.1,1,,Set negative spreadcapture
 fail,0,0,q,simorder.run[badcfg7;trades;quotes],1,,Negative spreadcapture throws error
+before,0,0,q,badcfg12:basecfg,1,,Setup bad config for a zero tick size
+before,0,0,q,badcfg12[`ticksize]:0f,1,,Set ticksize to zero
+fail,0,0,q,simorder.run[badcfg12;trades;quotes],1,,Zero ticksize throws error
 before,0,0,q,badcfg8:basecfg,1,,Setup bad config for a window on another day
 before,0,0,q,badcfg8[`starttime]:badcfg8[`starttime]-30D00:00,1,,Move starttime 30 days earlier
 before,0,0,q,badcfg8[`endtime]:badcfg8[`endtime]-30D00:00,1,,Move endtime 30 days earlier
@@ -147,6 +150,23 @@ before,0,0,q,sellfarcfg[`side]:`SELL,1,,Set side to SELL
 before,0,0,q,sellfarcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
 before,0,0,q,sellfarprices:simorder.pricing[sellfarcfg;quotes;filltimes],1,,Generate SELL far-touch prices
 true,0,0,q,(avg sellfarprices)<avg sellmidprices,1,,SELL: far-touch prices average lower than mid
+before,0,0,q,pidx:0|quotes[`time] bin filltimes,1,,Index of the quote in force at each fill
+true,0,0,q,all 1e-9>abs farprices-quotes[`ask] pidx,1,,BUY with spreadcapture 1 fills exactly at the ask
+true,0,0,q,all 1e-9>abs sellfarprices-quotes[`bid] pidx,1,,SELL with spreadcapture 1 fills exactly at the bid
+before,0,0,q,halfcfg:basecfg,1,,Setup half-spread config
+before,0,0,q,halfcfg[`spreadcapture]:0.5,1,,Set spreadcapture to 0.5
+before,0,0,q,halfprices:simorder.pricing[halfcfg;quotes;filltimes],1,,Generate half-spread prices
+before,0,0,q,inside:{[p;q;i] all (p>=q[`bid] i)&p<=q[`ask] i},1,,Every price inside the quote in force
+true,0,0,q,inside[midprices;quotes;pidx],1,,spreadcapture 0: every execution inside the quote in force
+true,0,0,q,inside[halfprices;quotes;pidx],1,,spreadcapture 0.5: every execution inside the quote in force
+true,0,0,q,inside[farprices;quotes;pidx],1,,spreadcapture 1: every execution inside the quote in force
+true,0,0,q,inside[sellmidprices;quotes;pidx],1,,SELL spreadcapture 0: every execution inside the quote in force
+true,0,0,q,inside[sellfarprices;quotes;pidx],1,,SELL spreadcapture 1: every execution inside the quote in force
+before,0,0,q,tickq:([] time:d+0D09:30 0D09:40; bid:100 100f; ask:100.02 100.01),1,,Two quotes: a two-tick spread until 09:40 then a one-tick spread
+before,0,0,q,tickmid:simorder.pricing[midcfg;tickq;filltimes],1,,Midpoint fills against them
+true,0,0,q,all 1e-9>abs 100.01-tickmid where filltimes<d+0D09:40,1,,On a two-tick spread the midpoint is a whole tick and the fill is exactly there (casting 0.5+x to long put it a tick above)
+true,0,0,q,all 1e-9>abs (tickmid where filltimes>=d+0D09:40)-0.01*floor 0.5+100.005%0.01,1,,On a one-tick spread the fill is the midpoint rounded to the nearest tick
+true,0,0,q,all ((tickmid>=100f)&tickmid<=100.01) where filltimes>=d+0D09:40,1,,On a one-tick spread the rounded midpoint stays inside the quote
 comment,0,0,q,,1,,=== Order Tests ===
 before,0,0,q,ordertbl:simorder.buildorder[basecfg;quotes],1,,Build parent order table
 true,0,0,q,98h=type ordertbl,1,,buildorder returns table

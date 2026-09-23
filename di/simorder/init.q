@@ -33,7 +33,7 @@ validate:{[cfg]
   / returns: cfg if valid, throws error otherwise
 
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
-  reqkeys,:`numfills`pacing`spreadcapture`seed;
+  reqkeys,:`numfills`pacing`spreadcapture`ticksize`seed;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
@@ -43,6 +43,7 @@ validate:{[cfg]
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
   if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
+  if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -125,7 +126,7 @@ sizing:{[cfg;trades;filltimes]
   ];
 
   raw:qty*weights%sum weights;
-  sizes:1|`long$0.5+raw;  / round, then enforce minimum size of 1 per fill
+  sizes:1|floor 0.5+raw;  / round to nearest, then enforce minimum size of 1 per fill
 
   / floor may have pushed the total off orderqty (e.g. a tiny tail weight
   / rounds to 0 then gets floored to 1) - fix by dumping the residual onto
@@ -294,10 +295,10 @@ impact:{[icfg;execs;trades;quotes]
 
 pricing:{[cfg;quotes;filltimes]
   / price each fill relative to the prevailing quote at fill time
-  / cfg: config dict with `side`spreadcapture
+  / cfg: config dict with `side`spreadcapture`ticksize
   / quotes: market quotes table (time-sorted) for the day
   / filltimes: scheduled fill timestamps from .z.m.schedule
-  / returns: list of fill prices, rounded to nearest cent
+  / returns: list of fill prices, rounded to the nearest tick (cfg`ticksize)
   /
   / spreadcapture 0 = fills at mid (best possible, no spread cost)
   / spreadcapture 1 = fills at the far touch (worst - fully crosses the spread)
@@ -313,7 +314,9 @@ pricing:{[cfg;quotes;filltimes]
     cfg[`side]=`SELL; mid-cap*mid-bid;
     '"pricing: unknown side - ",string cfg`side];
 
-  0.01*`long$0.5+prices%0.01
+  / nearest tick: floor of x+0.5, not a cast, since `long$ already rounds
+  / to nearest and casting x+0.5 rounds every price up to the next tick
+  cfg[`ticksize]*floor 0.5+prices%cfg`ticksize
   };
 
 
@@ -458,6 +461,7 @@ schema[`endtime]:         ("P";"execution window end (timestamp)")
 schema[`numfills]:        ("J";"number of child fills to generate")
 schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
 schema[`spreadcapture]:   ("F";"0=fills at mid (best), 1=fills at far touch (worst)")
+schema[`ticksize]:        ("F";"minimum price increment; fill prices are rounded to the nearest tick (0.01 for US equities)")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
 schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
