@@ -187,56 +187,97 @@ q)result`quote
 
 ## Presets
 
-Presets are calibrated for NVDA (NASDAQ large-cap tech):
+Three scenarios for each of three US large caps, NVDA (NASDAQ), XOM and PG (NYSE), named `<sym>_<scenario>`:
 
 | Preset | Description |
 |--------|-------------|
-| `default` | Baseline NVDA trading day |
-| `volatile` | Higher volatility regime (earnings, macro events) |
-| `jumpy` | Jump-diffusion model (sudden news, guidance) |
+| `nvda_default`, `xom_default`, `pg_default` | Baseline trading day |
+| `nvda_volatile`, `xom_volatile`, `pg_volatile` | Higher volatility and clustering regime (earnings, macro events) |
+| `nvda_jumpy`, `xom_jumpy`, `pg_jumpy` | Jump-diffusion model (sudden news, guidance), with bursts after each jump |
+
+The three names differ in `baseintensity`, `startprice`, `spreadticks` and `primaryvenue`.
 
 ## Configuration Parameters
+
+All keys of the schema (`simtick.describe[]` returns the same list), with the `nvda_default` preset's values.
+
+**Session**
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `sym` | Ticker symbol | `` `NVDA `` |
-| `baseintensity` | Base arrival rate (trades/sec) | 1.0 |
-| `alpha` | Hawkes excitation (0 = Poisson) | 0.3 |
-| `beta` | Hawkes decay (must be > alpha) | 1.0 |
-| `vol` | Annualized volatility | 0.45 |
+| `tradingdate` | Simulation date | 2026.08.18 |
+| `openingtime`, `closingtime` | Session open and close (minute) | 09:30, 16:00 |
+| `startprice` | Price at the open | 215.00 |
+| `seed` | Random seed (`0N` = no seed) | 42 |
+| `rngmodel` | Random number source (`pseudo`) | `pseudo` |
+| `tradingdays` | Trading days per year, for annualizing `vol` and `drift` | 252 |
+
+**Price path**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
 | `drift` | Annualized drift | 0.05 |
+| `vol` | Annualized volatility | 0.45 |
+| `pricemodel` | `gbm` or `jump` | `gbm` |
+| `jumpintensity` | Jump model: jumps per day | 2.0 |
+| `jumpmean`, `jumpvol` | Jump model: mean and standard deviation of the log jump size | 0.0, 0.02 |
+| `jumpburst` | Extra trade immigrants seeded by each jump, each with its usual cascade | 3000 |
+| `jumpburstminutes` | Mean delay in minutes of those immigrants after the jump | 1.0 |
+| `clock` | `transaction` (variance per quote update: vol follows activity) or `calendar` (variance per second: flat vol) | `transaction` |
+
+**Arrivals**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `baseintensity` | Immigrant arrival rate before the profile and the cascades (trades/sec) | 8.25 |
+| `alpha` | Hawkes excitation (0 = Poisson) | 0.3 |
+| `beta` | Hawkes decay (must be > alpha); the branching ratio is alpha/beta | 1.0 |
 | `profile` | Intraday intensity weights, one per half hour, space-separated in the CSV | `1.6 1.2 1.0 ... 1.8` |
 | `openauctionpct` | Opening auction print as a fraction of the continuous volume | 0.01 |
 | `closeauctionpct` | Closing auction print as a fraction of the continuous volume | 0.08 |
-| `pricemodel` | `gbm` or `jump` | `gbm` |
-| `clock` | `transaction` (variance per quote update: vol follows activity) or `calendar` (variance per second: flat vol) | `transaction` |
-| `jumpburst` | Extra trade immigrants seeded by each jump, each with its usual cascade | 3000 |
-| `jumpburstminutes` | Mean delay in minutes of those immigrants after the jump | 1.0 |
+
+**Trade sizes**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
 | `qtymodel` | `mixture` (round lots, blocks, irregular lots), `lognormal` or `constant` | `mixture` |
 | `avgqty` | Average trade size (of the irregular lots under `mixture`) | 60 |
+| `qtyvol` | Log volatility of the lognormal sizes (the irregular lots under `mixture`) | 0.9 |
 | `roundlotshare` | Mixture: share of trades that are round lots of 100, 200, 300, 500 or 1000 | 0.35 |
 | `blockshare` | Mixture: share of trades that are blocks | 0.002 |
 | `blockqty` | Mixture: median block size | 10000 |
-| `offexchangeshare` | Share of trades printed off-exchange (`TRF`) | 0.42 |
-| `primaryvenue` | Primary listing venue, where the auction prints are | `XNAS` |
-| `seed` | Random seed (`0N` = no seed) | `42` |
+
+**Quotes**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `generatequotes` | Return the quotes as well as the trades (they are always generated) | 1b |
+| `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
 | `spreadticks` | Mean spread in ticks through the day (1 tick plus a Poisson excess) | 1.15 |
 | `spreadopenmult` | Spread multiplier at the open, decaying to the midday one | 2.5 |
+| `spreadmidmult` | Spread multiplier through the day | 1.0 |
 | `spreadclosemult` | Spread multiplier at the close, reached by the same decay | 0.9 |
 | `spreaddecayminutes` | Minutes over which the open and close multipliers decay toward the midday one | 15 |
 | `spreadactivity` | Exponent of local quote activity (trailing minute over its expected level) on the mean spread; 0 = none | 0.5 |
-| `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
 | `quotespertrade` | Quote updates per trade on average (quotes arrive on their own Hawkes clock at this multiple of the trade intensity) | 4 |
 | `quotetradelink` | Share of the quote updates seeded by the trades, at Exp(beta) delays after them | 0.5 |
+| `avgquotesize` | Average quote size, in shares | 500 |
 | `quotesizevol` | Log volatility of quote sizes, lognormal around `avgquotesize` in round lots of 100 | 0.6 |
 | `imbalancesignal` | Log tilt of the sizes toward the side of the next mid move (the book leans, weakly, toward what comes next) | 0.15 |
+
+**Trades against the quotes**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
 | `sidepersistence` | Probability a trade's aggressor side repeats the previous one (0.5 = independent) | 0.7 |
 | `midpointshare` | Share of trades printing at the midpoint | 0.12 |
 | `improvementshare` | Share of trades printing a tenth of a tick inside the touch | 0.08 |
-| `impactticks` | Ticks an average-size trade moves the mid in its direction, scaled by sqrt(qty/avgqty); 0 turns impact off | 0.25 |
+| `offexchangeshare` | Share of trades printed off-exchange (`TRF`) | 0.42 |
+| `primaryvenue` | Primary listing venue, where the auction prints are | `XNAS` |
+| `impactticks` | Ticks an average-size trade moves the mid in its direction, scaled by sqrt(qty / mean size); 0 turns impact off | 0.25 |
 | `impacthalflife` | Seconds over which the transient part of a trade's impact halves | 30 |
 | `impactpermanent` | Share of a trade's impact that never decays | 0.3 |
-| `generatequotes` | Generate quotes flag | 0b |
 
 ## Testing
 

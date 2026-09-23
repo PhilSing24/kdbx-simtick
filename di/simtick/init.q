@@ -739,7 +739,7 @@ loadconfig:{[filepath]
   /
   / Example:
   /   cfgs:loadconfig`:di/simtick/presets.csv
-  /   cfg:cfgs`default
+  /   cfg:cfgs`nvda_default
   /   run[cfg]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
   / the type string is applied by column position, so the header is checked
