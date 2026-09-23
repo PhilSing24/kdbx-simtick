@@ -48,7 +48,7 @@ q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
 / Run multi-day simulation (in-memory)
 q)trades:simcalendar.run[cfg;calendar;(::)]
 q)cols trades
-`sym`time`price`qty
+`sym`time`seq`price`qty`aggressor`cond`venue
 q)count trades
 180778
 ```
@@ -122,6 +122,8 @@ Day 1: starts at cfg[`startprice], ends at P1
 Day 2: starts at P1, ends at P2
 Day 3: starts at P2, ends at P3
 ```
+
+Each day's closing print is the next day's price at the open, from which that day's first trade diffuses over the interval to its time (as in `di.simtick`), so the first print of a day is close to, not equal to, the last print of the day before.
 
 ### Disk Persistence
 

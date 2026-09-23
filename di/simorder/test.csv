@@ -9,7 +9,7 @@ before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
 before,0,0,q,d:`date$first trades`time,1,,Date of the simulated day
-before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;1),1,,Base order config fixture
+before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;0.01;1),1,,Base order config fixture
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
 before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
@@ -32,6 +32,22 @@ fail,0,0,q,simorder.run[badcfg6;trades;quotes],1,,spreadcapture above 1 throws e
 before,0,0,q,badcfg7:basecfg,1,,Setup bad config for negative spreadcapture
 before,0,0,q,badcfg7[`spreadcapture]:-0.1,1,,Set negative spreadcapture
 fail,0,0,q,simorder.run[badcfg7;trades;quotes],1,,Negative spreadcapture throws error
+before,0,0,q,badcfg12:basecfg,1,,Setup bad config for a zero tick size
+before,0,0,q,badcfg12[`ticksize]:0f,1,,Set ticksize to zero
+fail,0,0,q,simorder.run[badcfg12;trades;quotes],1,,Zero ticksize throws error
+before,0,0,q,badcfg8:basecfg,1,,Setup bad config for a window on another day
+before,0,0,q,badcfg8[`starttime]:badcfg8[`starttime]-30D00:00,1,,Move starttime 30 days earlier
+before,0,0,q,badcfg8[`endtime]:badcfg8[`endtime]-30D00:00,1,,Move endtime 30 days earlier
+fail,0,0,q,simorder.run[badcfg8;trades;quotes],1,,Window on a day the market data does not cover throws error
+before,0,0,q,badcfg9:basecfg,1,,Setup bad config for a window spanning two days
+before,0,0,q,badcfg9[`endtime]:badcfg9[`endtime]+1D00:00,1,,Move endtime to the next day
+fail,0,0,q,simorder.run[badcfg9;trades;quotes],1,,Window spanning two days throws error
+before,0,0,q,badcfg10:basecfg,1,,Setup bad config for a symbol absent from the market data
+before,0,0,q,badcfg10[`sym]:`XOM,1,,Set a symbol the tables do not hold
+fail,0,0,q,simorder.run[badcfg10;trades;quotes],1,,Symbol absent from the market data throws error
+before,0,0,q,badcfg11:basecfg,1,,Setup bad config for a start before the first quote
+before,0,0,q,badcfg11[`starttime]:d+0D09:00,1,,Set starttime before the open
+fail,0,0,q,simorder.run[badcfg11;trades;quotes],1,,Start before the first quote of the day throws error
 comment,0,0,q,,1,,=== Schedule Tests ===
 before,0,0,q,filltimes:simorder.schedule[basecfg],1,,Generate even-pacing fill schedule
 true,0,0,q,(count filltimes)=basecfg`numfills,1,,Schedule returns numfills timestamps
@@ -99,7 +115,8 @@ true,0,0,q,(lateshift 0)=0.5,1,,The taper halves a move 5 minutes before the clo
 before,0,0,q,sig:simorder.dailyvol quotes,1,,Daily volatility of the fixture
 true,0,0,q,(sig>0) & sig<1,1,,Daily volatility is a positive fraction
 before,0,0,q,bigres:simorder.run[bigcfg;trades;quotes],1,,Run the large arrival order
-before,0,0,q,impexecs:update interval:0D00:00:30 from `time`side`qty#bigres`executions,1,,Its executions with their 30-second intervals
+before,0,0,q,impexecs:`time`side`qty`interval#bigres`executions,1,,Its executions with the intervals they were sized in
+true,0,0,q,all 0D00:00:30=impexecs`interval,1,,Arrival pacing: 20 fills over 10 minutes carry 30-second intervals
 true,0,0,q,all 0<simorder.childimpact[icfg;impexecs;trades;sig],1,,Every child has a positive impact
 before,0,0,q,moved:simorder.impact[icfg;impexecs;trades;quotes],1,,Move the market by the large order's impact
 before,0,0,q,mq:moved`quotes,1,,Moved quotes
@@ -133,6 +150,23 @@ before,0,0,q,sellfarcfg[`side]:`SELL,1,,Set side to SELL
 before,0,0,q,sellfarcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
 before,0,0,q,sellfarprices:simorder.pricing[sellfarcfg;quotes;filltimes],1,,Generate SELL far-touch prices
 true,0,0,q,(avg sellfarprices)<avg sellmidprices,1,,SELL: far-touch prices average lower than mid
+before,0,0,q,pidx:0|quotes[`time] bin filltimes,1,,Index of the quote in force at each fill
+true,0,0,q,all 1e-9>abs farprices-quotes[`ask] pidx,1,,BUY with spreadcapture 1 fills exactly at the ask
+true,0,0,q,all 1e-9>abs sellfarprices-quotes[`bid] pidx,1,,SELL with spreadcapture 1 fills exactly at the bid
+before,0,0,q,halfcfg:basecfg,1,,Setup half-spread config
+before,0,0,q,halfcfg[`spreadcapture]:0.5,1,,Set spreadcapture to 0.5
+before,0,0,q,halfprices:simorder.pricing[halfcfg;quotes;filltimes],1,,Generate half-spread prices
+before,0,0,q,inside:{[p;q;i] all (p>=q[`bid] i)&p<=q[`ask] i},1,,Every price inside the quote in force
+true,0,0,q,inside[midprices;quotes;pidx],1,,spreadcapture 0: every execution inside the quote in force
+true,0,0,q,inside[halfprices;quotes;pidx],1,,spreadcapture 0.5: every execution inside the quote in force
+true,0,0,q,inside[farprices;quotes;pidx],1,,spreadcapture 1: every execution inside the quote in force
+true,0,0,q,inside[sellmidprices;quotes;pidx],1,,SELL spreadcapture 0: every execution inside the quote in force
+true,0,0,q,inside[sellfarprices;quotes;pidx],1,,SELL spreadcapture 1: every execution inside the quote in force
+before,0,0,q,tickq:([] time:d+0D09:30 0D09:40; bid:100 100f; ask:100.02 100.01),1,,Two quotes: a two-tick spread until 09:40 then a one-tick spread
+before,0,0,q,tickmid:simorder.pricing[midcfg;tickq;filltimes],1,,Midpoint fills against them
+true,0,0,q,all 1e-9>abs 100.01-tickmid where filltimes<d+0D09:40,1,,On a two-tick spread the midpoint is a whole tick and the fill is exactly there (casting 0.5+x to long put it a tick above)
+true,0,0,q,all 1e-9>abs (tickmid where filltimes>=d+0D09:40)-0.01*floor 0.5+100.005%0.01,1,,On a one-tick spread the fill is the midpoint rounded to the nearest tick
+true,0,0,q,all ((tickmid>=100f)&tickmid<=100.01) where filltimes>=d+0D09:40,1,,On a one-tick spread the rounded midpoint stays inside the quote
 comment,0,0,q,,1,,=== Order Tests ===
 before,0,0,q,ordertbl:simorder.buildorder[basecfg;quotes],1,,Build parent order table
 true,0,0,q,98h=type ordertbl,1,,buildorder returns table
@@ -144,7 +178,10 @@ before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run full order sim
 true,0,0,q,99h=type ordresult,1,,run returns a dict
 true,0,0,q,`order`executions~key ordresult,1,,Dict has order and executions keys
 before,0,0,q,executions:ordresult`executions,1,,Extract executions table
-true,0,0,q,`orderid`execid`sym`side`time`price`qty~cols executions,1,,Executions table has correct columns
+true,0,0,q,`orderid`execid`sym`side`time`price`qty`interval~cols executions,1,,Executions table has correct columns
+true,0,0,q,all (`timespan$`long$(`long$basecfg[`endtime]-basecfg`starttime)%21)=executions`interval,1,,Even pacing: every execution carries the schedule's spacing as its interval
+before,0,0,q,exq:aj[`time;executions;`time`bid`ask#quotes],1,,Executions with the quote in force at their time
+true,0,0,q,all (exq[`price]>=exq`bid)&exq[`price]<=exq`ask,1,,Every execution is priced inside the quote in force
 true,0,0,q,(sum executions`qty)=basecfg`orderqty,1,,Executions quantities sum exactly to orderqty
 true,0,0,q,(asc executions`time)~executions`time,1,,Executions sorted by time
 true,0,0,q,all executions[`time]>basecfg`starttime,1,,All executions after starttime
@@ -154,8 +191,26 @@ true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
 before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order simulation (frontloaded pacing)
 before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
+true,0,0,q,(sum frontexecutions`interval)=(last frontexecutions`time)-frontcfg`starttime,1,,Frontloaded pacing: the intervals tile the window from starttime to the last fill
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
+comment,0,0,q,,1,,=== Config Tests ===
+before,0,0,q,ordcfgs:simorder.loadconfig`:di/simorder/presets.csv,1,,Load the order presets
+true,0,0,q,`good`bad`arrival~exec name from ordcfgs,1,,The three presets load
+before,0,0,q,fullordcfgs:0!ordcfgs,1,,Presets as a plain table
+before,0,0,q,`:/tmp/simorder_reordered.csv 0: csv 0: (reverse cols fullordcfgs) xcols fullordcfgs,1,,Presets written with the columns in reverse order
+true,0,0,q,(simorder.loadconfig`:/tmp/simorder_reordered.csv)~ordcfgs,1,,Columns in any order load to the same presets
+before,0,0,q,`:/tmp/simorder_missing.csv 0: csv 0: delete side from fullordcfgs,1,,Presets written without the side column
+fail,0,0,q,simorder.loadconfig`:/tmp/simorder_missing.csv,1,,A missing column throws error instead of parsing values into the wrong types
+before,0,0,q,`:/tmp/simorder_unknown.csv 0: csv 0: update foo:1 from fullordcfgs,1,,Presets written with an extra column
+fail,0,0,q,simorder.loadconfig`:/tmp/simorder_unknown.csv,1,,An unknown column throws error
+after,0,0,q,system"rm -f /tmp/simorder_reordered.csv /tmp/simorder_missing.csv /tmp/simorder_unknown.csv",1,,Clean up preset files
+comment,0,0,q,,1,,=== Mixed Market Tests ===
+before,0,0,q,xomresult:simtick.run[cfgs`xom_default],1,,Generate a second instrument for the same day
+before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table
+before,0,0,q,mixedquotes:`time xasc raze(quotes;xomresult`quote),1,,Quotes of both instruments in one table
+true,0,0,q,(simorder.run[basecfg;mixedtrades;mixedquotes])~simorder.run[basecfg;trades;quotes],1,,An order against mixed-instrument tables matches the single-instrument run
+true,0,0,q,(simorder.marketday[basecfg;mixedquotes;"quotes"])~quotes,1,,marketday returns the order's instrument and day only
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run

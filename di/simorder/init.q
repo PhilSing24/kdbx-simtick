@@ -33,15 +33,17 @@ validate:{[cfg]
   / returns: cfg if valid, throws error otherwise
 
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
-  reqkeys,:`numfills`pacing`spreadcapture`seed;
+  reqkeys,:`numfills`pacing`spreadcapture`ticksize`seed;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
+  if[(`date$cfg`starttime)<>`date$cfg`endtime; '"validate: starttime and endtime must fall on the same day"];
   if[0>=cfg`orderqty; '"validate: orderqty must be positive"];
   if[0>=cfg`numfills; '"validate: numfills must be positive"];
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
   if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
+  if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -124,7 +126,7 @@ sizing:{[cfg;trades;filltimes]
   ];
 
   raw:qty*weights%sum weights;
-  sizes:1|`long$0.5+raw;  / round, then enforce minimum size of 1 per fill
+  sizes:1|floor 0.5+raw;  / round to nearest, then enforce minimum size of 1 per fill
 
   / floor may have pushed the total off orderqty (e.g. a tiny tail weight
   / rounds to 0 then gets floored to 1) - fix by dumping the residual onto
@@ -293,10 +295,10 @@ impact:{[icfg;execs;trades;quotes]
 
 pricing:{[cfg;quotes;filltimes]
   / price each fill relative to the prevailing quote at fill time
-  / cfg: config dict with `side`spreadcapture
+  / cfg: config dict with `side`spreadcapture`ticksize
   / quotes: market quotes table (time-sorted) for the day
   / filltimes: scheduled fill timestamps from .z.m.schedule
-  / returns: list of fill prices, rounded to nearest cent
+  / returns: list of fill prices, rounded to the nearest tick (cfg`ticksize)
   /
   / spreadcapture 0 = fills at mid (best possible, no spread cost)
   / spreadcapture 1 = fills at the far touch (worst - fully crosses the spread)
@@ -312,7 +314,9 @@ pricing:{[cfg;quotes;filltimes]
     cfg[`side]=`SELL; mid-cap*mid-bid;
     '"pricing: unknown side - ",string cfg`side];
 
-  0.01*`long$0.5+prices%0.01
+  / nearest tick: floor of x+0.5, not a cast, since `long$ already rounds
+  / to nearest and casting x+0.5 rounds every price up to the next tick
+  cfg[`ticksize]*floor 0.5+prices%cfg`ticksize
   };
 
 
@@ -340,12 +344,33 @@ buildorder:{[cfg;quotes]
     arrivalprice:enlist arrivalprice)
   };
 
+intervals:{[cfg;filltimes]
+  / the length of market the child was sized against, one timespan per fill,
+  / which impact reads as the interval centred on the child (execs column
+  / `interval, see childimpact)
+  / cfg: config dict with `starttime`endtime`numfills`pacing
+  / filltimes: scheduled fill timestamps from .z.m.schedule
+  / returns: timespan per fill
+  /
+  / pacing `even: the schedule's spacing, window/(numfills+1)
+  / pacing `arrival: the sizing interval, window/numfills
+  / pacing `frontloaded: each child's bucket, from the previous fill (or
+  /   starttime) to its own time
+  dur:cfg[`endtime]-cfg`starttime;
+  n:count filltimes;
+  $[cfg[`pacing]=`even; n#`timespan$`long$dur%n+1;
+    cfg[`pacing]=`arrival; n#`timespan$`long$dur%n;
+    cfg[`pacing]=`frontloaded; filltimes-(enlist cfg`starttime),-1_filltimes;
+    '"intervals: unknown pacing - ",string cfg`pacing]
+  };
+
 buildexecutions:{[cfg;trades;quotes]
   / build the child fills table
   / cfg: order config dict
   / trades: market trades table for the day
   / quotes: market quotes table for the day
-  / returns: fills table, one row per child fill
+  / returns: fills table, one row per child fill, with the interval each was
+  /   sized against (what impact needs, see intervals)
   filltimes:.z.m.schedule[cfg];
   sizes:.z.m.sizing[cfg;trades;filltimes];
   prices:.z.m.pricing[cfg;quotes;filltimes];
@@ -356,7 +381,8 @@ buildexecutions:{[cfg;trades;quotes]
     side:cfg[`side];
     time:filltimes;
     price:prices;
-    qty:sizes)
+    qty:sizes;
+    interval:.z.m.intervals[cfg;filltimes])
   };
 
 
@@ -364,12 +390,33 @@ buildexecutions:{[cfg;trades;quotes]
 / MAIN ENTRY POINT
 / ============================================================
 
+marketday:{[cfg;t;name]
+  / the rows of a market table for the order's instrument and day
+  / cfg: order config dict with `sym`starttime
+  / t: trades or quotes table with `sym`time
+  / name: table name for error context
+  / returns: rows for cfg`sym on the day of starttime, time-sorted; throws if none
+  d:`date$cfg`starttime;
+  r:`time xasc select from t where sym=cfg`sym,d=`date$time;
+  if[0=count r;
+    '"run: no ",name," for ",string[cfg`sym]," on ",string[d]," (",name," cover ",
+      (", " sv string distinct t`sym)," on ",(", " sv string distinct `date$t`time),")"];
+  r
+  };
+
+
 run:{[cfg;trades;quotes]
   / main simulation entry point
   / cfg: order configuration dictionary (typically loaded via loadconfig)
-  / trades: market trades table for the day (from di.simtick/di.simcalendar)
-  / quotes: market quotes table for the day (from di.simtick/di.simcalendar, generatequotes:1b)
+  / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simcalendar)
+  / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simcalendar, generatequotes:1b)
+  /   both may hold other instruments and days; only the order's are used
   / returns: dict with `order`executions
+  /
+  / throws when the tables have no rows for the order's sym on the day of
+  / starttime, or when starttime precedes the first quote of that day (no
+  / quote in force for the arrival price). Without these checks an order on
+  / another day was priced silently off the first or last quote of the day.
   /
   / Example:
   /   cfg:first loadconfig`:presets.csv
@@ -378,8 +425,16 @@ run:{[cfg;trades;quotes]
   /   ordresult`order  / 1-row order table
   /   ordresult`executions  / child executions table
   cfg:.z.m.validate[cfg];
-  .z.m.val.hascols[trades;`time`price`qty;"run"];
-  .z.m.val.hascols[quotes;`time`bid`ask;"run"];
+  .z.m.val.hascols[trades;`sym`time`price`qty;"run"];
+  .z.m.val.hascols[quotes;`sym`time`bid`ask;"run"];
+
+  / keep only the order's instrument and day, so tables holding several
+  / instruments or days (di.simcalendar in memory, di.simbasket) can be
+  / passed whole, and throw when the market does not cover the order
+  trades:.z.m.marketday[cfg;trades;"trades"];
+  quotes:.z.m.marketday[cfg;quotes;"quotes"];
+  if[cfg[`starttime]<first quotes`time;
+    '"run: starttime ",string[cfg`starttime]," is before the first quote at ",string first quotes`time];
 
   if[not null cfg`seed; system "S ",string cfg`seed];
 
@@ -406,6 +461,7 @@ schema[`endtime]:         ("P";"execution window end (timestamp)")
 schema[`numfills]:        ("J";"number of child fills to generate")
 schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
 schema[`spreadcapture]:   ("F";"0=fills at mid (best), 1=fills at far touch (worst)")
+schema[`ticksize]:        ("F";"minimum price increment; fill prices are rounded to the nearest tick (0.01 for US equities)")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
 schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
@@ -423,7 +479,16 @@ loadconfig:{[filepath]
   /   cfg:cfgs`good
   /   run[cfg;trades;quotes]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  1!(.z.m.csvtypes;enlist csv) 0: filepath
+  / the type string is applied by column position, so the header is checked
+  / against the schema first: any column order loads, a missing, unknown or
+  / repeated column throws instead of parsing values into the wrong types
+  hdr:`$csv vs first read0 filepath;
+  expected:key .z.m.schema;
+  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
+  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
+  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns - ",", " sv string distinct hdr where 1<count each group[hdr] hdr];
+  types:raze first each .z.m.schema hdr;
+  1!expected xcols (types;enlist csv) 0: filepath
   };
 
 describe:{[]
@@ -434,4 +499,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;schedule;sizing;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;marketday;schedule;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])

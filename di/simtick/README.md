@@ -11,30 +11,33 @@ Realistic synthetic tick data is valuable for many quantitative finance workflow
 The module is designed for **progressive complexity**: configure from simple to sophisticated scenarios by adjusting parameters:
 
 - **Baseline**: Set `alpha:0` and equal multipliers for basic Poisson arrivals with GBM prices
-- **Add seasonality**: Vary `openmult`, `midmult`, `closemult` for U-shape or J-shape intraday patterns
+- **Add seasonality**: Set `profile` to the half-hour weights of the intraday pattern (U-shape, J-shape, or anything measured)
 - **Add clustering**: Increase `alpha` to enable Hawkes self-excitation for realistic trade bursts
 - **Add jumps**: Switch to `pricemodel:jump` for discontinuous price moves
-- **Add quotes**: Set `generatequotes:1b` for bid-ask spread dynamics
+- **Add quotes**: Set `generatequotes:1b` to return the quotes as well as the trades (they are always generated, since trades execute against them)
 
 This flexibility allows the same module to serve quick prototypes and sophisticated stress-testing scenarios.
 
 ### Key Features
 
 - **Trade clustering** — real trades arrive in bursts, not uniformly. We use a Hawkes process to model this self-exciting behavior.
-- **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
-- **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities.
-- **Microstructure** — bid-ask spreads that widen at open/close, quote updates between trades.
-- **Realistic pricing** — trade prices and quote bid/ask rounded to the nearest cent (US equity tick size).
+- **Intraday seasonality** — trading activity is high at open and close, low at midday. The `profile` gives one weight per half hour, so a flat midday and a spike in the last minutes are both expressible, and the opening and closing auction prints frame the session.
+- **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities. The diffusion runs on a transaction clock by default: each quote update carries the same variance, so volatility follows activity, U-shaped through the day and higher in bursts, as in a market (`clock:calendar` keeps the flat, time-based variance).
+- **Coupled activity, volatility and spread** — a jump seeds a burst of trades and quotes that fades over minutes (`jumpburst`, `jumpburstminutes`), and the spread widens with local activity (`spreadactivity`), so volatility, volume and spread rise together.
+- **Microstructure** — quotes come first, on their own clock: the price path is the mid, the spread is a whole number of ticks (one most of the day, wider in the first minutes after the open), and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Quote updates partly follow the trades, and quote sizes are lognormal round lots whose imbalance leans toward the next mid move. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
+- **Order-flow impact** — a propagator: each signed trade moves the mid in its direction by `impactticks` ticks scaled by its size, a share `impactpermanent` of which stays while the rest halves every `impacthalflife` seconds. With persistent aggressor signs the tape shows price impact and partial reversion after a trade, what markout curves measure.
+- **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
+- **Tape attributes** — trade sizes as printed on a US tape (round lots, blocks and odd lots under `qtymodel:mixture`), a condition flag (`R` regular, `I` odd lot, `O` and `C` auction prints), a venue (lit MIC codes by share, or `TRF` for off-exchange prints, which is where midpoint and improved prints go), and one sequence number across quotes and trades. The quotes are one consolidated top of book, the NBBO; venues appear on trades only.
 
 ### Market Focus
 
 The default presets and parameter examples are calibrated for **US equity markets** (NVDA on NASDAQ). Key characteristics:
 
-- High liquidity at open and close, quiet midday (J-shape or U-shape)
-- Spreads wider at open/close, tighter at midday
+- High liquidity at open and close, quiet midday (J-shape or U-shape), with auction prints at the open and the close
+- Spreads widest in the first minutes after the open, one tick most of the day, tightest at the close
 - Arrival rates and volatility consistent with large-cap tech stocks
 
-**Futures markets** have different microstructure — most liquid in the last 5-10 minutes before close with the tightest spreads, and wider spreads at midday. The parameter system is flexible enough to approximate futures behavior by tuning `openmult`, `midmult`, `closemult`, `spreadopenmult`, `spreadmidmult`, `spreadclosemult`. However, the sharp pre-close liquidity spike typical of futures cannot be fully captured with the current cosine interpolation — the shape function smooths transitions gradually rather than modeling sudden discontinuities.
+**Futures markets** have different microstructure — most liquid in the last 5-10 minutes before close with the tightest spreads, and wider spreads at midday. A `profile` with a large last weight and the spread multipliers approximate that; the auction percentages can be set to zero.
 
 ### Use Cases
 
@@ -48,13 +51,17 @@ The default presets and parameter examples are calibrated for **US equity market
 
 ### Limitations
 
-This module emphasizes **trade generation** and derives quotes in a simplified manner. Quotes are constructed *after* trades to ensure consistency with executed prices. This approach is computationally efficient but inverts the true market causality where quotes exist first and trades result from order matching.
+Quotes are generated first and trades execute against the quote in force, so the causality of a real market is respected at the top of the book. The model stays simplified beyond that:
+
+- **One-way link between the clocks** — a share `quotetradelink` of the quote updates is seeded by the trades, so a burst of trades brings a burst of quotes; quotes do not in turn excite trades
+- **Quotes per trade** — the presets use 4 to keep a day's data small; a real large cap shows 10 to 30, and `quotespertrade` sets it
+- **No depth** — only the touch is modelled: no queue, no queue position, no book beyond the best bid and ask
 
 **Not suitable for:**
 
 - **Advanced Market-making research** — no order book queue dynamics, no queue position modeling
 - **Execution optimization** — no realistic fill probability or market impact simulation
-- **HFT strategy development** — quote generation is not causally realistic
+- **HFT strategy development** — no depth, independent quote and trade clocks
 
 For these advanced use cases, a full limit order book simulator with queue dynamics would be preferred.
 
@@ -109,9 +116,9 @@ Correlated price paths across assets are essential for:
 
 Simulations are driven by a configuration dictionary containing all model parameters (arrival rates, volatility, spread settings, etc.). Rather than building these manually, the module reads configurations from a **CSV file**.
 
-A ready-to-use file `presets.csv` is included with three market scenarios calibrated for NVDA (default, volatile, jumpy). You can:
+A ready-to-use file `presets.csv` is included with three market scenarios (default, volatile, jumpy) for each of NVDA, XOM and PG. Every knob of a run is a column of the preset, including the tick size and the quote-generation settings, so a preset describes a run fully. `loadconfig` checks the header against the schema: columns may come in any order, and a missing, unknown or repeated column throws rather than parsing values into the wrong types. You can:
 
-- Use presets directly: `cfg:cfgs`default`
+- Use presets directly: `cfg:cfgs`nvda_default`
 - Modify values for specific runs: `cfg[`vol]:0.65`
 - Add new rows to define custom scenarios
 - Create your own CSV following the same schema
@@ -150,13 +157,13 @@ q)simtick:use`di.simtick
 ```q
 q)simtick:use`di.simtick
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
-q)cfg:cfgs`default
+q)cfg:cfgs`nvda_default
 q)simtick.run[cfg]
-sym  time                          price    qty
------------------------------------------------
-NVDA 2026.01.20D09:30:02.487640474 181.90   43
-NVDA 2026.01.20D09:30:03.846514899 182.01   32
-NVDA 2026.01.20D09:30:04.444929571 182.05   78
+sym  time                          seq price   qty    aggressor cond venue
+--------------------------------------------------------------------------
+NVDA 2026.08.18D09:30:00.000000000 2   215     424347           O    XNAS
+NVDA 2026.08.18D09:30:00.100212953 7   215.011 7      S         I    TRF
+NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 ...
 ```
 
@@ -198,16 +205,38 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `beta` | Hawkes decay (must be > alpha) | 1.0 |
 | `vol` | Annualized volatility | 0.45 |
 | `drift` | Annualized drift | 0.05 |
-| `transitionpoint` | Intraday shape (0.3=J, 0.5=U) | 0.3 |
+| `profile` | Intraday intensity weights, one per half hour, space-separated in the CSV | `1.6 1.2 1.0 ... 1.8` |
+| `openauctionpct` | Opening auction print as a fraction of the continuous volume | 0.01 |
+| `closeauctionpct` | Closing auction print as a fraction of the continuous volume | 0.08 |
 | `pricemodel` | `gbm` or `jump` | `gbm` |
-| `qtymodel` | `lognormal` or `constant` | `lognormal` |
-| `avgqty` | Average trade size | 100 |
+| `clock` | `transaction` (variance per quote update: vol follows activity) or `calendar` (variance per second: flat vol) | `transaction` |
+| `jumpburst` | Extra trade immigrants seeded by each jump, each with its usual cascade | 3000 |
+| `jumpburstminutes` | Mean delay in minutes of those immigrants after the jump | 1.0 |
+| `qtymodel` | `mixture` (round lots, blocks, irregular lots), `lognormal` or `constant` | `mixture` |
+| `avgqty` | Average trade size (of the irregular lots under `mixture`) | 60 |
+| `roundlotshare` | Mixture: share of trades that are round lots of 100, 200, 300, 500 or 1000 | 0.35 |
+| `blockshare` | Mixture: share of trades that are blocks | 0.002 |
+| `blockqty` | Mixture: median block size | 10000 |
+| `offexchangeshare` | Share of trades printed off-exchange (`TRF`) | 0.42 |
+| `primaryvenue` | Primary listing venue, where the auction prints are | `XNAS` |
 | `seed` | Random seed (`0N` = no seed) | `42` |
-| `basespread` | Base bid-ask spread (fraction) | 0.0001 |
+| `spreadticks` | Mean spread in ticks through the day (1 tick plus a Poisson excess) | 1.15 |
+| `spreadopenmult` | Spread multiplier at the open, decaying to the midday one | 2.5 |
+| `spreadclosemult` | Spread multiplier at the close, reached by the same decay | 0.9 |
+| `spreaddecayminutes` | Minutes over which the open and close multipliers decay toward the midday one | 15 |
+| `spreadactivity` | Exponent of local quote activity (trailing minute over its expected level) on the mean spread; 0 = none | 0.5 |
+| `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
+| `quotespertrade` | Quote updates per trade on average (quotes arrive on their own Hawkes clock at this multiple of the trade intensity) | 4 |
+| `quotetradelink` | Share of the quote updates seeded by the trades, at Exp(beta) delays after them | 0.5 |
+| `quotesizevol` | Log volatility of quote sizes, lognormal around `avgquotesize` in round lots of 100 | 0.6 |
+| `imbalancesignal` | Log tilt of the sizes toward the side of the next mid move (the book leans, weakly, toward what comes next) | 0.15 |
+| `sidepersistence` | Probability a trade's aggressor side repeats the previous one (0.5 = independent) | 0.7 |
+| `midpointshare` | Share of trades printing at the midpoint | 0.12 |
+| `improvementshare` | Share of trades printing a tenth of a tick inside the touch | 0.08 |
+| `impactticks` | Ticks an average-size trade moves the mid in its direction, scaled by sqrt(qty/avgqty); 0 turns impact off | 0.25 |
+| `impacthalflife` | Seconds over which the transient part of a trade's impact halves | 30 |
+| `impactpermanent` | Share of a trade's impact that never decays | 0.3 |
 | `generatequotes` | Generate quotes flag | 0b |
-| `openmult` | Opening intensity multiplier | 1.5 |
-| `midmult` | Midday intensity multiplier | 0.5 |
-| `closemult` | Closing intensity multiplier | 3.0 |
 
 ## Testing
 
@@ -220,17 +249,17 @@ q)k4unit.moduletest`di.simtick
 
 | Group | Tests | Description |
 |-------|-------|-------------|
-| Validation | 7 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers, zero/negative vol, zero/negative startprice) |
-| Arrivals | 5 | Output properties: non-empty, sorted, positive, within duration, correct type |
+| Validation | 9 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero profile weight, zero/negative vol, zero/negative startprice, impactpermanent above 1, unknown clock) |
+| Arrivals | 9 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9; 1-second counts overdispersed with excitation, Poisson without |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 8 | Correct schema, sorted times, positive prices/qty, integer qty, within session |
-| Quotes | 8 | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade |
-| Config | 7 | Keyed table, correct column count, correct types (float, symbol, date) |
+| Trades | 26 | Correct schema with aggressor, cond, venue and seq, round-lot, odd-lot and block shares, cond I on odd lots, venues in the MIC set with about offexchangeshare on the TRF and auctions on the primary venue, sequence ascending, the opening and closing auction prints at the open and close with closeauctionpct of the continuous volume and no aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level realized vol matches the configured vol, hourly vol follows activity on the transaction clock and is flat on the calendar clock |
+| Quotes | 43 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without, a jump seeds a burst of trades, the burst widens the spread with activity coupling and not without, with flat profiles the spread tracks activity, per-second quote counts follow trade counts with the trade link and not without, sizes in round lots, seq ascending and one sequence across quotes and trades starting with the opening quote, midpoint prints off-exchange, the size imbalance leans toward the next mid move with the signal and not without |
+| Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **50** | |
+| **Total** | **110** | |
 
 ## Documentation
 
@@ -238,6 +267,8 @@ The `docs/` folder contains:
 
 - **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
 - **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
+
+The technical paper describes quotes as derived from the trades; the module now generates the quotes first, on their own clock, and the trades against them (see [Limitations](#limitations)). The paper also describes the arrivals as simulated by Ogata thinning. The module simulates the same process through its cluster representation instead (Hawkes and Oakes, 1974): immigrants arrive as an inhomogeneous Poisson process at the seasonal baseline, and every event spawns Poisson(`alpha`/`beta`) children at exponential delays, generation after generation. The two are equal in distribution, but the cluster form needs no upper bound on the intensity, so bursts are never capped (a fixed bound under-produced arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and it runs as vector operations.
 
 ## Notebooks
 

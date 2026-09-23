@@ -6,7 +6,7 @@ simorder:use`di.simorder
 
 / generate one day of market data (generatequotes defaults to 1 as of presets.csv update)
 tickcfgs:simtick.loadconfig`:di/simtick/presets.csv
-tickcfg:tickcfgs`default
+tickcfg:tickcfgs`nvda_default
 result:simtick.run[tickcfg]
 trades:result`trade
 quotes:result`quote

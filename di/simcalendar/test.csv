@@ -2,8 +2,9 @@ action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,Initialize simtick module
 before,0,0,q,simcalendar:use`di.simcalendar,1,Initialize simcalendar module
 before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,Load presets
-before,0,0,q,cfg:cfgs`default,1,Get default config
+before,0,0,q,cfg:cfgs`nvda_default,1,Get default config
 before,0,0,q,cfg[`seed]:42,1,Set seed for reproducibility
+before,0,0,q,cfg[`generatequotes]:0b,1,Trades only for the run tests (the presets enable quotes)
 before,0,0,q,calendar:simcalendar.loadcalendar`:di/simcalendar/calendar.csv,1,Load calendar
 comment,0,0,q,,1,=== Validation Tests ===
 fail,0,0,q,simcalendar.validate[2026.01.20],1,Non-list date throws error
@@ -18,7 +19,7 @@ true,0,0,q,(asc calendar)~calendar,1,Calendar is sorted ascending
 comment,0,0,q,,1,=== Run In-Memory Tests ===
 before,0,0,q,trades:simcalendar.run[cfg;calendar;(::)],1,Run in-memory simulation
 true,0,0,q,98h=type trades,1,Result is a table
-true,0,0,q,`sym`time`price`qty~cols trades,1,Trades has correct columns
+true,0,0,q,`sym`time`seq`price`qty`aggressor`cond`venue~cols trades,1,Trades has correct columns
 true,0,0,q,(asc trades`time)~trades`time,1,Trades sorted by time
 true,0,0,q,all 0<trades`price,1,All prices positive
 true,0,0,q,all 0<trades`qty,1,All quantities positive
@@ -32,7 +33,7 @@ comment,0,0,q,,1,=== Price Continuity Tests ===
 before,0,0,q,days:asc distinct "d"$trades`time,1,Get sorted days
 before,0,0,q,lastprice1:last exec price from trades where ("d"$time)=days 0,1,Last price of day 1
 before,0,0,q,firstprice2:first exec price from trades where ("d"$time)=days 1,1,First price of day 2
-true,0,0,q,lastprice1=firstprice2,1,Last price day 1 equals first price day 2
+true,0,0,q,(abs firstprice2-lastprice1)<0.01*lastprice1,1,First price of day 2 within 1% of the last price of day 1 (the close is carried as the open price and the first trade diffuses from it)
 true,0,0,q,all 0<exec price from trades where ("d"$time)=last days,1,Last day prices all positive
 comment,0,0,q,,1,=== Quotes Tests ===
 before,0,0,q,qcfg:cfg,1,Setup config with quotes
@@ -40,7 +41,7 @@ before,0,0,q,qcfg[`generatequotes]:1b,1,Enable quote generation
 before,0,0,q,qresult:simcalendar.run[qcfg;calendar;(::)],1,Run with quotes
 true,0,0,q,99h=type qresult,1,Result with quotes is dict
 true,0,0,q,`trade`quote~key qresult,1,Dict has trade and quote keys
-true,0,0,q,`sym`time`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
+true,0,0,q,`sym`time`seq`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
 comment,0,0,q,,1,=== Describe Tests ===
 before,0,0,q,caldesc:simcalendar.describe[],1,Get module description
 true,0,0,q,98h=type caldesc,1,describe returns a table
@@ -52,12 +53,12 @@ before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up any existing test d
 before,0,0,q,diskresult:simcalendar.run[cfg;calendar;dbpath],1,Run with disk persistence
 true,0,0,q,diskresult~dbpath,1,Returns dbpath on success
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test",1,Database root exists on disk
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20",1,First date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.22",1,Last date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20/trade",1,Trade table exists in partition
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18",1,First date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.20",1,Last date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/trade",1,Trade table exists in partition
 before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up before quotes disk test
 before,0,0,q,qdiskresult:simcalendar.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.01.20/quote",1,Quote table exists in partition
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/quote",1,Quote table exists in partition
 after,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up test database
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simcalendar.run[cfg;calendar;(::)],1,First run
