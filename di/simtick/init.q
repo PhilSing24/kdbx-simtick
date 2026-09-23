@@ -122,35 +122,23 @@ hawkes.children:{[params;parents]
   asc t where t<params`duration
   };
 
-arrivals:{[cfg]
-  / generate trade arrival times using a Hawkes process with exponential
-  / kernel, simulated through its cluster representation (Hawkes and Oakes,
-  / 1974): immigrants arrive as an inhomogeneous Poisson process of intensity
-  / baseintensity*shape(t), and every event spawns Poisson(alpha/beta)
-  / children at Exp(beta) delays, generation after generation until a
-  / generation is empty. The union of all generations is the process
-  / cfg: configuration dictionary
-  / returns: ascending list of arrival times in seconds from session start
+hawkes.process:{[cfg;baseintensity;extra]
+  / a Hawkes process with exponential kernel on the session, simulated
+  / through its cluster representation (Hawkes and Oakes, 1974): immigrants
+  / arrive as an inhomogeneous Poisson process of intensity
+  / baseintensity*shape(t), plus any extra immigrants given, and every event
+  / spawns Poisson(alpha/beta) children at Exp(beta) delays, generation after
+  / generation until a generation is empty. The union of all generations is
+  / the process
+  / cfg: config dict with `alpha`beta`openingtime`closingtime and the shape keys
+  / baseintensity: immigrant intensity before the intraday shape (per second)
+  / extra: extra immigrant times in seconds from open (a shock, see hawkes.shock)
+  / returns: ascending event times in seconds from session start
   /
   / This is exact: unlike Ogata thinning it needs no upper bound on the
   / intensity, so bursts are never capped (a fixed bound under-produced
   / arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and each
   / generation is a vector operation rather than a scan over candidates
-  /
-  / Required config keys:
-  /   baseintensity, alpha, beta, openingtime, closingtime,
-  /   openmult, midmult, closemult, transitionpoint
-
-  / validate required config keys
-  reqkeys:`baseintensity`alpha`beta`openingtime`closingtime;
-  reqkeys,:`openmult`midmult`closemult`transitionpoint;
-  .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
-
-  baseintensity:cfg`baseintensity;
-  alpha:cfg`alpha;
-  beta:cfg`beta;
-
-  / session duration in seconds
   open:`timespan$cfg`openingtime;
   close:`timespan$cfg`closingtime;
   if[open>=close; '"arrivals: openingtime must be before closingtime"];
@@ -161,11 +149,40 @@ arrivals:{[cfg]
   maxmult:cfg[`openmult]|cfg[`midmult]|cfg`closemult;
   cand:.z.m.poisson[baseintensity*maxmult;duration];
   immigrants:cand where (count[cand]?1.0)<.z.m.shape[cfg;cand%duration]%maxmult;
+  immigrants:asc immigrants,extra where extra<duration;
 
   / offspring, generation by generation, until a generation is empty
-  params:`alpha`beta`duration!(alpha;beta;duration);
+  params:`alpha`beta`duration!(cfg`alpha;cfg`beta;duration);
   generations:.z.m.hawkes.children[params]\[{0<count x};immigrants];
   asc `float$raze generations
+  };
+
+hawkes.shock:{[cfg;jumptimes;n]
+  / extra immigrants seeded by price jumps: n after each jump, at exponential
+  / delays of mean jumpburstminutes; each then seeds its usual cascade, so a
+  / jump brings a burst of activity that fades over minutes
+  / cfg: config dict with `jumpburstminutes
+  / jumptimes: jump times in seconds from open
+  / n: immigrants per jump
+  / returns: ascending times in seconds from open
+  if[(0=count jumptimes) or 0=n; :`float$()];
+  parents:jumptimes where (count jumptimes)#n;
+  asc parents+neg log[1-(count parents)?1.0]*60*cfg`jumpburstminutes
+  };
+
+arrivals:{[cfg]
+  / generate trade arrival times using a Hawkes process with exponential
+  / kernel at the config's baseintensity (see hawkes.process)
+  / cfg: configuration dictionary
+  / returns: ascending list of arrival times in seconds from session start
+  /
+  / Required config keys:
+  /   baseintensity, alpha, beta, openingtime, closingtime,
+  /   openmult, midmult, closemult, transitionpoint
+  reqkeys:`baseintensity`alpha`beta`openingtime`closingtime;
+  reqkeys,:`openmult`midmult`closemult`transitionpoint;
+  .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
+  .z.m.hawkes.process[cfg;cfg`baseintensity;`float$()]
   };
 
 gbm:{[s;r;eps;t]
@@ -178,67 +195,78 @@ gbm:{[s;r;eps;t]
   exp (t*r-.5*s*s)+eps*s*sqrt t
   };
 
-pricegbm:{[cfg;dts]
-  / generate price path using geometric Brownian motion
-  / cfg: config dict with `startprice`vol`drift`rngmodel
-  / dts: list of time deltas in years (first element is time from session
-  /   open to the first point - startprice is the price AT session open, so
-  /   this first interval is diffused like every other step, matching the
-  /   technical paper's eq(17); run samples the path on the quote clock,
-  /   whose first point is the open itself)
-  / returns: list of prices corresponding to each time point
+diffusion:{[cfg;dts]
+  / geometric Brownian motion factors per step
+  / cfg: config dict with `vol`drift`rngmodel
+  / dts: list of time steps in years (a first step of 0 leaves the first
+  /   point at the start price)
+  / returns: multiplicative factor per step
   eps:.z.m.rng.normal[count dts;cfg];
-  cfg[`startprice]*prds .z.m.gbm[cfg`vol;cfg`drift;eps;dts]
+  .z.m.gbm[cfg`vol;cfg`drift;eps;dts]
   };
 
-pricejump:{[cfg;dts]
-  / generate price path using Merton jump-diffusion model
-  / dS/S = μdt + σdW + J·dN where J is lognormal, N is Poisson
-  / cfg: config dict with `startprice`vol`drift`tradingdays`jumpintensity`jumpmean`jumpvol`rngmodel
-  / dts: list of time deltas in years (first element is time from session
-  /   open to first trade - startprice represents the price AT session
-  /   open, so this first interval is diffused/jumped like every other
-  /   step, matching the technical paper's eq(17) treatment of GBM)
-  / returns: list of prices corresponding to each time point
-  n:count dts;
+jump.events:{[cfg;duration]
+  / the day's price jumps as events (Merton jump-diffusion): Poisson arrivals
+  / at jumpintensity per day, uniform in the session, with lognormal sizes
+  / cfg: config dict with `jumpintensity`jumpmean`jumpvol`rngmodel
+  / duration: session length in seconds
+  / returns: table `time`factor, time in seconds from open ascending, factor
+  /   the multiplicative jump exp(jumpmean+jumpvol*N)
+  n:first .z.m.rng.poisson[enlist `float$cfg`jumpintensity;40];
+  times:asc n?`float$duration;
+  ([]time:times;factor:exp cfg[`jumpmean]+cfg[`jumpvol]*.z.m.rng.normal[n;cfg])
+  };
 
-  / diffusion component
-  eps:.z.m.rng.normal[n;cfg];
-  diffusion:.z.m.gbm[cfg`vol;cfg`drift;eps;dts];
+clocksteps:{[cfg;times]
+  / the time steps in years between successive points, by the config's clock
+  / cfg: config dict with `clock`tradingdays`openingtime`closingtime
+  / times: points in seconds from open, ascending
+  / returns: float per point, the first 0
+  /
+  / clock `calendar: elapsed seconds over the trading year's seconds, so
+  /   variance grows with clock time and realized vol is flat through the day
+  / clock `transaction: every step carries the same variance, a trading
+  /   day's over the points, so variance grows with activity: realized vol
+  /   follows the intraday profile and rises in bursts (and clusters), as it
+  /   does in a market
+  n:count times;
+  $[`transaction=`calendar^cfg`clock;
+    0f,(n-1)#1%cfg[`tradingdays]*1|n-1;
+    [open:`timespan$cfg`openingtime; close:`timespan$cfg`closingtime;
+     (0f,1_deltas times)%cfg[`tradingdays]*(close-open)%nspersec]]
+  };
 
-  / jump component: Poisson arrivals with lognormal sizes
-  dtdays:dts*cfg`tradingdays;
-  hasjump:(n?1.0)<1-exp neg cfg[`jumpintensity]*dtdays;
-  epsj:.z.m.rng.normal[n;cfg];
-  jumps:exp hasjump*(cfg[`jumpmean]+cfg[`jumpvol]*epsj);
-
-  cfg[`startprice]*prds diffusion*jumps
+pricepath:{[cfg;times;jumps]
+  / the price path at the given points: start price, diffusion steps by the
+  / config's clock, and the jumps at or before each point
+  / cfg: config dict with `startprice`vol`drift`clock`tradingdays and the session keys
+  / times: points in seconds from open, ascending
+  / jumps: `time`factor table (see jump.events), possibly empty
+  / returns: price per point
+  times:`float$times;
+  path:cfg[`startprice]*prds .z.m.diffusion[cfg;.z.m.clocksteps[cfg;times]];
+  path*1f^(prds jumps`factor) jumps[`time] bin times
   };
 
 price:{[cfg;times]
-  / generate prices for given arrival times
+  / generate prices for given points in time
   / cfg: configuration dictionary
-  / times: list of arrival times in seconds from session start
-  / returns: list of prices corresponding to each arrival time
+  / times: list of times in seconds from session start, ascending
+  / returns: list of prices corresponding to each time
   /
   / Required config keys:
   /   openingtime, closingtime, tradingdays, pricemodel, startprice, vol, drift
   /   For jump model: jumpintensity, jumpmean, jumpvol
-
-  / validate inputs
+  /   clock (`calendar or `transaction, see clocksteps) defaults to `calendar
+  /
+  / startprice is the price at the session open; a first time of 0 returns it
   .z.m.val.nonempty[times;"times";"price"];
   if[any times<0; '"price: times must be non-negative"];
-
   reqkeys:`openingtime`closingtime`tradingdays`pricemodel`startprice`vol`drift;
   .z.m.val.haskeys[cfg;reqkeys;"price"];
-
-  / convert times to dt in years
-  open:`timespan$cfg`openingtime;
-  close:`timespan$cfg`closingtime;
-  secsperyear:cfg[`tradingdays]*`long$(close-open)%nspersec;
-  dts:deltas[times]%secsperyear;
-
-  $[cfg[`pricemodel]=`jump; .z.m.pricejump[cfg;dts]; .z.m.pricegbm[cfg;dts]]
+  duration:(`timespan$cfg[`closingtime])-`timespan$cfg`openingtime;
+  jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration%nspersec]; ([]time:`float$();factor:`float$())];
+  .z.m.pricepath[cfg;times;jumps]
   };
 
 qty.constant:{[n;cfg]
@@ -272,11 +300,28 @@ qty.gen:{[n;cfg]
     '"qty.gen: unknown qtymodel - ",string model]
   };
 
-quote.generate:{[cfg;times;mids]
+quote.activity:{[cfg;quotearrs]
+  / local quote activity relative to its expected level: the quotes in the
+  / trailing minute over the number the intensity profile expects there,
+  / raised to spreadactivity; multiplies the mean spread, so bursts widen it
+  / cfg: config dict with `spreadactivity`quotespertrade`baseintensity`alpha`beta and the shape keys
+  / quotearrs: quote times in seconds from open, ascending
+  / returns: float multiplier per quote, 1 when spreadactivity is 0
+  n:count quotearrs;
+  if[0=cfg`spreadactivity; :n#1f];
+  duration:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  cnt:(til n)-quotearrs bin quotearrs-60f;
+  rate:cfg[`quotespertrade]*cfg[`baseintensity]*.z.m.shape[cfg;quotearrs%duration]%1-cfg[`alpha]%cfg`beta;
+  ratio:(1+cnt)%1+rate*60f&quotearrs;
+  xexp[0.25|ratio&4;cfg`spreadactivity]
+  };
+
+quote.generate:{[cfg;times;mids;activity]
   / quote table from the mid path sampled on the quote clock
   / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`ticksize`rngmodel
   / times: quote timestamps, ascending, the first at the session open
   / mids: mid price at each time (the price path sampled on the quote clock)
+  / activity: spread multiplier per quote from local activity (see quote.activity)
   / returns: quote table `time`bid`ask`bidsize`asksize; bid and ask on the
   /   tick grid, the spread a whole number of ticks, at least one
   n:count times;
@@ -284,7 +329,7 @@ quote.generate:{[cfg;times;mids]
 
   / spread in whole ticks: one tick plus a Poisson excess whose mean is
   / spreadticks times the time-of-day multiplier, less the one tick
-  meanticks:cfg[`spreadticks]*.z.m.quote.spreadmults[cfg;times];
+  meanticks:cfg[`spreadticks]*activity*.z.m.quote.spreadmults[cfg;times];
   ticks:1+.z.m.rng.poisson[0f|meanticks-1;12];
 
   / the spread sits around the mid, its bid on the tick grid
@@ -427,6 +472,12 @@ validate:{[cfg]
     '"validate: midpointshare and improvementshare must be between 0 and 1"];
   if[1<cfg[`midpointshare]+cfg`improvementshare;
     '"validate: midpointshare and improvementshare must not exceed 1 together"];
+  / clock, activity coupling, jump bursts
+  .z.m.val.haskeys[cfg;`clock`spreadactivity`jumpburst`jumpburstminutes;"validate"];
+  if[not cfg[`clock] in `calendar`transaction; '"validate: clock must be calendar or transaction"];
+  if[0>cfg`spreadactivity; '"validate: spreadactivity must be zero or positive"];
+  if[0>cfg`jumpburst; '"validate: jumpburst must be zero or positive"];
+  if[0>=cfg`jumpburstminutes; '"validate: jumpburstminutes must be positive"];
   / order-flow impact
   .z.m.val.haskeys[cfg;`impactticks`impacthalflife`impactpermanent;"validate"];
   if[0>cfg`impactticks; '"validate: impactticks must be zero or positive"];
@@ -445,7 +496,9 @@ run:{[cfg]
   / quotespertrade times the trade intensity (same clustering), starting
   / with a quote at the open, and the price path is sampled on that clock
   / as the mid, shifted by the impact of the signed order flow before each
-  / quote (see flow.impact). Trades arrive on the trade clock and execute
+  / quote (see flow.impact); a jump seeds a burst on both clocks (see
+  / hawkes.shock) and local activity widens the spread (see quote.activity).
+  / Trades arrive on the trade clock and execute
   / against the quote in force (see trade.generate), so every trade sits
   / inside its prevailing quote and carries an aggressor side
   /
@@ -461,16 +514,24 @@ run:{[cfg]
 
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
 
+  / the day's jumps, and the bursts of activity they seed on both clocks
+  duration:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration]; ([]time:`float$();factor:`float$())];
+  tradeshock:.z.m.hawkes.shock[cfg;jumps`time;cfg`jumpburst];
+  quoteshock:.z.m.hawkes.shock[cfg;jumps`time;`long$cfg[`jumpburst]*cfg`quotespertrade];
+
   / the two clocks (seconds from open) and the order flow on the trade clock
-  quotearrs:0f,.z.m.arrivals[@[cfg;`baseintensity;*;cfg`quotespertrade]];
-  arrs:.z.m.arrivals[cfg];
+  quotearrs:0f,.z.m.hawkes.process[cfg;cfg[`baseintensity]*cfg`quotespertrade;quoteshock];
+  arrs:.z.m.hawkes.process[cfg;cfg`baseintensity;tradeshock];
   n:count arrs;
   flow:$[n; .z.m.flow.generate[cfg;n]; `sign`qty!(`long$();`long$())];
 
-  / the mid on the quote clock: the price path plus the order flow's impact
-  mids:.z.m.price[cfg;quotearrs];
+  / the mid on the quote clock: the price path (by the config's clock, with
+  / the jumps) plus the order flow's impact
+  mids:.z.m.pricepath[cfg;quotearrs;jumps];
   mids+:.z.m.flow.impact[cfg;arrs;flow;quotearrs];
-  quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$quotearrs*nspersec;mids];
+  activity:.z.m.quote.activity[cfg;quotearrs];
+  quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$quotearrs*nspersec;mids;activity];
 
   / trades against the quote in force
   trades:$[n;
@@ -500,6 +561,9 @@ schema[`pricemodel]:("S";"price model (`gbm or `jump)")
 schema[`jumpintensity]:("F";"jump arrival rate (jumps/day)")
 schema[`jumpmean]:("F";"log jump mean")
 schema[`jumpvol]:("F";"log jump volatility")
+schema[`jumpburst]:("J";"extra trade immigrants seeded by each jump (each with its usual cascade); 0 = none")
+schema[`jumpburstminutes]:("F";"mean delay in minutes of those immigrants after the jump")
+schema[`clock]:("S";"clock of the diffusion: `calendar (variance grows with time, flat intraday vol) or `transaction (variance grows with activity: U-shaped vol, bursts)")
 schema[`baseintensity]:("F";"base trade arrival rate (trades/sec)")
 schema[`alpha]:("F";"Hawkes excitation parameter")
 schema[`beta]:("F";"Hawkes decay parameter (must be > alpha)")
@@ -516,6 +580,7 @@ schema[`spreadopenmult]:("F";"spread multiplier at the open, decaying to the mid
 schema[`spreadmidmult]:("F";"spread multiplier through the day")
 schema[`spreadclosemult]:("F";"spread multiplier at the close, reached by the same decay")
 schema[`spreaddecayminutes]:("F";"minutes over which the open and close spread multipliers decay toward the midday one (e-folding time)")
+schema[`spreadactivity]:("F";"exponent of local quote activity (trailing minute over its expected level) multiplying the mean spread; 0 = none")
 schema[`avgquotesize]:("J";"average quote size")
 schema[`ticksize]:("F";"minimum price increment; quotes are rounded to it, trades to a tenth of it (0.01 for US equities)")
 schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")

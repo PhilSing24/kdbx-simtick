@@ -22,7 +22,8 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 
 - **Trade clustering** — real trades arrive in bursts, not uniformly. We use a Hawkes process to model this self-exciting behavior.
 - **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
-- **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities.
+- **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities. The diffusion runs on a transaction clock by default: each quote update carries the same variance, so volatility follows activity, U-shaped through the day and higher in bursts, as in a market (`clock:calendar` keeps the flat, time-based variance).
+- **Coupled activity, volatility and spread** — a jump seeds a burst of trades and quotes that fades over minutes (`jumpburst`, `jumpburstminutes`), and the spread widens with local activity (`spreadactivity`), so volatility, volume and spread rise together.
 - **Microstructure** — quotes come first, on their own clock: the price path is the mid, the spread is a whole number of ticks (one most of the day, wider in the first minutes after the open), and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
 - **Order-flow impact** — a propagator: each signed trade moves the mid in its direction by `impactticks` ticks scaled by its size, a share `impactpermanent` of which stays while the rest halves every `impacthalflife` seconds. With persistent aggressor signs the tape shows price impact and partial reversion after a trade, what markout curves measure.
 - **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
@@ -51,7 +52,7 @@ The default presets and parameter examples are calibrated for **US equity market
 
 Quotes are generated first and trades execute against the quote in force, so the causality of a real market is respected at the top of the book. The model stays simplified beyond that:
 
-- **Independent clocks** — the quote clock and the trade clock are two Hawkes processes with the same parameters, not mutually exciting, so a burst of trades does not by itself bring a burst of quotes
+- **Independent clocks** — the quote clock and the trade clock are two Hawkes processes with the same parameters, not mutually exciting, so a burst of trades does not by itself bring a burst of quotes (a jump brings both)
 - **No depth** — only the touch is modelled: no queue, no queue position, no book beyond the best bid and ask
 
 **Not suitable for:**
@@ -204,6 +205,9 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `drift` | Annualized drift | 0.05 |
 | `transitionpoint` | Intraday shape (0.3=J, 0.5=U) | 0.3 |
 | `pricemodel` | `gbm` or `jump` | `gbm` |
+| `clock` | `transaction` (variance per quote update: vol follows activity) or `calendar` (variance per second: flat vol) | `transaction` |
+| `jumpburst` | Extra trade immigrants seeded by each jump, each with its usual cascade | 3000 |
+| `jumpburstminutes` | Mean delay in minutes of those immigrants after the jump | 1.0 |
 | `qtymodel` | `lognormal` or `constant` | `lognormal` |
 | `avgqty` | Average trade size | 100 |
 | `seed` | Random seed (`0N` = no seed) | `42` |
@@ -211,6 +215,7 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `spreadopenmult` | Spread multiplier at the open, decaying to the midday one | 2.5 |
 | `spreadclosemult` | Spread multiplier at the close, reached by the same decay | 0.9 |
 | `spreaddecayminutes` | Minutes over which the open and close multipliers decay toward the midday one | 15 |
+| `spreadactivity` | Exponent of local quote activity (trailing minute over its expected level) on the mean spread; 0 = none | 0.5 |
 | `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
 | `quotespertrade` | Quote updates per trade on average (quotes arrive on their own Hawkes clock at this multiple of the trade intensity) | 4 |
 | `sidepersistence` | Probability a trade's aggressor side repeats the previous one (0.5 = independent) | 0.7 |
@@ -235,17 +240,17 @@ q)k4unit.moduletest`di.simtick
 
 | Group | Tests | Description |
 |-------|-------|-------------|
-| Validation | 8 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers, zero/negative vol, zero/negative startprice, impactpermanent above 1) |
+| Validation | 9 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers, zero/negative vol, zero/negative startprice, impactpermanent above 1, unknown clock) |
 | Arrivals | 9 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9; 1-second counts overdispersed with excitation, Poisson without |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 11 | Correct schema with aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level and hourly realized vol from 1-minute bars match the configured vol |
-| Quotes | 29 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without |
+| Trades | 12 | Correct schema with aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level realized vol matches the configured vol, hourly vol follows activity on the transaction clock and is flat on the calendar clock |
+| Quotes | 33 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without, a jump seeds a burst of trades, the burst widens the spread with activity coupling and not without, with flat profiles the spread tracks activity |
 | Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **81** | |
+| **Total** | **88** | |
 
 ## Documentation
 

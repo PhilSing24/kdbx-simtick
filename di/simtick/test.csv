@@ -71,7 +71,7 @@ true,0,0,q,(abs cfg[`startprice]-first prices)<0.05*cfg`startprice,1,,First pric
 before,0,0,q,longtimes:1+til 10000,1,,Setup longer times for vol test
 before,0,0,q,longprices:simtick.price[cfg;longtimes],1,,Generate more prices
 before,0,0,q,logreturns:1_log longprices%prev longprices,1,,Calculate log returns
-before,0,0,q,realizedvol:(dev logreturns)*sqrt 252*23400,1,,Annualize realized vol
+before,0,0,q,realizedvol:(dev logreturns)*sqrt 252*9999,1,,Annualize realized vol (transaction clock: the 9999 steps share one trading day's variance)
 true,0,0,q,realizedvol within 0.1 0.8,1,,Realized vol within tolerance of input vol
 before,0,0,q,jumpcfg:cfgs`nvda_jumpy,1,,Get jump config
 before,0,0,q,jumpcfg[`seed]:42,1,,Set seed
@@ -94,7 +94,15 @@ true,0,0,q,all trades[`time]<=closetime,1,,All trades at or before close
 before,0,0,q,minbars:select last price by 1 xbar time.minute from trades,1,,One-minute bars of the run
 true,0,0,q,((dev 1_log p%prev p:exec price from minbars)*sqrt 252*390) within 0.75 1.25*cfg`vol,1,,Day-level realized vol from 1-minute bars within 25% of the configured vol
 before,0,0,q,hourvol:exec (dev 1_log price%prev price)*sqrt 252*390 by minute.hh from minbars,1,,Realized vol by hour
-true,0,0,q,all (hourvol 10 11 12 13 14 15) within 0.6 1.4*cfg`vol,1,,Each full hour's realized vol within 40% of the configured vol (calendar-time clock: flat by design until the transaction-time clock lands)
+true,0,0,q,(hourvol[15]%hourvol 11)>1.3,1,,Transaction clock: realized vol follows activity (the last hour trades several times more than 11:00 and is more volatile)
+before,0,0,q,calcfg:cfg,1,,Setup calendar-clock config
+before,0,0,q,calcfg[`clock]:`calendar,1,,Variance per second instead of per quote update
+before,0,0,q,caltrades:simtick.run[calcfg],1,,Trades on the calendar clock
+before,0,0,q,calhourvol:exec (dev 1_log price%prev price)*sqrt 252*390 by minute.hh from select last price by 1 xbar time.minute from caltrades,1,,Realized vol by hour on the calendar clock
+true,0,0,q,all (calhourvol 10 11 12 13 14 15) within 0.6 1.4*cfg`vol,1,,Calendar clock: each full hour's realized vol within 40% of the configured vol (flat)
+before,0,0,q,badcfg9:cfg,1,,Setup bad config for an unknown clock
+before,0,0,q,badcfg9[`clock]:`business,1,,Set an unknown clock
+fail,0,0,q,simtick.run[badcfg9],1,,Unknown clock throws error
 true,0,0,q,all 1e-6>abs (trades[`price]%0.1*cfg`ticksize)-floor 0.5+trades[`price]%0.1*cfg`ticksize,1,,Trade prices sit on the tenth-of-a-tick grid (touch, midpoint or a tenth of a tick inside the touch)
 comment,0,0,q,,1,,=== Quotes Tests ===
 before,0,0,q,cfg[`generatequotes]:1b,1,,Enable quotes
@@ -137,6 +145,33 @@ before,0,0,q,nisigns:1-2*nitrades[`aggressor]=`S,1,,Its aggressor signs
 before,0,0,q,nimid0:(aj[`time;select time from nitrades;niqmid])`mid,1,,Mid in force at each trade without impact
 before,0,0,q,nimid1:(aj[`time;update time:time+0D00:00:01 from select time from nitrades;niqmid])`mid,1,,Mid one second later without impact
 true,0,0,q,(abs avg nisigns*nimid1-nimid0)<0.1*cfg`ticksize,1,,Without impact the signed 1-second markout is zero
+before,0,0,q,burstcfg:cfgs`nvda_jumpy,1,,Setup jump config for burst tests
+before,0,0,q,burstcfg[`jumpvol]:0.05,1,,Large jumps so the jump minutes stand out
+before,0,0,q,burstcfg[`jumpintensity]:5.0,1,,Several jumps a day
+before,0,0,q,burstcfg[`seed]:7,1,,Fixed seed
+before,0,0,q,burstrun:simtick.run[burstcfg],1,,Run with jumps and bursts
+before,0,0,q,bursttrades:burstrun`trade,1,,Its trades
+before,0,0,q,burstn:exec count i by 1 xbar time.minute from bursttrades,1,,Trades per minute
+before,0,0,q,burstret:exec abs log last[price]%first price by 1 xbar time.minute from bursttrades,1,,Absolute return per minute
+before,0,0,q,jumpmins:where burstret>0.02,1,,Minutes with a jump
+true,0,0,q,0<count jumpmins,1,,The burst run has jumps (fixed seed)
+true,0,0,q,all 1.5<(burstn[jumpmins]|burstn[jumpmins+1])%med value burstn,1,,A jump seeds a burst: the jump minute or the next has at least 1.5 times the median trades
+before,0,0,q,burstsp:exec avg (ask-bid)%cfg`ticksize by 1 xbar time.minute from burstrun`quote,1,,Mean spread in ticks per minute
+true,0,0,q,all 1.3<(burstsp[jumpmins]|burstsp[jumpmins+1])%med value burstsp,1,,Activity widens the spread: at least 1.3 times the median in the jump minute or the next
+before,0,0,q,noactcfg:burstcfg,1,,Setup burst config without activity coupling
+before,0,0,q,noactcfg[`spreadactivity]:0f,1,,Activity coupling off
+before,0,0,q,noactrun:simtick.run[noactcfg],1,,Run without activity coupling
+before,0,0,q,noactret:exec abs log last[price]%first price by 1 xbar time.minute from noactrun`trade,1,,Absolute return per minute without coupling
+before,0,0,q,noactmins:where noactret>0.02,1,,Its jump minutes
+before,0,0,q,noactsp:exec avg (ask-bid)%cfg`ticksize by 1 xbar time.minute from noactrun`quote,1,,Its mean spread in ticks per minute
+true,0,0,q,all 1.3>(noactsp[noactmins]|noactsp[noactmins+1])%med value noactsp,1,,Without activity coupling a burst leaves the spread at its median
+before,0,0,q,flatspcfg:cfg,1,,Setup flat-profile config for the activity coupling
+before,0,0,q,flatspcfg[`openmult`midmult`closemult]:1 1 1f,1,,Flat intensity profile
+before,0,0,q,flatspcfg[`spreadopenmult`spreadclosemult]:1 1f,1,,Flat spread profile
+before,0,0,q,flatsprun:simtick.run[flatspcfg],1,,Run with only activity moving the spread
+before,0,0,q,flatspn:exec count i by 1 xbar time.minute from flatsprun`quote,1,,Quotes per minute
+before,0,0,q,flatsps:exec avg (ask-bid)%cfg`ticksize by 1 xbar time.minute from flatsprun`quote,1,,Mean spread in ticks per minute
+true,0,0,q,0.3<(value flatspn) cor value flatsps,1,,With flat profiles the spread tracks activity minute by minute
 true,0,0,q,(count quotes)>=count trades,1,,At least one quote per trade
 true,0,0,q,all (quotes[`ask]-quotes`bid)>=cfg[`ticksize]-1e-9,1,,Every spread is at least one tick
 before,0,0,q,spreadticks:floor 0.5+(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Spread of each quote in ticks
@@ -152,7 +187,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,39=count cfgs`nvda_default,1,,Config has 39 parameters (excluding key)
+true,0,0,q,43=count cfgs`nvda_default,1,,Config has 43 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -168,7 +203,7 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,40=count schema,1,,Schema has 40 parameters
+true,0,0,q,44=count schema,1,,Schema has 44 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
