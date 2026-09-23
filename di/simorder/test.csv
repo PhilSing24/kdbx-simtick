@@ -198,7 +198,7 @@ true,0,0,q,all executions[`time]>basecfg`starttime,1,,All executions after start
 true,0,0,q,all executions[`time]<basecfg`endtime,1,,All executions before endtime
 true,0,0,q,all executions[`price]>0,1,,All execution prices positive
 true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
-true,0,0,q,all 1e-6>abs (executions[`price]%0.001)-floor 0.5+executions[`price]%0.001,1,,Fill prices sit on the tenth-of-a-tick grid
+true,0,0,q,all 1e-6>abs (executions[`price]%0.005)-floor 0.5+executions[`price]%0.005,1,,Every fill price is a multiple of half a tick (on the tick or at the midpoint)
 true,0,0,q,all executions[`liquidity] in `A`R,1,,Each fill added or removed liquidity
 true,0,0,q,all `A=executions`capacity,1,,Fills carry the order's capacity
 true,0,0,q,all children[`filledqty]=0^(exec sum qty by childid from executions) children`childid,1,,Fills per child match the children's filledqty

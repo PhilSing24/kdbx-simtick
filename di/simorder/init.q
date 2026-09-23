@@ -490,6 +490,10 @@ execute:{[cfg;trades;quotes]
   children:raze parts[;`children];
   events:`orderid`childid`time xcols update orderid:cfg`orderid from `time xasc raze parts[;`events];
   fls:`time xasc raze parts[;`fills];
+  / fill prices on the half-tick grid: on the tick, or exactly at the
+  / midpoint (a lit venue cannot print elsewhere)
+  grid:0.5*cfg`ticksize;
+  fls:update price:grid*floor 0.5+price%grid from fls;
   execs:([]execid:1+til count fls;orderid:count[fls]#cfg`orderid;childid:fls`childid;sym:count[fls]#cfg`sym;
     side:count[fls]#cfg`side;time:fls`time;price:fls`price;qty:fls`qty;venue:fls`venue;
     liquidity:fls`liquidity;capacity:count[fls]#cfg`capacity;interval:fls`interval);
@@ -694,7 +698,7 @@ schema[`capacity]:        ("S";"A (agency) or P (principal)")
 schema[`latencyms]:       ("F";"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
 schema[`maxreplaces]:     ("J";"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
 schema[`jitter]:          ("F";"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
-schema[`ticksize]:        ("F";"minimum price increment (0.01 for US equities); fill prices sit on a tenth of it, as trades print on the tape")
+schema[`ticksize]:        ("F";"minimum price increment (0.01 for US equities); fill prices sit on the tick or exactly at the midpoint (half ticks)")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
 schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
