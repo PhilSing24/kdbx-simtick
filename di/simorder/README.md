@@ -196,8 +196,8 @@ The sizes are the children's targets; each child then executes against the tape 
 
 `simorder.impact[icfg;execs;trades;quotes]` moves one instrument's day of market data by the transient impact of child executions. Pass every order's executions in that instrument, not one order's: impact acts across orders, so it runs after all their schedules and sizes and before any of their prices.
 
-- **Child impact** — each execution's temporary impact, as a fraction of the price, is `eta × sigma × p^beta`. `sigma` is the day's volatility (`dailyvol`, from 5-minute mids), and `p` is the child's participation, own / (own + market), in the market volume of an interval of the child's length centred on its time (`execs` column `interval`). In currency it is that fraction of the mid in force.
-- **Shift** — the price shift in force at any time is the sum of every earlier execution's signed impact (a buy pushes up), each halving every `halflife`. The sum is tapered linearly to zero over `taper` before `closetime` and rounded to whole cents (`shiftat`), so bid and ask move by the same tick, a quote is never locked or crossed, and nothing is left at the close. The close, and the next day that `di.simcalendar` starts from it, are unmoved.
+- **Child impact** — each execution's impact, as a fraction of the price, is `eta × sigma × p^beta` under the `participation` model, where `sigma` is the day's volatility (`dailyvol`, from 5-minute mids) and `p` the child's participation, own / (own + market), in the market volume of an interval of the child's length centred on its time (`execs` column `interval`); or `eta × sigma × sqrt(own / daily volume)` under the `sqrtlaw` model, the square-root law on the child's size against the day's volume. In currency it is that fraction of the mid in force.
+- **Shift** — the price shift in force at any time is the sum of every earlier execution's signed impact (a buy pushes up): a share `permanent` of each stays through the day, the rest halves every `halflife`. The sum is tapered linearly to zero over `taper` before `closetime` and rounded to whole cents (`shiftat`), so bid and ask move by the same tick, a quote is never locked or crossed, and nothing is left at the close. The close, and the next day that `di.simcalendar` starts from it, are unmoved, so the permanent share is permanent within the day.
 - **Market** — quotes and prints move by the shift in force at their time (a print by the shift of the quote in force, so it keeps its place inside that quote), and a quote is added at each execution time carrying the moved level. Volumes, sizes and the order of events are unchanged; with `eta` 0 or no executions the market is returned as it is.
 - **Prices** — run each order again against the moved market (`run[cfg;moved`trades;moved`quotes]`). Its aggressive fills then take the moved touch, its passive children rest on the moved touch, and its arrival price includes earlier orders' impact but not its own.
 
@@ -215,6 +215,8 @@ q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
 | `halflife` | Timespan over which an execution's impact halves |
 | `taper` | Timespan before `closetime` over which the shift falls linearly to zero |
 | `closetime` | Time of day (timespan) of the close |
+| `permanent` | Optional, default 0: share of each execution's impact that stays through the day |
+| `model` | Optional, default `participation`: `participation` (p^beta) or `sqrtlaw` (sqrt of own over daily volume) |
 
 ## API
 
@@ -297,7 +299,7 @@ q)k4unit.moduletest`di.simorder
 | Schedule | 10 | Correct count, sorted, within window, frontloaded gaps widen over time; jitter moves children off the schedule, keeps their order and the window, within its bound, and is exact at 0 |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
-| Market impact | 18 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, aggressive fills against the moved market at its ask or one tick beyond, eta 0 leaves the market as it is |
+| Market impact | 31 | Missing keys, zero halflife, negative eta, permanent above 1 and an unknown model throw; the optional keys default; with a permanent share the move stays in full at its time, keeps its permanent half after one and two halflives and still vanishes at the close; the square-root law gives eta x sigma x sqrt(own / daily volume) and moves the market without locking a quote; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, aggressive fills against the moved market at its ask or one tick beyond, eta 0 leaves the market as it is |
 | Execution | 41 | Result shape; the parent order's columns, arrival price at the mid, filled in full, avgpx; the children's columns, numbering, order types and limits, lit venues, statuses; the executions' columns, quantity conservation, order, window, tenth-of-a-tick grid, liquidity flags, capacity, fills per child; aggressive fills at the ask in force or one tick beyond, passive fills at the child's limit in force and on its venue |
 | Events | 14 | Columns, event kinds, order; one new and one ack per child, replaces matching the children, fill events matching the executions, a done per filled child and a cancel per cancelled one, nothing left at a done, ack before the first fill |
 | Aggression | 13 | spreadcapture 1: all children marketable, all fills removing liquidity, no replace or cancel; spreadcapture 0: scheduled children all limit orders adding liquidity; about spreadcapture of 400 children aggressive; SELL aggressive fills at the bid or one tick below and filled in full; frontloaded and arrival orders filled in full, frontloaded intervals tiling the window |
@@ -305,7 +307,7 @@ q)k4unit.moduletest`di.simorder
 | Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **137** | |
+| **Total** | **147** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset (and `pg_default` for the rollover tests); order windows are set on that day's date.
 

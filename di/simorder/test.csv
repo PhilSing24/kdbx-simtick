@@ -129,6 +129,18 @@ true,0,0,q,(sh 2)=0.32,1,,A quarter is left after two halflives
 true,0,0,q,0f=last sh,1,,Nothing is left at the close
 before,0,0,q,lateshift:simorder.shiftat[icfg;d+0D15:55 0D15:57:30;([] time:enlist d+0D15:55; amount:enlist 1f)],1,,A move 5 minutes before the close with a 10-minute taper
 true,0,0,q,(lateshift 0)=0.5,1,,The taper halves a move 5 minutes before the close
+fail,0,0,q,simorder.validateimpact[@[icfg;`permanent;:;1.5]],1,,permanent above 1 throws error
+fail,0,0,q,simorder.validateimpact[@[icfg;`model;:;`linear]],1,,An unknown impact model throws error
+true,0,0,q,(`permanent`model!(0f;`participation))~`permanent`model#simorder.validateimpact icfg,1,,The optional impact keys default to no permanent share and the participation model
+before,0,0,q,permcfg:simorder.validateimpact @[icfg;`permanent;:;0.5],1,,Impact config with half of each move permanent
+before,0,0,q,permsh:simorder.shiftat[permcfg;imptimes;moves],1,,Shift at the same times with a permanent share
+true,0,0,q,(permsh 0)=1.28,1,,With a permanent share the move is still in force in full at its own time
+true,0,0,q,(permsh 1)=0.96,1,,After one halflife the permanent half stays and the other half has halved
+true,0,0,q,(permsh 2)=0.8,1,,After two halflives the permanent half stays and the other half has quartered
+true,0,0,q,0f=last permsh,1,,The taper still leaves nothing at the close
+before,0,0,q,sqrtcfg:simorder.validateimpact @[icfg;`model;:;`sqrtlaw],1,,Impact config on the square-root law
+before,0,0,q,sqrtimp:simorder.childimpact[sqrtcfg;([] time:enlist d+0D10:00;qty:enlist 10000;interval:enlist 0D00:00:30);trades;0.02],1,,Square-root impact of a 10000-share child
+true,0,0,q,1e-12>abs sqrtimp[0]-0.02*sqrt 10000%sum trades`qty,1,,The square-root law gives eta x sigma x sqrt(own / daily volume)
 before,0,0,q,sig:simorder.dailyvol quotes,1,,Daily volatility of the fixture
 true,0,0,q,(sig>0) & sig<1,1,,Daily volatility is a positive fraction
 before,0,0,q,bigres:simorder.run[bigcfg;trades;quotes],1,,Run the large arrival order
@@ -149,6 +161,9 @@ before,0,0,q,mres:simorder.run[bigcfg;mt;mq],1,,Run the large order against the 
 before,0,0,q,mpa:aj[`time;select from mres`executions where liquidity=`R;`time`bid`ask#mq],1,,Its aggressive fills with the moved quote in force
 true,0,0,q,all (mpa[`price]>=mpa`ask)&mpa[`price]<=mpa[`ask]+bigcfg`ticksize,1,,Aggressive fills against the moved market are at its ask or one tick beyond
 true,0,0,q,(simorder.impact[@[icfg;`eta;:;0f];impexecs;trades;quotes])~`trades`quotes!(trades;quotes),1,,eta 0 leaves the market as it is
+before,0,0,q,sqrtmoved:simorder.impact[@[icfg;`model;:;`sqrtlaw];impexecs;trades;quotes],1,,Move the market under the square-root law
+true,0,0,q,all (sqrtmoved[`quotes]`bid)<sqrtmoved[`quotes]`ask,1,,Under the square-root law no quote is locked or crossed
+true,0,0,q,((exec last bid from sqrtmoved`quotes where time<=t1)-exec last bid from quotes where time<=t1)>0,1,,And a buy still moves the quote up
 comment,0,0,q,,1,,=== Execution Tests ===
 before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run the order (even pacing)
 true,0,0,q,99h=type ordresult,1,,run returns a dict

@@ -219,10 +219,14 @@ arrivalsizes:{[cfg;trades;n]
 / ============================================================
 
 validateimpact:{[icfg]
-  / validate a market impact configuration dictionary
-  / icfg: `eta`beta`halflife`taper`closetime (see impact)
-  / returns: icfg if valid, throws error otherwise
+  / validate a market impact configuration dictionary, filling the optional
+  / keys: permanent (0) and model (`participation)
+  / icfg: `eta`beta`halflife`taper`closetime and optionally `permanent`model (see impact)
+  / returns: icfg with the optional keys filled if valid, throws error otherwise
   .z.m.val.haskeys[icfg;`eta`beta`halflife`taper`closetime;"validateimpact"];
+  icfg:(`permanent`model!(0f;`participation)),icfg;
+  if[not icfg[`permanent] within 0 1; '"validateimpact: permanent must be between 0 and 1"];
+  if[not icfg[`model] in `participation`sqrtlaw; '"validateimpact: model must be participation or sqrtlaw"];
   if[not 0<=icfg`eta; '"validateimpact: eta must be zero or positive"];
   if[not 0<icfg`beta; '"validateimpact: beta must be positive"];
   if[not -16h=type icfg`halflife; '"validateimpact: halflife must be a timespan"];
@@ -243,37 +247,47 @@ dailyvol:{[quotes]
   };
 
 childimpact:{[icfg;execs;trades;sigma]
-  / temporary impact of each child execution, as a fraction of the price: eta x sigma x p^beta, with p the
-  / child's participation, own / (own + market), in the market volume of an interval of the child's length
-  / centred on its time (for arrival pacing, the interval the child was sized in)
+  / impact of each child execution, as a fraction of the price
+  / model `participation: eta x sigma x p^beta, with p the child's participation, own / (own + market),
+  /   in the market volume of an interval of the child's length centred on its time (for arrival
+  /   pacing, the interval the child was sized in)
+  / model `sqrtlaw: eta x sigma x sqrt(own / daily volume), the square-root law on the child's size
+  /   against the day's volume
+  / icfg: impact configuration (see validateimpact); a missing model means participation
   / execs: `time`qty`interval, interval a timespan
   / trades: the day's trades for the instrument, `time`qty, time-sorted
   / sigma: daily volatility as a fraction (see dailyvol)
   / returns: float fraction per execution
+  own:`float$execs`qty;
+  if[`sqrtlaw=$[`model in key icfg;icfg`model;`participation]; :icfg[`eta]*sigma*sqrt own%sum `float$trades`qty];
   csum:0f,sums `float$trades`qty;
   half:`timespan$(`long$execs`interval) div 2;
   vol:(csum trades[`time] binr execs[`time]+half)-csum trades[`time] binr execs[`time]-half;
-  own:`float$execs`qty;
   p:0f^own%own+vol;
   icfg[`eta]*sigma*xexp[p;icfg`beta]
   };
 
 shiftat:{[icfg;times;moves]
   / the market's price shift in currency at each of times (ascending, one day): the sum of every earlier or
-  / simultaneous child's signed impact, each halving every halflife and ignored after 20 halflives (below a
-  / millionth of it), tapered linearly to zero over the taper before closetime and rounded to whole cents,
-  / so bid and ask move by the same tick and nothing is left at the close
-  / icfg: impact configuration (see validateimpact)
+  / simultaneous child's signed impact, a share permanent of which stays through the day while the rest
+  / halves every halflife and is ignored after 20 halflives (below a millionth of it); the sum is tapered
+  / linearly to zero over the taper before closetime (so the close, and the next day di.simcalendar starts
+  / from it, are unmoved: the permanent share is permanent within the day) and rounded to whole cents, so
+  / bid and ask move by the same tick
+  / icfg: impact configuration (see validateimpact); a missing permanent share means 0
   / times: ascending timestamps of one day
   / moves: `time`amount, amount in currency, positive pushing the price up
   / returns: float shift per time
   n:count times;
   if[0=n; :`float$()];
   h:`float$`long$icfg`halflife;
+  perm:$[`permanent in key icfg;icfg`permanent;0f];
   add:{[times;h;d;t;a]
     j:(times binr t)_til times binr t+`timespan$`long$20*h;
     @[d;j;+;a*xexp[0.5;(`float$`long$times[j]-t)%h]]};
-  d:add[times;h]/[n#0f;moves`time;moves`amount];
+  d:add[times;h]/[n#0f;moves`time;(1-perm)*moves`amount];
+  moves:`time xasc moves;
+  d+:0f^(sums perm*moves`amount) moves[`time] bin times;
   close:(`date$first times)+icfg`closetime;
   w:$[0D<icfg`taper; 0f|1f&(`float$`long$close-times)%`float$`long$icfg`taper; `float$times<close];
   0.01*`long$w*d%0.01
