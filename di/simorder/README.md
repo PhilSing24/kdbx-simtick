@@ -16,7 +16,8 @@ The module is designed around a single core idea: **execution quality is a confi
 
 - **Configurable pacing** — `even` (uniformly spaced, patient), `frontloaded` (rushed, concentrated early — in both timing *and* quantity; half the order fills in the first 1% of the window, so use it as a deliberately bad contrast, not as an algo) or `arrival` (an implementation-shortfall schedule under a participation cap, see [Arrival pacing](#arrival-pacing))
 - **Volume-aware sizing** — under `even` pacing, child execution sizes are weighted by real market volume in each time bucket (pulled from `trades`), not a naive flat split
-- **Spread-aware pricing** — each execution is priced relative to the prevailing bid/ask (from `quotes`) at its timestamp, placed between mid and the far touch according to `spreadcapture`
+- **Spread-aware pricing** — each execution is priced against the prevailing bid/ask (from `quotes`) at its timestamp: aggressive with probability `spreadcapture`, crossing the spread to the far touch, otherwise at the mid, so fills differ while their mean spread capture is the configured one. Prices sit on a tenth of a tick, as trades print on the tape, so a mid fill on a one-tick spread is at the half tick
+- **Seeded jitter** — children leave the exact schedule by a random share `jitter` of the gap to their neighbours, so fill times do not sit on round fractions of the window
 - **Exact quantity conservation** — child execution quantities always sum exactly to the parent order's `orderqty`, regardless of rounding or minimum-size flooring
 - **Interval per execution** — each execution carries the length of market it was sized against (`interval`, a timespan: the schedule's spacing under `even`, the sizing interval under `arrival`, the child's bucket under `frontloaded`), which is what `impact` reads
 - **Arrival price benchmark** — the parent order table carries the mid price at `starttime`, ready for implementation-shortfall calculations
@@ -195,7 +196,8 @@ q)prices:simorder.pricing[arrcfg;moved`quotes;execs`time]
 | Function | Description |
 |----------|-------------|
 | `simorder.run[cfg;trades;quotes]` | Full simulation - returns dict with `order`/`executions` |
-| `simorder.schedule[cfg]` | Generate child execution timestamps only |
+| `simorder.schedule[cfg]` | The exact child schedule |
+| `simorder.jittered[cfg;times]` | The schedule moved by the seeded jitter |
 | `simorder.sizing[cfg;trades;filltimes]` | Generate child execution quantities only |
 | `simorder.trajectory[urgency;n]` | Arrival pacing: share of the order left at each of n+1 interval boundaries |
 | `simorder.capped[want;cap]` | Arrival pacing: quantities per interval under a cap, shortfalls carried forward |
@@ -234,8 +236,9 @@ Presets should be calibrated as good/bad execution style pairs, matched against 
 | `endtime` | Execution window end (timestamp, same day as `starttime`) | `2026.08.18D09:45:00.000000000` |
 | `numfills` | Number of child executions to generate | 20 |
 | `pacing` | `even` (patient), `frontloaded` (rushed) or `arrival` (urgency trajectory under a participation cap) | `` `even `` |
-| `spreadcapture` | 0=fills at mid (best), 1=fills at far touch (worst) | 0.1 |
-| `ticksize` | Minimum price increment; fill prices are rounded to the nearest tick | 0.01 |
+| `spreadcapture` | Probability a fill is aggressive (crosses the spread to the far touch) rather than at the mid: 0=best, 1=worst | 0.1 |
+| `jitter` | Random shift of each child's time as a share of half the gap to its neighbours; 0 = exact schedule | 0.3 |
+| `ticksize` | Minimum price increment; fill prices sit on a tenth of it, as trades print on the tape | 0.01 |
 | `seed` | Random seed (`0N` = no seed) | 1 |
 | `urgency` | Arrival pacing only (required there): Almgren-Chriss urgency, kappa x horizon, positive; higher trades earlier | 2 |
 | `maxpct` | Arrival pacing only (required there): participation cap per interval, own / (own + market), between 0 and 1 | 0.2 |
@@ -259,18 +262,18 @@ q)k4unit.moduletest`di.simorder
 
 | Group | Tests | Description |
 |-------|-------|--------------|
-| Validation | 12 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing, spreadcapture out of range, zero ticksize, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
-| Schedule | 5 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time |
+| Validation | 13 | Bad configs throw correct errors (starttime>=endtime, zero orderqty/numfills, invalid side/pacing, spreadcapture out of range, zero ticksize, jitter above 1, window on a day or symbol the market data does not cover, window spanning two days, start before the first quote) |
+| Schedule | 10 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time; jitter moves children off the schedule, keeps their order and the window, within its bound, and is exact at 0 |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
 | Market impact | 18 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, executions priced against the moved market inside the NBBO, eta 0 leaves the market as it is |
-| Pricing | 15 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid, spreadcapture 1 exactly at the ask (BUY) and the bid (SELL), every execution inside the quote in force at spreadcapture 0, 0.5 and 1 for both sides, the midpoint of a two-tick spread filled exactly and of a one-tick spread rounded to the nearest tick inside the quote |
+| Pricing | 17 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid, spreadcapture 1 exactly at the ask (BUY) and the bid (SELL), every execution inside the quote in force at spreadcapture 0, 0.5 and 1 for both sides, the midpoint of a two-tick spread filled exactly and of a one-tick spread at the half tick inside the quote, about spreadcapture of many fills at the far touch and the rest at the mid |
 | Order | 4 | Correct schema, single row, positive arrival price |
 | Executions/Run | 15 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty, every execution inside the quote in force, intervals per pacing |
 | Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **97** | |
+| **Total** | **105** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset; order windows are set on that day's date.
 

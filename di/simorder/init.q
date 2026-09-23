@@ -33,7 +33,7 @@ validate:{[cfg]
   / returns: cfg if valid, throws error otherwise
 
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
-  reqkeys,:`numfills`pacing`spreadcapture`ticksize`seed;
+  reqkeys,:`numfills`pacing`spreadcapture`ticksize`jitter`seed;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
@@ -44,6 +44,7 @@ validate:{[cfg]
   if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
+  if[not cfg[`jitter] within 0 1; '"validate: jitter must be between 0 and 1"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -79,6 +80,21 @@ schedule:{[cfg]
     '"schedule: unknown pacing - ",string cfg`pacing];
 
   start+`timespan$`long$fracs*dur
+  };
+
+jittered:{[cfg;scheduled]
+  / the scheduled child times moved by a uniform jitter of up to jitter
+  / times the gap to the neighbouring child, drawn from the seeded stream,
+  / so children do not land on exact fractions of the window; the order
+  / of the children and the window are kept
+  / cfg: config dict with `jitter`starttime`endtime
+  / scheduled: ascending timestamps from schedule
+  / returns: ascending timestamps inside the window
+  n:count scheduled;
+  gaps:`float$`long$(scheduled,cfg`endtime)-(cfg`starttime),scheduled;
+  room:0.5*gaps[til n]&gaps 1+til n;
+  shift:`timespan$`long$room*cfg[`jitter]*-1+2*n?1.0;
+  scheduled+shift
   };
 
 
@@ -298,25 +314,33 @@ pricing:{[cfg;quotes;filltimes]
   / cfg: config dict with `side`spreadcapture`ticksize
   / quotes: market quotes table (time-sorted) for the day
   / filltimes: scheduled fill timestamps from .z.m.schedule
-  / returns: list of fill prices, rounded to the nearest tick (cfg`ticksize)
+  / returns: list of fill prices on the tenth-of-a-tick grid, as trades print
+  /   on the tape: a mid fill on a one-tick spread is at the half tick, not
+  /   rounded to the touch (which would be the far touch for a buy and the
+  /   near touch for a sell)
   /
-  / spreadcapture 0 = fills at mid (best possible, no spread cost)
-  / spreadcapture 1 = fills at the far touch (worst - fully crosses the spread)
+  / each fill is aggressive with probability spreadcapture (it crosses the
+  / spread and prints at the far touch) and otherwise prints at the mid, so
+  / the mean spread capture is spreadcapture while fills differ, as they do:
+  / spreadcapture 0 = every fill at mid (best), 1 = every fill at the far
+  / touch (worst). The draw comes from the seeded stream
   qtimes:quotes`time;
   idx:0|qtimes bin filltimes;
 
   bid:quotes[`bid] idx;
   ask:quotes[`ask] idx;
   mid:0.5*bid+ask;
-  cap:cfg`spreadcapture;
+  aggressive:(count filltimes)?1.0;
+  aggressive:aggressive<cfg`spreadcapture;
 
-  prices:$[cfg[`side]=`BUY; mid+cap*ask-mid;
-    cfg[`side]=`SELL; mid-cap*mid-bid;
+  prices:$[cfg[`side]=`BUY; ?[aggressive;ask;mid];
+    cfg[`side]=`SELL; ?[aggressive;bid;mid];
     '"pricing: unknown side - ",string cfg`side];
 
-  / nearest tick: floor of x+0.5, not a cast, since `long$ already rounds
-  / to nearest and casting x+0.5 rounds every price up to the next tick
-  cfg[`ticksize]*floor 0.5+prices%cfg`ticksize
+  / nearest tenth of a tick: floor of x+0.5, not a cast, since `long$
+  / already rounds to nearest and casting x+0.5 rounds every price up
+  grid:0.1*cfg`ticksize;
+  grid*floor 0.5+prices%grid
   };
 
 
@@ -371,7 +395,7 @@ buildexecutions:{[cfg;trades;quotes]
   / quotes: market quotes table for the day
   / returns: fills table, one row per child fill, with the interval each was
   /   sized against (what impact needs, see intervals)
-  filltimes:.z.m.schedule[cfg];
+  filltimes:.z.m.jittered[cfg;.z.m.schedule cfg];
   sizes:.z.m.sizing[cfg;trades;filltimes];
   prices:.z.m.pricing[cfg;quotes;filltimes];
 
@@ -460,8 +484,9 @@ schema[`starttime]:       ("P";"execution window start (timestamp, matches trade
 schema[`endtime]:         ("P";"execution window end (timestamp)")
 schema[`numfills]:        ("J";"number of child fills to generate")
 schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
-schema[`spreadcapture]:   ("F";"0=fills at mid (best), 1=fills at far touch (worst)")
-schema[`ticksize]:        ("F";"minimum price increment; fill prices are rounded to the nearest tick (0.01 for US equities)")
+schema[`spreadcapture]:   ("F";"probability a fill is aggressive (crosses the spread, prints at the far touch) rather than at the mid: 0=best, 1=worst")
+schema[`jitter]:          ("F";"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
+schema[`ticksize]:        ("F";"minimum price increment (0.01 for US equities); fill prices sit on a tenth of it, as trades print on the tape")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
 schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
@@ -499,4 +524,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;marketday;schedule;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])

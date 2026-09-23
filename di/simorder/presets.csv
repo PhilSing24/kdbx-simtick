@@ -1,4 +1,4 @@
-name,orderid,sym,side,orderqty,starttime,endtime,numfills,pacing,spreadcapture,ticksize,seed,urgency,maxpct
-good,ORD001,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,even,0.1,0.01,1,,
-bad,ORD002,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,frontloaded,0.9,0.01,1,,
-arrival,ORD003,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,arrival,0.35,0.01,1,2,0.2
+name,orderid,sym,side,orderqty,starttime,endtime,numfills,pacing,spreadcapture,ticksize,jitter,seed,urgency,maxpct
+good,ORD001,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,even,0.1,0.01,0.3,1,,
+bad,ORD002,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,frontloaded,0.9,0.01,0.3,1,,
+arrival,ORD003,NVDA,BUY,10000,2026.08.18D09:35:00.000000000,2026.08.18D09:45:00.000000000,20,arrival,0.35,0.01,0.3,1,2,0.2
