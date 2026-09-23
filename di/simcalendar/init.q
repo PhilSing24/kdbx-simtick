@@ -62,12 +62,12 @@ validate:{[calendar]
   };
 
 validatecfg:{[cfg]
-  / validate the calendar keys of a configuration (a simtick config joined
-  / with a row of this module's presets, see loadconfig)
+  / validate the calendar keys of a configuration (a composed simtick
+  / config: the calendar keys are the scenario layer's, see compose)
   / cfg: configuration dictionary
   / returns: cfg if valid, throws error otherwise
   reqkeys:`overnightshare`gapdayweight`regimepersistence`regimecorr`volregimesd`volumeregimesd;
-  reqkeys,:`vol`tradingdays`startprice`seed`sym`baseintensity`jumpintensity;
+  reqkeys,:`vol`tradingdays`price`seed`sym`tradesperday`jumpintensity`openingtime`closingtime;
   .z.m.val.haskeys[cfg;reqkeys;"validatecfg"];
   if[not (0<=cfg`overnightshare)&1>cfg`overnightshare; '"validatecfg: overnightshare must be between 0 and 1, 1 excluded"];
   if[0>cfg`gapdayweight; '"validatecfg: gapdayweight must be zero or positive"];
@@ -171,26 +171,30 @@ overnight:{[cfg;ndays]
 / CORE SIMULATION
 / ============================================================
 
-daycfg:{[cfg;day;startprice]
+daycfg:{[cfg;day;price]
   / the simtick config for one day: its date, closing time and open price,
   / the intraday vol reduced to the share left after the overnight one (so
   / the close-to-close vol is the configured vol) times the day's volatility
-  / multiplier, the base intensity times its volume multiplier, its jump
-  / intensity (a positive one selects the jump model), and its own seed, so
-  / the day is regenerated exactly from its row of the days table:
+  / multiplier, the trades per day times its volume multiplier and the
+  / share of the full session it is open (a half day trades about half),
+  / its jump intensity (a positive one selects the jump model), the base
+  / intensity derived from those as compose does, and its own seed, so the
+  / day is regenerated exactly from its row of the days table:
   /   simtick.run daycfg[cfg;days d;days[d]`open]
   / cfg: configuration dictionary
   / day: a row of the regimes or days table (`date`closingtime`volmult`volumemult`jumpintensity`dayseed)
-  / startprice: price at the open
+  / price: price at the open
   / returns: config dict for simtick.run
   dc:cfg;
   dc[`tradingdate]:day`date;
   dc[`closingtime]:day`closingtime;
-  dc[`startprice]:startprice;
+  dc[`price]:price;
   dc[`vol]:cfg[`vol]*day[`volmult]*sqrt 1-cfg`overnightshare;
-  dc[`baseintensity]:cfg[`baseintensity]*day`volumemult;
+  session:(day[`closingtime]-cfg`openingtime)%cfg[`closingtime]-cfg`openingtime;
+  dc[`tradesperday]:`long$cfg[`tradesperday]*day[`volumemult]*session;
   dc[`jumpintensity]:day`jumpintensity;
   if[0<day`jumpintensity; dc[`pricemodel]:`jump];
+  dc[`baseintensity]:simtick.intensityfor dc;
   dc[`seed]:day`dayseed;
   dc
   };
@@ -236,8 +240,8 @@ runstep:{[cfg;dst;state;day]
 
 run:{[cfg;calendar;dbpath]
   / main simulation entry point
-  / cfg: simtick configuration joined with this module's calendar keys
-  /   (see loadconfig)
+  / cfg: a composed simtick configuration (its scenario layer carries the
+  /   calendar keys, see compose)
   / calendar: list of trading dates, or a calendar table (see validate)
   / dbpath: file handle for disk persistence (e.g. `:/tmp/mydb), or (::) for in-memory
   / returns: in memory, a dict `trade`days (and `quote when generatequotes
@@ -247,7 +251,7 @@ run:{[cfg;calendar;dbpath]
   /   days as a splayed table at the root
   /
   / Example (in-memory):
-  /   cfg:tickcfg,simcalendar.loadconfig[`:di/simcalendar/presets.csv]`default
+  /   cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
   /   result:simcalendar.run[cfg;calendar;(::)]
   /   result`days
   /
@@ -259,7 +263,7 @@ run:{[cfg;calendar;dbpath]
   dst:$[topersist; hsym`$string dbpath; (::)];
 
   / every day draws from its own seeds (see seeds); none when the config has no seed
-  init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`startprice;();();());
+  init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
   state:.z.m.runstep[cfg;dst]/[init;reg];
   days:raze state`days;
   $[topersist;
@@ -386,37 +390,69 @@ nysecalendar:{[from;to]
   };
 
 
-/ configuration schema: column name -> (type; description)
-schema:()!()
-schema[`name]:("S";"preset name (key)")
-schema[`overnightshare]:("F";"share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded); the intraday vol is reduced to the rest so the close-to-close vol stays the configured vol")
-schema[`gapdayweight]:("F";"weight of each calendar day beyond the first in an overnight gap's variance (0.25: a weekend carries 1.5 nights' worth)")
-schema[`regimepersistence]:("F";"AR(1) persistence of the day-level regime, between 0 and 1 (1 excluded): 0 = independent days, 0.7 = quiet and busy spells of a few days")
-schema[`regimecorr]:("F";"correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 (0.7: busy days are volatile days, without being one thing)")
-schema[`volregimesd]:("F";"standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one (0 = every day at the configured vol)")
-schema[`volumeregimesd]:("F";"standard deviation of the log volume multiplier across days, driven by the same regime as the volatility (0 = every day at the configured intensity)")
+/ ============================================================
+/ SEVERAL INSTRUMENTS
+/ ============================================================
 
-csvtypes:raze first each value schema
+compose:{[market;instruments;scenarios;scenario;run]
+  / the configuration of each instrument of a multi-instrument run, one
+  / scenario for all or one per instrument
+  / market: a market dictionary (simtick.loadmarket)
+  / instruments: the instrument table (simtick.loadinstruments)
+  / scenarios: the scenario table (simtick.loadscenarios)
+  / scenario: a scenario name for every instrument of the table, or a
+  /   dictionary sym!scenario name for the instruments it names
+  / run: the run dictionary (date or calendar aside: seed, generatequotes)
+  / returns: dictionary sym!composed configuration (see simtick.compose)
+  if[-11h=type scenario; scenario:(exec sym from instruments)!(count instruments)#scenario];
+  if[not 99h=type scenario; '"compose: scenario must be a name or a dictionary sym!name"];
+  syms:key scenario;
+  if[count missing:syms where not syms in exec sym from instruments;
+    '"compose: instruments not in the instrument table - ",", " sv string missing];
+  if[count unknown:(distinct value scenario) where not (distinct value scenario) in exec name from scenarios;
+    '"compose: scenarios not in the scenario table - ",", " sv string unknown];
+  syms!{[m;i;s;r;sym;sce] simtick.compose[m;i sym;s sce;r]}[market;instruments;scenarios;run]'[syms;value scenario]
+  };
 
-loadconfig:{[filepath]
-  / load the calendar presets from CSV file; a row is joined onto a simtick
-  / config: cfg:tickcfg,loadconfig[`:presets.csv]`default
-  / filepath: file handle to CSV
-  / returns: keyed table with preset name as key
-  if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  hdr:`$csv vs first read0 filepath;
-  expected:key .z.m.schema;
-  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
-  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
-  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns"];
-  types:raze first each .z.m.schema hdr;
-  1!expected xcols (types;enlist csv) 0: filepath
+persistmany:{[dst;merged]
+  / write a merged multi-instrument result: trade and quote per date
+  / partition (sorted by sym then time, sym parted), days at the root
+  dates:distinct `date$merged[`trade]`time;
+  {[dst;merged;d]
+    daypath:hsym`$string[dst],"/",string d;
+    {[dst;daypath;merged;d;name]
+      if[not name in key merged; :(::)];
+      t:select from merged name where d=`date$time;
+      .Q.dd[daypath;`$string[name],"/"] set .Q.en[dst] update `p#sym from `sym`time xasc t}[dst;daypath;merged;d] each `trade`quote;
+    }[dst;merged] each dates;
+  .Q.dd[dst;`$"days/"] set .Q.en[dst] merged`days;
+  dst
+  };
+
+runmany:{[cfgs;calendar;dbpath]
+  / run several instruments over the same calendar (see compose): the
+  / regime seed of a date is shared, so the instruments live the same
+  / market days; each has its own tape and gaps
+  / cfgs: dictionary sym!configuration (compose)
+  / calendar: a list of trading dates, or a calendar table (see validate)
+  / dbpath: file handle for disk persistence, or (::) for in-memory
+  / returns: in memory, a dict `trade`days (and `quote when the configs
+  /   return quotes), the tables of every instrument and day, sorted by
+  /   time, and the days table with a sym column; on disk, dbpath
+  if[not 99h=type cfgs; '"runmany: cfgs must be a dictionary sym!configuration"];
+  rs:.z.m.run[;calendar;(::)] each cfgs;
+  merged:(`symbol$())!();
+  merged[`trade]:`time`sym xasc raze rs[;`trade];
+  if[all `quote in/: key each rs; merged[`quote]:`time`sym xasc raze rs[;`quote]];
+  merged[`days]:`sym`date xasc raze {[sym;r] `sym xcols update sym:sym from r`days}'[key rs;value rs];
+  $[(::)~dbpath; merged; .z.m.persistmany[hsym`$string dbpath;merged]]
   };
 
 describe:{[]
-  / return the calendar configuration schema as a table
-  ([]param:key .z.m.schema;typ:first each value .z.m.schema;description:last each value .z.m.schema)
+  / the calendar keys of the configuration schema (the scenario layer's
+  / calendar group), with their types and descriptions
+  ?[simtick.describe[];enlist (=;`group;enlist `calendar);0b;()]
   };
 
 / export public interface
-export:([run;runstep;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;loadconfig;validate;validatecfg;describe])
+export:([run;runmany;compose;runstep;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
