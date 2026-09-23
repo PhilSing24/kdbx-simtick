@@ -93,8 +93,7 @@ kdbx-modules/
     │   ├── test.csv
     │   ├── testing.q
     │   ├── README.md
-    │   ├── docs/
-    │   └── notebooks/
+    │   └── docs/
     ├── simcalendar/       # 1 instrument, N days (uses di.simtick)
     │   ├── init.q
     │   ├── calendar.csv
@@ -106,8 +105,7 @@ kdbx-modules/
         ├── presets.csv
         ├── test.csv
         ├── testing.q
-        ├── README.md
-        └── notebooks/
+        └── README.md
 ```
 
 ## Creating New Modules
