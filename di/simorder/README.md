@@ -23,7 +23,7 @@ The module is designed around a single core idea: **execution quality is a confi
 
 ### Market Focus
 
-Built to sit directly on top of `di.simtick`'s NVDA/NASDAQ presets. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simcalendar` in memory, `di.simbasket`) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped presets are on the same date as `di.simtick`'s.
+Built to sit directly on top of `di.simtick`'s NVDA/NASDAQ presets. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simcalendar` in memory) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped presets are on the same date as `di.simtick`'s.
 
 ### Use Cases
 

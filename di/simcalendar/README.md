@@ -9,10 +9,10 @@ This module orchestrates `di.simtick` over multiple trading days, producing a **
 ## Module Hierarchy
 
 ```
-simtick ← simcalendar ← simbasket
+simtick ← simcalendar
 ```
 
-This module sits between `simtick` (single instrument, single day) and `simbasket` (multiple correlated instruments). It can be used standalone or as the building block for `simbasket`.
+This module runs `simtick` over a trading calendar, one day at a time, carrying the closing price forward.
 
 ## Installation
 
