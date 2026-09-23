@@ -29,12 +29,12 @@ repl:
 test: test-simtick test-simcalendar test-simorder
 
 # Individual module tests
-# The runner is the local.k4unit module; each target exits non-zero when a check fails
+# The runner is the local.k4unit module; each target exits non-zero when a check fails or the suite aborts (the runner's error is trapped, since an untrapped error would end the piped q with status 0)
 test-simtick:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simtick; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simtick;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
 
 test-simcalendar:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simcalendar; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simcalendar;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
 
 test-simorder:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simorder; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simorder;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q

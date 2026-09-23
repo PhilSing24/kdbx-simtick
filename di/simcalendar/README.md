@@ -4,15 +4,16 @@ Multi-day tick simulation over a trading calendar.
 
 ## About
 
-This module orchestrates `di.simtick` over multiple trading days, producing a **coherent price path** where each day's closing price becomes the next day's opening price.
+This module runs `di.simtick` day after day and turns the days into one coherent history: each day opens at the previous close moved by an overnight return, the intraday and overnight variance share one budget so the configured `vol` stays the close-to-close volatility, quiet and busy spells come from a day-level regime, the calendar can mark half days and event days, and a `days` table summarizes every session. Every day draws from its own seed, so any day can be regenerated alone from its row of that table. It is the layer that makes multi-day TCA (the same execution style on different market days) and risk demos (close-to-close and close-to-open returns, volatility clustering across days) possible.
 
 ## Module Hierarchy
 
 ```
 simtick ← simcalendar
+simtick ← simorder
 ```
 
-This module runs `simtick` over a trading calendar, one day at a time, carrying the closing price forward.
+`simtick` is one instrument for one day; `simcalendar` runs it over N days. `simorder` runs against one day of the output (pass the whole result: it keeps the order's instrument and day).
 
 ## Installation
 
@@ -26,6 +27,7 @@ di/
 └── simcalendar/
     ├── init.q
     ├── calendar.csv
+    ├── presets.csv
     └── README.md
 ```
 
@@ -39,19 +41,26 @@ di/
 q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
 
-/ Load tick configuration from simtick
-q)cfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
+/ A tick configuration from simtick, joined with a calendar preset from this module
+q)tickcfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
+q)cfg:tickcfg,simcalendar.loadconfig[`:di/simcalendar/presets.csv]`default
 
 / Load trading calendar
 q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
 
 / Run multi-day simulation (in-memory)
-q)trades:simcalendar.run[cfg;calendar;(::)]
-q)cols trades
-`sym`time`seq`price`qty`aggressor`cond`venue
-q)count trades
-831718
+q)result:simcalendar.run[cfg;calendar;(::)]
+q)key result
+`trade`quote`days
+q)select date,closingtime,volmult,volumemult,dayseed,open,close,overnightret,trades,volume from result`days
+date       closingtime volmult   volumemult dayseed  open     close  overnightret trades volume  
+-------------------------------------------------------------------------------------------------
+2026.08.18 16:00       0.852167  0.852167   10612790 215      211.74 0            237203 39090196
+2026.08.19 16:00       0.7869607 0.7869607  10612821 209.1146 214.22 -0.01247679  218335 36320283
+2026.08.20 13:00       1.325001  1.325001   10612852 212.5223 221.48 -0.007956562 196695 32583884
 ```
+
+`generatequotes:0b` in the config returns `trade` and `days` only. The `days` table starts with the calendar and regime columns (`closingtime`, `volmult`, `volumemult`, `jumpintensity`, the seeds and the regime states `volstate` and `volumestate`) and ends with the day's open, close, overnight return, trades and volume.
 
 ### Disk persistence
 ```q
@@ -69,122 +78,114 @@ date       sym  time                          seq price   qty    aggressor cond 
 2026.08.18 NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 2026.08.18 NVDA 2026.08.18D09:30:00.232009923 14  215     300    S         R    XNAS
 2026.08.18 NVDA 2026.08.18D09:30:00.309357209 15  215     300    S         R    EDGX
+q)days
 ```
 
-
-### With quotes
-
-```q
-/ Enable quote generation
-q)cfg[`generatequotes]:1b
-
-/ In-memory - returns dict with `trade`quote
-q)result:simcalendar.run[cfg;calendar;(::)]
-q)result`trade
-q)result`quote
-
-/ On disk - writes both trade/ and quote/ partitions
-q)simcalendar.run[cfg;calendar;`:/tmp/mydb]
-```
+`trade` and `quote` are written per date partition; `days` is a splayed table at the root, loaded with the database.
 
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `simcalendar.run[cfg;calendar;dbpath]` | Run simulation, returns trades table or dbpath |
-| `simcalendar.loadcalendar[filepath]` | Load calendar from CSV, returns date list |
-| `simcalendar.describe[]` | Return module description |
+| `simcalendar.run[cfg;calendar;dbpath]` | Run the simulation; returns a dict `trade`quote`days` in memory, or `dbpath` on disk |
+| `simcalendar.runstep[cfg;dst;state;day]` | One day of the run (the step `run` folds over the regimes table) |
+| `simcalendar.daycfg[cfg;day;startprice]` | The simtick config for one day from its row of the regimes or days table: date, closing time, open price, vol and intensity multipliers, jump intensity, seed |
+| `simcalendar.overnight[cfg;ndays]` | One overnight log return over a gap of `ndays` calendar days |
+| `simcalendar.seeds[cfg;dates]` | The per-day seeds: a regime seed per date shared across instruments, the instrument's day seed and gap seed |
+| `simcalendar.regimes[cfg;calendar]` | The calendar with the day-level regime resolved: seeds, AR(1) state, volatility and volume multipliers, closing time, jump intensity |
+| `simcalendar.loadcalendar[filepath]` | Load a calendar from CSV, returns a calendar table |
+| `simcalendar.savecalendar[filepath;calendar]` | Write a calendar table to CSV |
+| `simcalendar.nysecalendar[from;to]` | The NYSE trading days between two dates, early closes at 13:00 |
+| `simcalendar.loadconfig[filepath]` | Load the calendar presets from CSV, returns keyed table |
+| `simcalendar.validate[calendar]` | Validate a calendar (a date list or a table) and return it as a table |
+| `simcalendar.validatecfg[cfg]` | Validate the calendar keys of a config |
+| `simcalendar.describe[]` | The calendar configuration schema |
+
+## Configuration
+
+All tick parameters come from `di.simtick`'s configuration; `tradingdate` and `startprice` are set per day. The calendar keys come from this module's `presets.csv` and are joined onto the tick config. `loadconfig` checks the header against the schema like the other modules.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `overnightshare` | Share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
+| `gapdayweight` | Weight of each calendar day beyond the first in a gap's variance; 0.25 gives a weekend 1.5 nights' worth | 0.25 |
+| `regimepersistence` | AR(1) persistence of the day-level regimes, between 0 and 1: 0 gives independent days, 0.7 quiet and busy spells of a few days | 0.7 |
+| `regimecorr` | Correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |
+| `volregimesd` | Standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one; 0 keeps every day at the configured vol | 0.3 |
+| `volumeregimesd` | Standard deviation of the log volume multiplier across days, driven by the same regime as the volatility | 0.3 |
+
+| Preset | Description |
+|--------|-------------|
+| `default` | 30% of the daily variance overnight, weekends at 1.5 nights, regimes with persistence 0.7, 30% spread and correlation 0.7 |
+| `nogap` | As default but no overnight return: each day opens exactly at the previous close |
+| `steady` | Overnight gaps but no regime: every day at the configured vol and intensity |
+| `turbulent` | Long spells (persistence 0.8) with 60% spread in vol and volume, correlation 0.8 |
 
 ## Calendar Format
 
-Simple CSV with a single `date` column:
+A CSV with a `date` column and any of four optional columns; an empty cell means the config's value (1 for the multipliers):
 
 ```csv
-date
-2026.08.18
-2026.08.19
-2026.08.20
+date,closingtime,volmult,volumemult,jumpintensity
+2026.08.18,,,,
+2026.08.19,,,,
+2026.08.20,13:00,,,
 ```
 
-You can generate this from:
-- NYSE official calendar PDFs
-- `pandas_market_calendars` Python package
-- Manual list of trading days
+| Column | Meaning |
+|--------|---------|
+| `closingtime` | The day's close (minute): `13:00` makes a half day |
+| `volmult` | Multiplies the day's volatility on top of the regime: 2 for an earnings day |
+| `volumemult` | Multiplies the day's trade intensity on top of the regime: 3 for an earnings day |
+| `jumpintensity` | The day's jumps per day; a positive value selects the jump model for that day |
+
+`run` and `validate` also accept a plain date list. A calendar table can be built in q as well, for instance an earnings day:
+
+```q
+q)calendar:update volmult:2f,volumemult:3f,jumpintensity:3f from calendar where date=2026.08.19
+```
+
+### Generating an NYSE calendar
+
+```q
+q)calendar:simcalendar.nysecalendar[2026.01.01;2026.12.31]
+q)count calendar
+251
+q)select from calendar where closingtime=13:00
+date       closingtime volmult volumemult jumpintensity
+-------------------------------------------------------
+2026.11.27 13:00
+2026.12.24 13:00
+q)simcalendar.savecalendar[`:mycalendar.csv;calendar]
+```
+
+The generator applies the NYSE rules: weekdays less New Year's Day (not observed on the Friday when it falls on a Saturday), Martin Luther King Jr. Day, Presidents' Day, Good Friday, Memorial Day, Juneteenth (from 2022), Independence Day, Labor Day, Thanksgiving and Christmas, with a Saturday holiday observed on the Friday and a Sunday one on the Monday; early closes on the day after Thanksgiving, July 3 and Christmas Eve when they are trading days. Special closures (days of mourning, disasters) are not modelled: check against the official calendar for a past year. Edit the table for event days before running, or save it and edit the CSV.
 
 ## Behavior
 
-### Price Continuity
+### Overnight gap and the variance budget
 
-Prices form one continuous path across days:
-
-```
-Day 1: starts at cfg[`startprice], ends at P1
-Day 2: starts at P1, ends at P2
-Day 3: starts at P2, ends at P3
-```
-
-Each day's closing print is the next day's price at the open, from which that day's first trade diffuses over the interval to its time (as in `di.simtick`), so the first print of a day is close to, not equal to, the last print of the day before.
-
-### Disk Persistence
-
-Pass a file handle as the third argument to persist to a date-partitioned kdb+ database:
-
-- `(::)` — in-memory only, returns trades table (or dict with quotes)
-- `` `:/path/mydb `` — writes date-partitioned DB, returns dbpath
-
-The database structure on disk:
+Each day after the first opens at the previous close times `exp` of an overnight log return, drawn as a normal with mean minus half its variance (no drift overnight) and variance
 
 ```
-/path/mydb/
-├── sym                    / symbol enumeration file
-├── 2026.08.18/
-│   ├── trade/             / splayed trade table
-│   └── quote/             / splayed quote table (if generatequotes:1b)
-├── 2026.08.19/
-│   ├── trade/
-│   └── quote/
-...
+overnightshare * vol^2 / tradingdays * (1 + gapdayweight * (calendar days - 1))
 ```
 
-When `generatequotes:1b`, both `trade` and `quote` partitions are written for each day.
+The intraday simulation runs at `vol * sqrt(1 - overnightshare)`, so over a one-night gap the close-to-close variance is exactly `vol^2 / tradingdays`: the configured `vol` is the close-to-close volatility, as it is quoted. A weekend or holiday gap carries more variance than one night but less than its calendar days, which is what markets show.
 
-### Overnight Gap
+The `days` table records, per session, the open, the close (the last print, the closing auction), the overnight return that produced the open, the number of trades and the volume, so close-to-open and close-to-close returns are one query away. With `overnightshare:0` the module behaves as before: each day opens exactly at the previous close.
 
-Currently, each day's opening price equals the previous day's closing price — there is no overnight gap. This produces a continuous price path.
+### Day-level regimes
 
-**Assumption:** The calendar contains consecutive trading days. If there are gaps (e.g., holidays), the price still carries forward without any adjustment for the elapsed time. A Friday close becomes the following Monday's open with no weekend effect.
+Days differ. Two standardized AR(1) states with persistence `regimepersistence`, `volstate` for volatility and `volumestate` for volume, are driven by daily shocks with correlation `regimecorr`. They give each day a volatility multiplier `exp(volregimesd * volstate - volregimesd^2)` and a volume multiplier `exp(volumeregimesd * volumestate - volumeregimesd^2 / 2)`, so busy days tend to be volatile days (at 0.7 they are strongly related without being one thing, as in markets) and spells of a few days cluster. The volume multiplier averages 1; the volatility multiplier is normalized on its square instead, since volatility enters a day as variance, so the close-to-close variance averages the configured `vol^2 / tradingdays` rather than exceeding it by `exp(volregimesd^2)`. The calendar's own `volmult` and `volumemult` multiply on top, for event days. `simcalendar.regimes[cfg;calendar]` returns the resolved multipliers, and the `days` table carries them.
 
-Implementing a realistic overnight gap is not straightforward. If we add random overnight returns (even with zero drift), we introduce additional variance:
+### Seeds: one per day, shared across instruments
 
-- **Intraday variance:** σ²/252 per trading day (from simtick)
-- **Overnight variance:** σ² × (calendar days)/252 per gap
+With `cfg[`seed]` set, every date gets a regime seed from the seed and the date alone, so a date's regime innovation is the same in any calendar that contains it and, since it does not depend on `sym`, the same for every instrument run on that date: the market's day. From it the instrument gets a day seed (for its tape) and a gap seed (for its overnight return). Consequences:
 
-Over a week (5 trading days, 7 calendar days of gaps), total variance would be approximately double what the configured `vol` implies for daily close-to-close returns.
-
-To maintain consistency with the simtick configuration, adding overnight gaps would require either:
-
-1. Recalibrating `vol` to account for the additional overnight variance
-2. Introducing a separate overnight volatility parameter with careful documentation
-3. Splitting variance budget between intraday and overnight components
-
-For now, we keep the simpler approach where the configured `vol` governs the entire price path. Future versions may address overnight gaps with proper variance accounting.
-
-### Seed Management
-
-If `cfg[`seed]` is set, the RNG is initialized once at the start of the simulation. Random numbers then flow sequentially across all days from a single stream:
-
-```
-Day 1: consumes randoms for arrivals, prices, quantities
-Day 2: continues from where Day 1 left off
-Day 3: continues from where Day 2 left off
-```
-
-This ensures:
-- **Reproducibility:** same seed → same outputs
-- **Continuity:** one coherent random sequence across the entire simulation
-- **Variety:** each day has different random draws (not repeated patterns)
-
-The number of random draws per day varies with trade count, which is path-dependent by nature.
+- Any day can be regenerated alone, exactly, from its row of the `days` table: `simtick.run simcalendar.daycfg[cfg;days d;days[d]`open]`.
+- Adding or removing days elsewhere in the calendar does not change a day's innovation or tape, only the regime level that the AR(1) carries into it and the open it inherits.
+- Without a seed nothing is seeded and every run differs.
 
 ### Validation
 
@@ -193,16 +194,28 @@ The calendar is validated for:
 - Non-empty
 - No duplicates
 - Sorted ascending
+- Only the known columns (`date`, `closingtime`, `volmult`, `volumemult`, `jumpintensity`)
 
-## Configuration
+The config must carry the calendar keys, with `overnightshare` and `regimepersistence` below 1 and `gapdayweight` and the regime spreads non-negative.
 
-All tick simulation parameters come from `di.simtick` configuration. The `tradingdate` field is overridden for each day in the calendar.
+## Testing
 
-See `simtick.describe[]` for available parameters.
+```bash
+make test-simcalendar
+```
+
+or from a q session:
+
+```q
+q)k4unit:use`local.k4unit
+q)k4unit.moduletest`di.simcalendar
+```
+
+The suite covers calendar validation and loading, the config keys, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, disk persistence and reproducibility.
 
 ## Future Extensions
 
-- **Overnight gaps**: Model price jumps between close and next open (requires variance recalibration)
+- **A market factor across instruments**: the shared regime seed is the hook for a common day and, later, a common intraday path
 
 ## License
 
