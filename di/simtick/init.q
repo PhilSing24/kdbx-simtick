@@ -166,9 +166,10 @@ pricegbm:{[cfg;dts]
   / generate price path using geometric Brownian motion
   / cfg: config dict with `startprice`vol`drift`rngmodel
   / dts: list of time deltas in years (first element is time from session
-  /   open to first trade - startprice represents the price AT session
-  /   open, so this first interval is diffused like every other step,
-  /   matching the technical paper's eq(17))
+  /   open to the first point - startprice is the price AT session open, so
+  /   this first interval is diffused like every other step, matching the
+  /   technical paper's eq(17); run samples the path on the quote clock,
+  /   whose first point is the open itself)
   / returns: list of prices corresponding to each time point
   eps:.z.m.rng.normal[count dts;cfg];
   cfg[`startprice]*prds .z.m.gbm[cfg`vol;cfg`drift;eps;dts]
@@ -255,154 +256,63 @@ qty.gen:{[n;cfg]
     '"qty.gen: unknown qtymodel - ",string model]
   };
 
-quote.generate:{[cfg;trades]
-  / generate quote updates for trades (fully vectorized)
-  / cfg: configuration dictionary
-  / trades: trade table with `time`price columns
-  / returns: quote table with `time`bid`ask`bidsize`asksize
-
-  / validate inputs
-  .z.m.val.hascols[trades;`time`price;"quote.generate"];
-
-  n:count trades;
-  if[n=0; :([]time:`timestamp$();bid:`float$();ask:`float$();bidsize:`long$();asksize:`long$())];
-
-  tradetimes:trades`time;
-  tradeprices:trades`price;
-
-  / parameters
-  basespread:cfg`basespread;
-  pretradeoffset:cfg`pretradeoffset;
-  quoteupdaterate:cfg`quoteupdaterate;
-  avgquotesize:cfg`avgquotesize;
+quote.generate:{[cfg;times;mids]
+  / quote table from the mid path sampled on the quote clock
+  / cfg: config dict with `basespread`spreadopenmult`spreadmidmult`spreadclosemult`avgquotesize`ticksize`rngmodel
+  / times: quote timestamps, ascending, the first at the session open
+  / mids: mid price at each time (the price path sampled on the quote clock)
+  / returns: quote table `time`bid`ask`bidsize`asksize; bid and ask on the
+  /   tick grid, bid < ask
+  n:count times;
   ticksize:cfg`ticksize;
 
-  / === 1. initial quote (before first trade) ===
-  jitter:$[0<cfg`initquotejitterms; first 1?cfg`initquotejitterms; 0];
-  initoffset:`timespan$`long$nsperms*pretradeoffset+jitter;
-  inittime:tradetimes[0]-initoffset;
-  initprice:tradeprices[0];
-  initspread:basespread*initprice*cfg`spreadopenmult;
+  / spread as a fraction of the mid, wider at open and close, with a little noise
+  spreadvar:1+0.1*abs .z.m.rng.normal[n;cfg];
+  spreads:cfg[`basespread]*mids*.z.m.quote.spreadmults[cfg;times]*spreadvar;
 
-  / === 2. pre-trade quotes (one per trade, vectorized) ===
-  / times: random offset before each trade
-  randoffsets:n?pretradeoffset;
-  pretimes:tradetimes-`timespan$`long$(pretradeoffset+randoffsets)*nsperms;
+  / bid and ask on the tick grid; a spread that collapses in rounding becomes one tick
+  bid:ticksize*`long$0.5+(mids-spreads%2)%ticksize;
+  ask:ticksize*`long$0.5+(mids+spreads%2)%ticksize;
+  ask:ask|bid+ticksize;
 
-  / clip: a pre-trade quote must never precede the PREVIOUS trade's own
-  / execution. Without this, during tight Hawkes-clustered bursts (two
-  / trades firing within ~pretradeoffset of each other), independent
-  / per-trade random jitter can cause trade i+1's pre-trade quote
-  / (centered on trade i+1's price) to land chronologically before
-  / trade i even executes - corrupting the nearest-preceding-quote
-  / lookup for trade i with a neighboring trade's price. Since
-  / tradetimes is strictly ascending, clipping to the immediately
-  / prior trade's time transitively guarantees this quote can never
-  / precede ANY earlier trade, not just the adjacent one.
-  / strict inequality: a non-strict clip (>=) can leave the quote
-  / tied EXACTLY at the previous trade's timestamp, which still lets
-  / ASOF-style nearest-quote lookups mismatch it to the wrong trade.
-  / +1 nanosecond guarantees genuine ordering, not just a tie.
-  prevtradetimes:(first tradetimes),-1_tradetimes;
-  pretimes:pretimes|(prevtradetimes+`timespan$1);
-
-  / spreads based on time of day (vectorized)
-  / use pretimes (actual quote timestamps) not tradetimes - spread is evaluated
-  / when the quote is posted, which is pretradeoffset ms before the trade
-  prespreadmults:.z.m.quote.spreadmults[cfg;pretimes];
-  prespreads:basespread*tradeprices*prespreadmults;
-  prebids:tradeprices-prespreads%2;
-  preasks:tradeprices+prespreads%2;
-
-  / sizes (vectorized)
-  prebidsizes:avgquotesize+`long$100*.z.m.rng.normal[n;cfg];
-  preasksizes:avgquotesize+`long$100*.z.m.rng.normal[n;cfg];
-
-  / === 3. intermediate quotes (vectorized) ===
-  / only if we have at least 2 trades
-  intresult:$[n>1;
-    .z.m.quote.intermediates[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quoteupdaterate;avgquotesize];
-    `times`bids`asks`bidsizes`asksizes!5#enlist`float$()
-  ];
-
-  / === 4. combine all quotes ===
-  alltimes:(enlist inittime),intresult[`times],pretimes;
-  allbids:(enlist initprice-initspread%2),intresult[`bids],prebids;
-  allasks:(enlist initprice+initspread%2),intresult[`asks],preasks;
-  allbidsizes:(enlist avgquotesize),intresult[`bidsizes],prebidsizes;
-  allasksizes:(enlist avgquotesize),intresult[`asksizes],preasksizes;
-
-  / build table, enforce minimum size of 1, sort by time
-  / round bid/ask to the tick size consistent with trade price rounding
-  / enforce bid < ask after rounding - tight spreads can collapse to bid=ask
-  quotes:([]time:alltimes;bid:allbids;ask:allasks;bidsize:allbidsizes;asksize:allasksizes);
-  quotes:update bidsize:1|bidsize,asksize:1|asksize,
-    bid:ticksize*`long$0.5+bid%ticksize,
-    ask:ticksize*`long$0.5+ask%ticksize from quotes;
-  quotes:update ask:bid+ticksize from quotes where bid>=ask;
-  `time xasc quotes
+  bidsize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
+  asksize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
+  ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
   };
 
-quote.intermediates:{[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quoteupdaterate;avgquotesize]
-  / generate all intermediate quotes across all gaps (fully vectorized)
-  / returns dict with `times`bids`asks`bidsizes`asksizes
-  n:count tradetimes;
-  empty:`times`bids`asks`bidsizes`asksizes!5#enlist`float$();
+trade.generate:{[cfg;times;quotes]
+  / trades against the quote in force at their time: a buyer-initiated trade
+  / takes the ask, a seller-initiated one the bid, the aggressor side following
+  / a persistent sign process; a share of trades prints at the midpoint and a
+  / share a tenth of a tick inside the touch (price improvement)
+  / cfg: config dict with `sidepersistence`midpointshare`improvementshare`ticksize
+  /   and the quantity model keys
+  / times: trade timestamps, ascending, none before the first quote
+  / quotes: quote table (see quote.generate)
+  / returns: trade table `time`price`qty`aggressor, aggressor `B (buyer-
+  /   initiated) or `S; prices on the tenth-of-a-tick grid
+  n:count times;
+  idx:quotes[`time] bin times;
+  bid:quotes[`bid] idx;
+  ask:quotes[`ask] idx;
+  mid:0.5*bid+ask;
 
-  / gap times in ms between consecutive trades
-  prevtimes:tradetimes til n-1;
-  nexttimes:tradetimes 1+til n-1;
-  prevprices:tradeprices til n-1;
-  nextprices:tradeprices 1+til n-1;
-  gaps:`long$(nexttimes-prevtimes)%nsperms;
+  / aggressor signs: a Markov chain, each sign repeating the previous one with
+  / probability sidepersistence (lag-1 autocorrelation 2*sidepersistence-1)
+  flips:(n?1.0)>cfg`sidepersistence;
+  flips[0]:0b;
+  sign:(1-2*first 1?2)*1-2*(sums flips) mod 2;
 
-  / number of intermediate quotes per gap (capped at maxquoteupdates)
-  nupdates:cfg[`maxquoteupdates]&`long$floor quoteupdaterate*gaps%1000;
+  / where the trade prints: touch, midpoint or a tenth of a tick inside the touch
+  u:n?1.0;
+  atmid:u<cfg`midpointshare;
+  improved:(not atmid)&u<cfg[`midpointshare]+cfg`improvementshare;
+  touch:?[sign>0;ask;bid];
+  price:?[atmid;mid;?[improved;touch-sign*0.1*cfg`ticksize;touch]];
+  grid:0.1*cfg`ticksize;
+  price:grid*floor 0.5+price%grid;
 
-  / filter gaps that are too short (need room for quotes before pretradeoffset)
-  mingap:2*pretradeoffset;
-  nupdates:nupdates*gaps>mingap;
-
-  totint:sum nupdates;
-  if[totint=0; :empty];
-
-  / expand gap indices: create nupdates[i] copies of index i for each gap
-  / e.g., if nupdates=(0 2 0 3), gapidx=(1 1 3 3 3)
-  gapidx:raze {x#y}'[nupdates; til count nupdates];
-
-  / position within each gap (0, 1, 2, ... for each gap)
-  / e.g., if nupdates=(0 2 0 3), positions=(0 1 0 1 2)
-  positions:raze til each nupdates;
-
-  / gap-specific values expanded to each intermediate quote
-  gapnupdates:nupdates gapidx;
-  gapprevtimes:prevtimes gapidx;
-  gapnexttimes:nexttimes gapidx;
-  gapprevprices:prevprices gapidx;
-  gapnextprices:nextprices gapidx;
-
-  / times: evenly spaced within [prevtime, nexttime - pretradeoffset]
-  availdurations:gapnexttimes-gapprevtimes-`timespan$`long$pretradeoffset*nsperms;
-  fractions:(1+positions)%1+gapnupdates;
-  inttimes:gapprevtimes+`timespan$`long$fractions*`long$availdurations;
-
-  / prices: interpolate from prev toward next trade price, plus noise
-  midprices:gapprevprices+fractions*(gapnextprices-gapprevprices);
-  noise:cfg[`quoteticksize]*midprices*.z.m.rng.normal[totint;cfg];
-  midprices+:noise;
-
-  / spreads (vectorized across all intermediate quotes)
-  intspreadmults:.z.m.quote.spreadmults[cfg;inttimes];
-  spreadvar:1+0.1*abs .z.m.rng.normal[totint;cfg];
-  intspreads:basespread*midprices*intspreadmults*spreadvar;
-  intbids:midprices-intspreads%2;
-  intasks:midprices+intspreads%2;
-
-  / sizes
-  intbidsizes:avgquotesize+`long$100*.z.m.rng.normal[totint;cfg];
-  intasksizes:avgquotesize+`long$100*.z.m.rng.normal[totint;cfg];
-
-  `times`bids`asks`bidsizes`asksizes!(inttimes;intbids;intasks;intbidsizes;intasksizes)
+  ([]time:times;price:price;qty:.z.m.qty.gen[n;cfg];aggressor:?[sign>0;`B;`S])
   };
 
 quote.spreadmults:{[cfg;times]
@@ -440,8 +350,9 @@ validate:{[cfg]
   /   - Transitionpoint in valid range (prevents division by zero)
   /   - Positive volatility (zero vol produces degenerate flat price path)
   /   - Positive start price (negative/zero price is economically invalid)
-  /   - Positive tick size; non-negative quote knobs (maxquoteupdates,
-  /     initquotejitterms, quoteticksize)
+  /   - Positive tick size, positive quotespertrade, sidepersistence and the
+  /     midpoint and improvement shares between 0 and 1 (shares summing to
+  /     at most 1)
 
   / check Hawkes stability condition
   if[cfg[`alpha]>=cfg`beta; '"validate: Hawkes unstable - alpha must be < beta"];
@@ -456,12 +367,17 @@ validate:{[cfg]
   if[0>=cfg`vol; '"validate: vol must be positive"];
   / check startprice positive (GBM/jump models require positive initial price)
   if[0>=cfg`startprice; '"validate: startprice must be positive"];
-  / tick size and quote knobs: in the config since a preset must describe a run fully
-  .z.m.val.haskeys[cfg;`ticksize`maxquoteupdates`initquotejitterms`quoteticksize;"validate"];
+  / microstructure keys: in the config since a preset must describe a run fully
+  reqkeys:`ticksize`basespread`spreadopenmult`spreadmidmult`spreadclosemult`avgquotesize;
+  reqkeys,:`quotespertrade`sidepersistence`midpointshare`improvementshare;
+  .z.m.val.haskeys[cfg;reqkeys;"validate"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
-  if[0>cfg`maxquoteupdates; '"validate: maxquoteupdates must be zero or positive"];
-  if[0>cfg`initquotejitterms; '"validate: initquotejitterms must be zero or positive"];
-  if[0>cfg`quoteticksize; '"validate: quoteticksize must be zero or positive"];
+  if[0>=cfg`quotespertrade; '"validate: quotespertrade must be positive"];
+  if[not cfg[`sidepersistence] within 0 1; '"validate: sidepersistence must be between 0 and 1"];
+  if[not all cfg[`midpointshare`improvementshare] within 0 1;
+    '"validate: midpointshare and improvementshare must be between 0 and 1"];
+  if[1<cfg[`midpointshare]+cfg`improvementshare;
+    '"validate: midpointshare and improvementshare must not exceed 1 together"];
   cfg
   };
 
@@ -470,6 +386,13 @@ run:{[cfg]
   / main simulation entry point
   / cfg: configuration dictionary (typically loaded via loadconfig)
   / returns: trade table if generatequotes=0b, else dict with `trade`quote
+  /
+  / quotes come first: quote updates arrive on their own Hawkes clock at
+  / quotespertrade times the trade intensity (same clustering), starting
+  / with a quote at the open, and the price path is sampled on that clock
+  / as the mid. Trades then arrive on the trade clock and execute against
+  / the quote in force (see trade.generate), so every trade sits inside its
+  / prevailing quote and carries an aggressor side
   /
   / Example:
   /   cfg:first loadconfig`:presets.csv
@@ -481,37 +404,23 @@ run:{[cfg]
   / set seed for reproducibility (0N = no seed)
   if[not null cfg`seed; system "S ",string cfg`seed];
 
-  / generate arrival times (seconds from open)
-  arrs:.z.m.arrivals[cfg];
-  n:count arrs;
-
-  if[n=0;
-    trades:([]sym:`symbol$();time:`timestamp$();price:`float$();qty:`long$());
-    :$[cfg`generatequotes;
-      `trade`quote!(trades;([]sym:`symbol$();time:`timestamp$();bid:`float$();ask:`float$();bidsize:`long$();asksize:`long$()));
-      trades]
-  ];
-
-  / convert to timestamps
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
-  times:basetime+`timespan$`long$arrs*nspersec;
 
-  / generate prices and round to the tick size
-  prices:.z.m.price[cfg;arrs];
-  prices:cfg[`ticksize]*`long$0.5+prices%cfg`ticksize;
+  / quote clock (seconds from open) and the mid path on it
+  quotearrs:0f,.z.m.arrivals[@[cfg;`baseintensity;*;cfg`quotespertrade]];
+  mids:.z.m.price[cfg;quotearrs];
+  quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$quotearrs*nspersec;mids];
 
-  / generate quantities
-  qtys:.z.m.qty.gen[n;cfg];
+  / trade clock, then trades against the quote in force
+  arrs:.z.m.arrivals[cfg];
+  trades:$[count arrs;
+    .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes];
+    ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$())];
 
-  trades:([]time:times;price:prices;qty:qtys);
-  trades:`sym`time xcols update sym:cfg`sym from trades;
-  trades:update `p#sym from trades;
-
-  $[cfg`generatequotes;
-    `trade`quote!(trades; 
-      {[s;t] update `p#sym from `sym`time xcols update sym:s from t}[cfg`sym;.z.m.quote.generate[cfg;trades]]);
-    trades]
-  }; 
+  addsym:{[s;t] update `p#sym from `sym`time xcols update sym:s from t};
+  trades:addsym[cfg`sym;trades];
+  $[cfg`generatequotes; `trade`quote!(trades;addsym[cfg`sym;quotes]); trades]
+  };
 
 / configuration schema: column name -> (type; description)
 / type codes: S=symbol, D=date, U=minute, F=float, J=long, B=boolean
@@ -546,13 +455,12 @@ schema[`basespread]:("F";"base bid-ask spread (fraction of price)")
 schema[`spreadopenmult]:("F";"spread multiplier at open")
 schema[`spreadmidmult]:("F";"spread multiplier at midday")
 schema[`spreadclosemult]:("F";"spread multiplier at close")
-schema[`pretradeoffset]:("J";"min ms before trade for quote")
-schema[`quoteupdaterate]:("F";"quote updates per second")
 schema[`avgquotesize]:("J";"average quote size")
-schema[`ticksize]:("F";"minimum price increment; trade prices and quotes are rounded to it (0.01 for US equities)")
-schema[`maxquoteupdates]:("J";"maximum intermediate quote updates between two trades")
-schema[`initquotejitterms]:("J";"random jitter range (ms) added to the initial quote's offset before the first trade")
-schema[`quoteticksize]:("F";"noise on the mid of intermediate quotes, as a fraction of price")
+schema[`ticksize]:("F";"minimum price increment; quotes are rounded to it, trades to a tenth of it (0.01 for US equities)")
+schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")
+schema[`sidepersistence]:("F";"probability a trade's aggressor side repeats the previous trade's (0.5 = independent sides)")
+schema[`midpointshare]:("F";"share of trades printing at the midpoint")
+schema[`improvementshare]:("F";"share of trades printing a tenth of a tick inside the touch")
 
 / derive type string from schema
 csvtypes:raze first each value schema

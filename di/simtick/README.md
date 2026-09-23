@@ -14,7 +14,7 @@ The module is designed for **progressive complexity**: configure from simple to 
 - **Add seasonality**: Vary `openmult`, `midmult`, `closemult` for U-shape or J-shape intraday patterns
 - **Add clustering**: Increase `alpha` to enable Hawkes self-excitation for realistic trade bursts
 - **Add jumps**: Switch to `pricemodel:jump` for discontinuous price moves
-- **Add quotes**: Set `generatequotes:1b` for bid-ask spread dynamics
+- **Add quotes**: Set `generatequotes:1b` to return the quotes as well as the trades (they are always generated, since trades execute against them)
 
 This flexibility allows the same module to serve quick prototypes and sophisticated stress-testing scenarios.
 
@@ -23,7 +23,7 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 - **Trade clustering** — real trades arrive in bursts, not uniformly. We use a Hawkes process to model this self-exciting behavior.
 - **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
 - **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities.
-- **Microstructure** — bid-ask spreads that widen at open/close, quote updates between trades.
+- **Microstructure** — quotes come first, on their own clock: the price path is the mid, spreads widen at open/close, and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
 - **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
 
 ### Market Focus
@@ -48,13 +48,17 @@ The default presets and parameter examples are calibrated for **US equity market
 
 ### Limitations
 
-This module emphasizes **trade generation** and derives quotes in a simplified manner. Quotes are constructed *after* trades to ensure consistency with executed prices. This approach is computationally efficient but inverts the true market causality where quotes exist first and trades result from order matching.
+Quotes are generated first and trades execute against the quote in force, so the causality of a real market is respected at the top of the book. The model stays simplified beyond that:
+
+- **Independent clocks** — the quote clock and the trade clock are two Hawkes processes with the same parameters, not mutually exciting, so a burst of trades does not by itself bring a burst of quotes
+- **No order-flow impact yet** — the mid is the price path; signed trades do not move it (a propagator is the next step)
+- **No depth** — only the touch is modelled: no queue, no queue position, no book beyond the best bid and ask
 
 **Not suitable for:**
 
 - **Advanced Market-making research** — no order book queue dynamics, no queue position modeling
 - **Execution optimization** — no realistic fill probability or market impact simulation
-- **HFT strategy development** — quote generation is not causally realistic
+- **HFT strategy development** — no depth, independent quote and trade clocks
 
 For these advanced use cases, a full limit order book simulator with queue dynamics would be preferred.
 
@@ -152,11 +156,11 @@ q)simtick:use`di.simtick
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
 q)cfg:cfgs`nvda_default
 q)simtick.run[cfg]
-sym  time                          price    qty
------------------------------------------------
-NVDA 2026.01.20D09:30:02.487640474 181.90   43
-NVDA 2026.01.20D09:30:03.846514899 182.01   32
-NVDA 2026.01.20D09:30:04.444929571 182.05   78
+sym  time                          price  qty aggressor
+-------------------------------------------------------
+NVDA 2026.08.18D09:30:00.041274736 215.02 74  B
+NVDA 2026.08.18D09:30:00.060939101 215    158 B
+NVDA 2026.08.18D09:30:00.085191564 214.98 309 S
 ...
 ```
 
@@ -204,10 +208,11 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `avgqty` | Average trade size | 100 |
 | `seed` | Random seed (`0N` = no seed) | `42` |
 | `basespread` | Base bid-ask spread (fraction) | 0.0001 |
-| `ticksize` | Minimum price increment; prices and quotes are rounded to it | 0.01 |
-| `maxquoteupdates` | Maximum intermediate quote updates between two trades | 10 |
-| `initquotejitterms` | Jitter range (ms) on the initial quote's offset before the first trade | 100 |
-| `quoteticksize` | Noise on the mid of intermediate quotes, as a fraction of price | 0.0001 |
+| `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
+| `quotespertrade` | Quote updates per trade on average (quotes arrive on their own Hawkes clock at this multiple of the trade intensity) | 4 |
+| `sidepersistence` | Probability a trade's aggressor side repeats the previous one (0.5 = independent) | 0.7 |
+| `midpointshare` | Share of trades printing at the midpoint | 0.12 |
+| `improvementshare` | Share of trades printing a tenth of a tick inside the touch | 0.08 |
 | `generatequotes` | Generate quotes flag | 0b |
 | `openmult` | Opening intensity multiplier | 1.5 |
 | `midmult` | Midday intensity multiplier | 0.5 |
@@ -228,13 +233,13 @@ q)k4unit.moduletest`di.simtick
 | Arrivals | 9 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9; 1-second counts overdispersed with excitation, Poisson without |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 11 | Correct schema, sorted times, positive prices/qty, integer qty, within session, prices on the tick grid, day-level and hourly realized vol from 1-minute bars match the configured vol |
-| Quotes | 12 | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade, every trade inside its prevailing quote, at least one quote per trade, spread at least one tick, bids and asks on the tick grid |
+| Trades | 11 | Correct schema with aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level and hourly realized vol from 1-minute bars match the configured vol |
+| Quotes | 21 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread at least one tick, bids and asks on the tick grid |
 | Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **65** | |
+| **Total** | **73** | |
 
 ## Documentation
 
@@ -243,7 +248,7 @@ The `docs/` folder contains:
 - **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)** — Technical paper detailing the mathematical foundations of this module (Hawkes process, GBM, jump-diffusion, quote generation)
 - **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)** — Reference paper on Hawkes processes in finance (Bacry et al., 2015)
 
-The technical paper describes the arrivals as simulated by Ogata thinning. The module simulates the same process through its cluster representation instead (Hawkes and Oakes, 1974): immigrants arrive as an inhomogeneous Poisson process at the seasonal baseline, and every event spawns Poisson(`alpha`/`beta`) children at exponential delays, generation after generation. The two are equal in distribution, but the cluster form needs no upper bound on the intensity, so bursts are never capped (a fixed bound under-produced arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and it runs as vector operations.
+The technical paper describes quotes as derived from the trades; the module now generates the quotes first, on their own clock, and the trades against them (see [Limitations](#limitations)). The paper also describes the arrivals as simulated by Ogata thinning. The module simulates the same process through its cluster representation instead (Hawkes and Oakes, 1974): immigrants arrive as an inhomogeneous Poisson process at the seasonal baseline, and every event spawns Poisson(`alpha`/`beta`) children at exponential delays, generation after generation. The two are equal in distribution, but the cluster form needs no upper bound on the intensity, so bursts are never capped (a fixed bound under-produced arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and it runs as vector operations.
 
 ## Notebooks
 

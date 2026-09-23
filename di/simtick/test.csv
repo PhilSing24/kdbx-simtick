@@ -79,7 +79,7 @@ comment,0,0,q,,1,,=== Trades Tests ===
 before,0,0,q,cfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,trades:simtick.run[cfg],1,,Generate trades only
 true,0,0,q,98h=type trades,1,,Result is table
-true,0,0,q,`sym`time`price`qty~cols trades,1,,Trades has correct columns
+true,0,0,q,`sym`time`price`qty`aggressor~cols trades,1,,Trades has correct columns (aggressor: B buyer-initiated / S seller-initiated)
 true,0,0,q,(asc trades`time)~trades`time,1,,Trades sorted by time
 true,0,0,q,all 0<trades`price,1,,All trade prices positive
 true,0,0,q,all 0<trades`qty,1,,All trade quantities positive
@@ -92,7 +92,7 @@ before,0,0,q,minbars:select last price by 1 xbar time.minute from trades,1,,One-
 true,0,0,q,((dev 1_log p%prev p:exec price from minbars)*sqrt 252*390) within 0.75 1.25*cfg`vol,1,,Day-level realized vol from 1-minute bars within 25% of the configured vol
 before,0,0,q,hourvol:exec (dev 1_log price%prev price)*sqrt 252*390 by minute.hh from minbars,1,,Realized vol by hour
 true,0,0,q,all (hourvol 10 11 12 13 14 15) within 0.6 1.4*cfg`vol,1,,Each full hour's realized vol within 40% of the configured vol (calendar-time clock: flat by design until the transaction-time clock lands)
-true,0,0,q,all 1e-6>abs (trades[`price]%cfg`ticksize)-floor 0.5+trades[`price]%cfg`ticksize,1,,Trade prices sit on the tick grid
+true,0,0,q,all 1e-6>abs (trades[`price]%0.1*cfg`ticksize)-floor 0.5+trades[`price]%0.1*cfg`ticksize,1,,Trade prices sit on the tenth-of-a-tick grid (touch, midpoint or a tenth of a tick inside the touch)
 comment,0,0,q,,1,,=== Quotes Tests ===
 before,0,0,q,cfg[`generatequotes]:1b,1,,Enable quotes
 before,0,0,q,result:simtick.run[cfg],1,,Generate trades and quotes
@@ -108,6 +108,19 @@ true,0,0,q,all 0<quotes`asksize,1,,All ask sizes positive
 true,0,0,q,(first quotes`time)<first trades`time,1,,Quote exists before first trade
 before,0,0,q,qidx:0|quotes[`time] bin trades[`time],1,,Find prevailing quote index for each trade
 true,0,0,q,(all trades[`price]>=quotes[`bid] qidx) and (all trades[`price]<=quotes[`ask] qidx),1,,All trades fall within their prevailing quote's bid-ask spread (regression test for pre-trade quote ordering bug)
+before,0,0,q,pbid:quotes[`bid] qidx,1,,Bid in force at each trade
+before,0,0,q,pask:quotes[`ask] qidx,1,,Ask in force at each trade
+before,0,0,q,attouch:(1e-9>abs trades[`price]-pbid)|1e-9>abs trades[`price]-pask,1,,Trades printing at the bid or the ask
+before,0,0,q,atmid:1e-9>abs trades[`price]-0.5*pbid+pask,1,,Trades printing at the midpoint
+true,0,0,q,(avg attouch) within 0.7 0.9,1,,About 80% of trades print at the touch (1 - midpointshare - improvementshare)
+true,0,0,q,(avg atmid) within 0.08 0.16,1,,About 12% of trades print at the midpoint (midpointshare)
+true,0,0,q,(avg not attouch|atmid) within 0.04 0.12,1,,About 8% of trades print a tenth of a tick inside the touch (improvementshare)
+true,0,0,q,all 1e-9>abs (trades[`price]-pask) where attouch&trades[`aggressor]=`B,1,,Buyer-initiated trades at the touch print at the ask
+true,0,0,q,all 1e-9>abs (trades[`price]-pbid) where attouch&trades[`aggressor]=`S,1,,Seller-initiated trades at the touch print at the bid
+before,0,0,q,signs:1-2*trades[`aggressor]=`S,1,,Aggressor signs (+1 buy / -1 sell)
+true,0,0,q,((1_signs) cor -1_signs) within 0.3 0.5,1,,Aggressor signs persist: lag-1 autocorrelation about 2*sidepersistence-1 = 0.4
+true,0,0,q,((count quotes)%count trades) within 0.8 1.2*cfg`quotespertrade,1,,About quotespertrade quote updates per trade
+true,0,0,q,(first quotes`time)=opentime,1,,The first quote is at the open
 true,0,0,q,(count quotes)>=count trades,1,,At least one quote per trade
 true,0,0,q,all (quotes[`ask]-quotes`bid)>=cfg[`ticksize]-1e-9,1,,Every spread is at least one tick
 true,0,0,q,all 1e-6>abs (quotes[`bid]%cfg`ticksize)-floor 0.5+quotes[`bid]%cfg`ticksize,1,,Bids sit on the tick grid
@@ -116,7 +129,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,36=count cfgs`nvda_default,1,,Config has 36 parameters (excluding key)
+true,0,0,q,35=count cfgs`nvda_default,1,,Config has 35 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -132,7 +145,7 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,37=count schema,1,,Schema has 37 parameters
+true,0,0,q,36=count schema,1,,Schema has 36 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
