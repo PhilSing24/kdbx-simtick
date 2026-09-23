@@ -55,6 +55,22 @@ rng.normal:{[n;cfg]
   };
 
 
+rng.poisson:{[lams;maxk]
+  / Poisson variates with element-wise means, by inversion truncated at maxk
+  / lams: list of means, non-negative
+  / maxk: largest value returned; choose it so that P(X>maxk) is negligible
+  /   for the means in use (12 covers means up to about 3)
+  / returns: list of longs
+  / X is the number of k from 0 up with P(X<=k) below the uniform
+  u:(count lams)?1.0;
+  term:exp neg lams;
+  cdf:term;
+  k:`long$u>cdf;
+  m:1;
+  while[m<=maxk; term*:lams%m; cdf+:term; k+:u>cdf; m+:1];
+  k
+  };
+
 shape:{[cfg;progress]
   / intraday intensity multiplier using cosine interpolation
   / cfg: config dict with `openmult`midmult`closemult`transitionpoint
@@ -258,22 +274,22 @@ qty.gen:{[n;cfg]
 
 quote.generate:{[cfg;times;mids]
   / quote table from the mid path sampled on the quote clock
-  / cfg: config dict with `basespread`spreadopenmult`spreadmidmult`spreadclosemult`avgquotesize`ticksize`rngmodel
+  / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`ticksize`rngmodel
   / times: quote timestamps, ascending, the first at the session open
   / mids: mid price at each time (the price path sampled on the quote clock)
   / returns: quote table `time`bid`ask`bidsize`asksize; bid and ask on the
-  /   tick grid, bid < ask
+  /   tick grid, the spread a whole number of ticks, at least one
   n:count times;
   ticksize:cfg`ticksize;
 
-  / spread as a fraction of the mid, wider at open and close, with a little noise
-  spreadvar:1+0.1*abs .z.m.rng.normal[n;cfg];
-  spreads:cfg[`basespread]*mids*.z.m.quote.spreadmults[cfg;times]*spreadvar;
+  / spread in whole ticks: one tick plus a Poisson excess whose mean is
+  / spreadticks times the time-of-day multiplier, less the one tick
+  meanticks:cfg[`spreadticks]*.z.m.quote.spreadmults[cfg;times];
+  ticks:1+.z.m.rng.poisson[0f|meanticks-1;12];
 
-  / bid and ask on the tick grid; a spread that collapses in rounding becomes one tick
-  bid:ticksize*`long$0.5+(mids-spreads%2)%ticksize;
-  ask:ticksize*`long$0.5+(mids+spreads%2)%ticksize;
-  ask:ask|bid+ticksize;
+  / the spread sits around the mid, its bid on the tick grid
+  bid:ticksize*floor 0.5+(mids-0.5*ticks*ticksize)%ticksize;
+  ask:bid+ticks*ticksize;
 
   bidsize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
   asksize:1|cfg[`avgquotesize]+`long$100*.z.m.rng.normal[n;cfg];
@@ -350,26 +366,22 @@ trade.generate:{[cfg;times;quotes;flow]
   };
 
 quote.spreadmults:{[cfg;times]
-  / spread multiplier based on time of day (vectorized)
-  / cfg: config dict with spread parameters
+  / spread multiplier by time of day (vectorized): spreadmidmult through the
+  / day, moved toward spreadopenmult after the open and toward
+  / spreadclosemult before the close, each with an exponential decay of
+  / spreaddecayminutes (for a large cap the spread is widest in the first
+  / minutes and tightens within the half hour; it is tightest at the close)
+  / cfg: config dict with `openingtime`closingtime`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes
   / times: list of timestamps
-  / returns: list of spread multipliers (wider at open/close, tighter at midday)
+  / returns: list of spread multipliers
   opentime:`timespan$cfg`openingtime;
   closetime:`timespan$cfg`closingtime;
-  duration:closetime-opentime;
-
-  / time of day as timespan
   timeofday:times-`timestamp$`date$times;
-
-  / progress through trading day (0 to 1)
-  progress:(timeofday-opentime)%duration;
-  progress:0f|progress&1f;
-
-  / vectorized conditional: early part vs late part of day
-  earlyvals:cfg[`spreadopenmult]+(cfg[`spreadmidmult]-cfg`spreadopenmult)*2*progress;
-  latevals:cfg[`spreadmidmult]+(cfg[`spreadclosemult]-cfg`spreadmidmult)*2*progress-0.5;
-  early:progress<0.5;
-  (early*earlyvals)+(not early)*latevals
+  sinceopen:0f|(`float$timeofday-opentime)%60*nspersec;
+  toclose:0f|(`float$closetime-timeofday)%60*nspersec;
+  tau:cfg`spreaddecayminutes;
+  midm:cfg`spreadmidmult;
+  midm+((cfg[`spreadopenmult]-midm)*exp neg sinceopen%tau)+(cfg[`spreadclosemult]-midm)*exp neg toclose%tau
   };
 
 validate:{[cfg]
@@ -402,10 +414,13 @@ validate:{[cfg]
   / check startprice positive (GBM/jump models require positive initial price)
   if[0>=cfg`startprice; '"validate: startprice must be positive"];
   / microstructure keys: in the config since a preset must describe a run fully
-  reqkeys:`ticksize`basespread`spreadopenmult`spreadmidmult`spreadclosemult`avgquotesize;
+  reqkeys:`ticksize`spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize;
   reqkeys,:`quotespertrade`sidepersistence`midpointshare`improvementshare;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
+  if[1>cfg`spreadticks; '"validate: spreadticks must be at least 1"];
+  if[0>=min cfg`spreadopenmult`spreadmidmult`spreadclosemult; '"validate: spread multipliers must be positive"];
+  if[0>=cfg`spreaddecayminutes; '"validate: spreaddecayminutes must be positive"];
   if[0>=cfg`quotespertrade; '"validate: quotespertrade must be positive"];
   if[not cfg[`sidepersistence] within 0 1; '"validate: sidepersistence must be between 0 and 1"];
   if[not all cfg[`midpointshare`improvementshare] within 0 1;
@@ -496,10 +511,11 @@ schema[`qtymodel]:("S";"quantity model (`constant or `lognormal)")
 schema[`avgqty]:("J";"average trade quantity")
 schema[`qtyvol]:("F";"quantity volatility (for lognormal)")
 schema[`generatequotes]:("B";"generate quotes flag")
-schema[`basespread]:("F";"base bid-ask spread (fraction of price)")
-schema[`spreadopenmult]:("F";"spread multiplier at open")
-schema[`spreadmidmult]:("F";"spread multiplier at midday")
-schema[`spreadclosemult]:("F";"spread multiplier at close")
+schema[`spreadticks]:("F";"mean bid-ask spread in ticks through the day, at least 1 (the spread is 1 tick plus a Poisson excess)")
+schema[`spreadopenmult]:("F";"spread multiplier at the open, decaying to the midday one")
+schema[`spreadmidmult]:("F";"spread multiplier through the day")
+schema[`spreadclosemult]:("F";"spread multiplier at the close, reached by the same decay")
+schema[`spreaddecayminutes]:("F";"minutes over which the open and close spread multipliers decay toward the midday one (e-folding time)")
 schema[`avgquotesize]:("J";"average quote size")
 schema[`ticksize]:("F";"minimum price increment; quotes are rounded to it, trades to a tenth of it (0.01 for US equities)")
 schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")

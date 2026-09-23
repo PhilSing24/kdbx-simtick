@@ -139,13 +139,20 @@ before,0,0,q,nimid1:(aj[`time;update time:time+0D00:00:01 from select time from 
 true,0,0,q,(abs avg nisigns*nimid1-nimid0)<0.1*cfg`ticksize,1,,Without impact the signed 1-second markout is zero
 true,0,0,q,(count quotes)>=count trades,1,,At least one quote per trade
 true,0,0,q,all (quotes[`ask]-quotes`bid)>=cfg[`ticksize]-1e-9,1,,Every spread is at least one tick
+before,0,0,q,spreadticks:floor 0.5+(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Spread of each quote in ticks
+true,0,0,q,all 1e-6>abs spreadticks-(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Every spread is a whole number of ticks
+before,0,0,q,midday:(quotes[`time]>opentime+0D01:30)&quotes[`time]<closetime-0D01:00,1,,Quotes between 11:00 and 15:00
+true,0,0,q,0.75<avg 1=spreadticks where midday,1,,Midday the spread is one tick most of the time
+true,0,0,q,(avg spreadticks where midday) within 1 1.4*cfg`spreadticks,1,,Midday mean spread in ticks about spreadticks
+true,0,0,q,(avg spreadticks where quotes[`time]<opentime+0D00:05)>avg spreadticks where midday,1,,Spreads are wider in the first five minutes than midday
+true,0,0,q,(avg spreadticks where quotes[`time]>closetime-0D00:05)<=avg spreadticks where midday,1,,Spreads are no wider in the last five minutes than midday
 true,0,0,q,all 1e-6>abs (quotes[`bid]%cfg`ticksize)-floor 0.5+quotes[`bid]%cfg`ticksize,1,,Bids sit on the tick grid
 true,0,0,q,all 1e-6>abs (quotes[`ask]%cfg`ticksize)-floor 0.5+quotes[`ask]%cfg`ticksize,1,,Asks sit on the tick grid
 comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,38=count cfgs`nvda_default,1,,Config has 38 parameters (excluding key)
+true,0,0,q,39=count cfgs`nvda_default,1,,Config has 39 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -161,7 +168,7 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,39=count schema,1,,Schema has 39 parameters
+true,0,0,q,40=count schema,1,,Schema has 40 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model

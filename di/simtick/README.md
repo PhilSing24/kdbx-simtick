@@ -23,7 +23,7 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 - **Trade clustering** — real trades arrive in bursts, not uniformly. We use a Hawkes process to model this self-exciting behavior.
 - **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
 - **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities.
-- **Microstructure** — quotes come first, on their own clock: the price path is the mid, spreads widen at open/close, and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
+- **Microstructure** — quotes come first, on their own clock: the price path is the mid, the spread is a whole number of ticks (one most of the day, wider in the first minutes after the open), and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
 - **Order-flow impact** — a propagator: each signed trade moves the mid in its direction by `impactticks` ticks scaled by its size, a share `impactpermanent` of which stays while the rest halves every `impacthalflife` seconds. With persistent aggressor signs the tape shows price impact and partial reversion after a trade, what markout curves measure.
 - **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
 
@@ -32,7 +32,7 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 The default presets and parameter examples are calibrated for **US equity markets** (NVDA on NASDAQ). Key characteristics:
 
 - High liquidity at open and close, quiet midday (J-shape or U-shape)
-- Spreads wider at open/close, tighter at midday
+- Spreads widest in the first minutes after the open, one tick most of the day, tightest at the close
 - Arrival rates and volatility consistent with large-cap tech stocks
 
 **Futures markets** have different microstructure — most liquid in the last 5-10 minutes before close with the tightest spreads, and wider spreads at midday. The parameter system is flexible enough to approximate futures behavior by tuning `openmult`, `midmult`, `closemult`, `spreadopenmult`, `spreadmidmult`, `spreadclosemult`. However, the sharp pre-close liquidity spike typical of futures cannot be fully captured with the current cosine interpolation — the shape function smooths transitions gradually rather than modeling sudden discontinuities.
@@ -207,7 +207,10 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `qtymodel` | `lognormal` or `constant` | `lognormal` |
 | `avgqty` | Average trade size | 100 |
 | `seed` | Random seed (`0N` = no seed) | `42` |
-| `basespread` | Base bid-ask spread (fraction) | 0.0001 |
+| `spreadticks` | Mean spread in ticks through the day (1 tick plus a Poisson excess) | 1.15 |
+| `spreadopenmult` | Spread multiplier at the open, decaying to the midday one | 2.5 |
+| `spreadclosemult` | Spread multiplier at the close, reached by the same decay | 0.9 |
+| `spreaddecayminutes` | Minutes over which the open and close multipliers decay toward the midday one | 15 |
 | `ticksize` | Minimum price increment; quotes are rounded to it, trades to a tenth of it | 0.01 |
 | `quotespertrade` | Quote updates per trade on average (quotes arrive on their own Hawkes clock at this multiple of the trade intensity) | 4 |
 | `sidepersistence` | Probability a trade's aggressor side repeats the previous one (0.5 = independent) | 0.7 |
@@ -237,12 +240,12 @@ q)k4unit.moduletest`di.simtick
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
 | Trades | 11 | Correct schema with aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level and hourly realized vol from 1-minute bars match the configured vol |
-| Quotes | 23 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread at least one tick, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without |
+| Quotes | 29 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without |
 | Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **76** | |
+| **Total** | **81** | |
 
 ## Documentation
 
