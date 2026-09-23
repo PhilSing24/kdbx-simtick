@@ -1,8 +1,9 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,Initialize simtick module
 before,0,0,q,simcalendar:use`di.simcalendar,1,Initialize simcalendar module
-before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,Load presets
-before,0,0,q,cfg:cfgs`nvda_default,1,Get default config
+before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,Load tick presets
+before,0,0,q,calcfgs:simcalendar.loadconfig`:di/simcalendar/presets.csv,1,Load calendar presets
+before,0,0,q,cfg:cfgs[`nvda_default] upsert calcfgs`default,1,Tick config joined with the default calendar config
 before,0,0,q,cfg[`seed]:42,1,Set seed for reproducibility
 before,0,0,q,cfg[`generatequotes]:0b,1,Trades only for the run tests (the presets enable quotes)
 before,0,0,q,calendar:simcalendar.loadcalendar`:di/simcalendar/calendar.csv,1,Load calendar
@@ -11,14 +12,32 @@ fail,0,0,q,simcalendar.validate[2026.01.20],1,Non-list date throws error
 fail,0,0,q,simcalendar.validate[`date$()],1,Empty date list throws error
 fail,0,0,q,simcalendar.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
 fail,0,0,q,simcalendar.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
+fail,0,0,q,simcalendar.run[cfgs`nvda_default;calendar;(::)],1,A tick config without the calendar keys throws error
+before,0,0,q,badcfg1:cfg,1,Setup bad config for overnightshare of 1
+before,0,0,q,badcfg1[`overnightshare]:1f,1,Set overnightshare to 1 (no intraday variance left)
+fail,0,0,q,simcalendar.run[badcfg1;calendar;(::)],1,overnightshare of 1 throws error
+before,0,0,q,badcfg2:cfg,1,Setup bad config for a negative gapdayweight
+before,0,0,q,badcfg2[`gapdayweight]:-1f,1,Set a negative gapdayweight
+fail,0,0,q,simcalendar.run[badcfg2;calendar;(::)],1,Negative gapdayweight throws error
 comment,0,0,q,,1,=== loadcalendar Tests ===
 fail,0,0,q,simcalendar.loadcalendar["/not/a/handle"],1,String filepath throws error
 true,0,0,q,14h=type calendar,1,loadcalendar returns date list
 true,0,0,q,0<count calendar,1,Calendar is non-empty
 true,0,0,q,(asc calendar)~calendar,1,Calendar is sorted ascending
+comment,0,0,q,,1,=== Config Tests ===
+true,0,0,q,99h=type calcfgs,1,loadconfig returns keyed table
+true,0,0,q,`default`nogap~exec name from calcfgs,1,The two presets load
+before,0,0,q,`:/tmp/simcalendar_missing.csv 0: csv 0: delete gapdayweight from 0!calcfgs,1,Presets written without a column
+fail,0,0,q,simcalendar.loadconfig`:/tmp/simcalendar_missing.csv,1,A missing column throws error
+after,0,0,q,system"rm -f /tmp/simcalendar_missing.csv",1,Clean up preset file
+true,0,0,q,`param`typ`description~cols simcalendar.describe[],1,describe returns the schema table
 comment,0,0,q,,1,=== Run In-Memory Tests ===
-before,0,0,q,trades:simcalendar.run[cfg;calendar;(::)],1,Run in-memory simulation
-true,0,0,q,98h=type trades,1,Result is a table
+before,0,0,q,result:simcalendar.run[cfg;calendar;(::)],1,Run in-memory simulation
+before,0,0,q,trades:result`trade,1,The trades of all days
+before,0,0,q,days:result`days,1,The days table
+true,0,0,q,99h=type result,1,Result is a dict
+true,0,0,q,`trade`days~key result,1,Result has trade and days (no quotes requested)
+true,0,0,q,98h=type trades,1,Trades is a table
 true,0,0,q,`sym`time`seq`price`qty`aggressor`cond`venue~cols trades,1,Trades has correct columns
 true,0,0,q,(asc trades`time)~trades`time,1,Trades sorted by time
 true,0,0,q,all 0<trades`price,1,All prices positive
@@ -29,24 +48,35 @@ comment,0,0,q,,1,=== Multi-Day Tests ===
 before,0,0,q,daycounts:select count i by "d"$time from trades,1,Count trades per day
 true,0,0,q,(count calendar)=count daycounts,1,All calendar days have trades
 true,0,0,q,all 0<exec x from daycounts,1,Each day has at least one trade
-comment,0,0,q,,1,=== Price Continuity Tests ===
-before,0,0,q,days:asc distinct "d"$trades`time,1,Get sorted days
-before,0,0,q,lastprice1:last exec price from trades where ("d"$time)=days 0,1,Last price of day 1
-before,0,0,q,firstprice2:first exec price from trades where ("d"$time)=days 1,1,First price of day 2
-true,0,0,q,(abs firstprice2-lastprice1)<0.01*lastprice1,1,First price of day 2 within 1% of the last price of day 1 (the close is carried as the open price and the first trade diffuses from it)
-true,0,0,q,all 0<exec price from trades where ("d"$time)=last days,1,Last day prices all positive
+true,0,0,q,`date`open`close`overnightret`trades`volume~cols days,1,Days table has correct columns
+true,0,0,q,calendar~days`date,1,One row per calendar day
+true,0,0,q,(days`trades)~exec x from daycounts,1,The days table counts the trades of each day
+true,0,0,q,(days`volume)~value exec sum qty by "d"$time from trades,1,The days table sums the volume of each day
+true,0,0,q,(days`close)~value exec last price by "d"$time from trades,1,The close of each day is its last print
+comment,0,0,q,,1,=== Overnight Gap Tests ===
+true,0,0,q,0f=first days`overnightret,1,The first day opens at startprice: no gap
+true,0,0,q,cfg[`startprice]=first days`open,1,The first day's open is the start price
+true,0,0,q,all 1e-9>abs (1_days`open)-(-1_days`close)*exp 1_days`overnightret,1,Each later day opens at the previous close moved by its overnight return
+true,0,0,q,all 0.1>abs days`overnightret,1,Overnight returns are of a plausible size (under 10%)
+true,0,0,q,0<count distinct 1_days`overnightret,1,Overnight returns vary
+before,0,0,q,nogapcfg:cfgs[`nvda_default] upsert calcfgs`nogap,1,Tick config with the no-gap calendar config
+before,0,0,q,nogapcfg[`seed]:42,1,Set seed
+before,0,0,q,nogapcfg[`generatequotes]:0b,1,Trades only
+before,0,0,q,nogapdays:(simcalendar.run[nogapcfg;calendar;(::)])`days,1,Days without overnight gaps
+true,0,0,q,all 0f=nogapdays`overnightret,1,With overnightshare 0 there is no gap
+true,0,0,q,(1_nogapdays`open)~-1_nogapdays`close,1,With overnightshare 0 each day opens exactly at the previous close
+before,0,0,q,gapcfg:cfg,1,Setup config for a large overnight share
+before,0,0,q,gapcfg[`overnightshare]:0.9,1,Most of the variance overnight
+before,0,0,q,gapdays:(simcalendar.run[gapcfg;calendar;(::)])`days,1,Days with a large overnight share
+true,0,0,q,(avg abs 1_gapdays`overnightret)>avg abs 1_days`overnightret,1,A larger overnightshare gives larger gaps
+true,0,0,q,(abs simcalendar.overnight[cfg;1])<0.2,1,overnight returns a log return of plausible size
 comment,0,0,q,,1,=== Quotes Tests ===
 before,0,0,q,qcfg:cfg,1,Setup config with quotes
 before,0,0,q,qcfg[`generatequotes]:1b,1,Enable quote generation
 before,0,0,q,qresult:simcalendar.run[qcfg;calendar;(::)],1,Run with quotes
 true,0,0,q,99h=type qresult,1,Result with quotes is dict
-true,0,0,q,`trade`quote~key qresult,1,Dict has trade and quote keys
+true,0,0,q,`trade`quote`days~key qresult,1,Dict has trade quote and days keys
 true,0,0,q,`sym`time`seq`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
-comment,0,0,q,,1,=== Describe Tests ===
-before,0,0,q,caldesc:simcalendar.describe[],1,Get module description
-true,0,0,q,98h=type caldesc,1,describe returns a table
-true,0,0,q,`function`description~cols caldesc,1,describe has correct columns
-true,0,0,q,`run`loadcalendar`validate~caldesc`function,1,describe lists all public functions
 comment,0,0,q,,1,=== Disk Persistence Tests ===
 before,0,0,q,dbpath:`:/tmp/simcalendar_test,1,Set test database path
 before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up any existing test database
@@ -56,6 +86,8 @@ true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test",1,Database root exists on dis
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18",1,First date partition exists
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.20",1,Last date partition exists
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/trade",1,Trade table exists in partition
+true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/days",1,The days table is written at the root
+true,0,0,q,(count calendar)=count get hsym`$"/tmp/simcalendar_test/days",1,The days table on disk has one row per day
 before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up before quotes disk test
 before,0,0,q,qdiskresult:simcalendar.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
 true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/quote",1,Quote table exists in partition

@@ -4,15 +4,16 @@ Multi-day tick simulation over a trading calendar.
 
 ## About
 
-This module orchestrates `di.simtick` over multiple trading days, producing a **coherent price path** where each day's closing price becomes the next day's opening price.
+This module runs `di.simtick` day after day and turns the days into one coherent history: each day opens at the previous close moved by an overnight return, the intraday and overnight variance share one budget so the configured `vol` stays the close-to-close volatility, and a `days` table summarizes every session. It is the layer that makes multi-day TCA (the same execution style on different market days) and risk demos (close-to-close and close-to-open returns) possible.
 
 ## Module Hierarchy
 
 ```
 simtick ← simcalendar
+simtick ← simorder
 ```
 
-This module runs `simtick` over a trading calendar, one day at a time, carrying the closing price forward.
+`simtick` is one instrument for one day; `simcalendar` runs it over N days. `simorder` runs against one day of the output (pass the whole result: it keeps the order's instrument and day).
 
 ## Installation
 
@@ -26,6 +27,7 @@ di/
 └── simcalendar/
     ├── init.q
     ├── calendar.csv
+    ├── presets.csv
     └── README.md
 ```
 
@@ -39,19 +41,26 @@ di/
 q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
 
-/ Load tick configuration from simtick
-q)cfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
+/ A tick configuration from simtick, joined with a calendar preset from this module
+q)tickcfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
+q)cfg:tickcfg,simcalendar.loadconfig[`:di/simcalendar/presets.csv]`default
 
 / Load trading calendar
 q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
 
 / Run multi-day simulation (in-memory)
-q)trades:simcalendar.run[cfg;calendar;(::)]
-q)cols trades
-`sym`time`seq`price`qty`aggressor`cond`venue
-q)count trades
-831718
+q)result:simcalendar.run[cfg;calendar;(::)]
+q)key result
+`trade`quote`days
+q)result`days
+date       open     close  overnightret trades volume  
+-------------------------------------------------------
+2026.08.18 215      223.26 0            276745 46253466
+2026.08.19 226.2596 222.51 0.01334587   277738 45837884
+2026.08.20 226.7656 223.05 0.01894494   277507 45756446
 ```
+
+`generatequotes:0b` in the config returns `trade` and `days` only.
 
 ### Disk persistence
 ```q
@@ -69,31 +78,38 @@ date       sym  time                          seq price   qty    aggressor cond 
 2026.08.18 NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 2026.08.18 NVDA 2026.08.18D09:30:00.232009923 14  215     300    S         R    XNAS
 2026.08.18 NVDA 2026.08.18D09:30:00.309357209 15  215     300    S         R    EDGX
+q)days
 ```
 
-
-### With quotes
-
-```q
-/ Enable quote generation
-q)cfg[`generatequotes]:1b
-
-/ In-memory - returns dict with `trade`quote
-q)result:simcalendar.run[cfg;calendar;(::)]
-q)result`trade
-q)result`quote
-
-/ On disk - writes both trade/ and quote/ partitions
-q)simcalendar.run[cfg;calendar;`:/tmp/mydb]
-```
+`trade` and `quote` are written per date partition; `days` is a splayed table at the root, loaded with the database.
 
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `simcalendar.run[cfg;calendar;dbpath]` | Run simulation, returns trades table or dbpath |
+| `simcalendar.run[cfg;calendar;dbpath]` | Run the simulation; returns a dict `trade`quote`days` in memory, or `dbpath` on disk |
+| `simcalendar.runstep[cfg;dst;state;date]` | One day of the run (the step `run` folds over the calendar) |
+| `simcalendar.daycfg[cfg;date;startprice]` | The simtick config for one day: date, open price, intraday vol |
+| `simcalendar.overnight[cfg;ndays]` | One overnight log return over a gap of `ndays` calendar days |
 | `simcalendar.loadcalendar[filepath]` | Load calendar from CSV, returns date list |
-| `simcalendar.describe[]` | Return module description |
+| `simcalendar.loadconfig[filepath]` | Load the calendar presets from CSV, returns keyed table |
+| `simcalendar.validate[calendar]` | Validate a calendar |
+| `simcalendar.validatecfg[cfg]` | Validate the calendar keys of a config |
+| `simcalendar.describe[]` | The calendar configuration schema |
+
+## Configuration
+
+All tick parameters come from `di.simtick`'s configuration; `tradingdate` and `startprice` are set per day. The calendar keys come from this module's `presets.csv` and are joined onto the tick config. `loadconfig` checks the header against the schema like the other modules.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `overnightshare` | Share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
+| `gapdayweight` | Weight of each calendar day beyond the first in a gap's variance; 0.25 gives a weekend 1.5 nights' worth | 0.25 |
+
+| Preset | Description |
+|--------|-------------|
+| `default` | 30% of the daily variance overnight, weekends at 1.5 nights |
+| `nogap` | No overnight return: each day opens exactly at the previous close |
 
 ## Calendar Format
 
@@ -113,61 +129,17 @@ You can generate this from:
 
 ## Behavior
 
-### Price Continuity
+### Overnight gap and the variance budget
 
-Prices form one continuous path across days:
-
-```
-Day 1: starts at cfg[`startprice], ends at P1
-Day 2: starts at P1, ends at P2
-Day 3: starts at P2, ends at P3
-```
-
-Each day's closing print is the next day's price at the open, from which that day's first trade diffuses over the interval to its time (as in `di.simtick`), so the first print of a day is close to, not equal to, the last print of the day before.
-
-### Disk Persistence
-
-Pass a file handle as the third argument to persist to a date-partitioned kdb+ database:
-
-- `(::)` — in-memory only, returns trades table (or dict with quotes)
-- `` `:/path/mydb `` — writes date-partitioned DB, returns dbpath
-
-The database structure on disk:
+Each day after the first opens at the previous close times `exp` of an overnight log return, drawn as a normal with mean minus half its variance (no drift overnight) and variance
 
 ```
-/path/mydb/
-├── sym                    / symbol enumeration file
-├── 2026.08.18/
-│   ├── trade/             / splayed trade table
-│   └── quote/             / splayed quote table (if generatequotes:1b)
-├── 2026.08.19/
-│   ├── trade/
-│   └── quote/
-...
+overnightshare * vol^2 / tradingdays * (1 + gapdayweight * (calendar days - 1))
 ```
 
-When `generatequotes:1b`, both `trade` and `quote` partitions are written for each day.
+The intraday simulation runs at `vol * sqrt(1 - overnightshare)`, so over a one-night gap the close-to-close variance is exactly `vol^2 / tradingdays`: the configured `vol` is the close-to-close volatility, as it is quoted. A weekend or holiday gap carries more variance than one night but less than its calendar days, which is what markets show.
 
-### Overnight Gap
-
-Currently, each day's opening price equals the previous day's closing price — there is no overnight gap. This produces a continuous price path.
-
-**Assumption:** The calendar contains consecutive trading days. If there are gaps (e.g., holidays), the price still carries forward without any adjustment for the elapsed time. A Friday close becomes the following Monday's open with no weekend effect.
-
-Implementing a realistic overnight gap is not straightforward. If we add random overnight returns (even with zero drift), we introduce additional variance:
-
-- **Intraday variance:** σ²/252 per trading day (from simtick)
-- **Overnight variance:** σ² × (calendar days)/252 per gap
-
-Over a week (5 trading days, 7 calendar days of gaps), total variance would be approximately double what the configured `vol` implies for daily close-to-close returns.
-
-To maintain consistency with the simtick configuration, adding overnight gaps would require either:
-
-1. Recalibrating `vol` to account for the additional overnight variance
-2. Introducing a separate overnight volatility parameter with careful documentation
-3. Splitting variance budget between intraday and overnight components
-
-For now, we keep the simpler approach where the configured `vol` governs the entire price path. Future versions may address overnight gaps with proper variance accounting.
+The `days` table records, per session, the open, the close (the last print, the closing auction), the overnight return that produced the open, the number of trades and the volume, so close-to-open and close-to-close returns are one query away. With `overnightshare:0` the module behaves as before: each day opens exactly at the previous close.
 
 ### Seed Management
 
@@ -179,12 +151,7 @@ Day 2: continues from where Day 1 left off
 Day 3: continues from where Day 2 left off
 ```
 
-This ensures:
-- **Reproducibility:** same seed → same outputs
-- **Continuity:** one coherent random sequence across the entire simulation
-- **Variety:** each day has different random draws (not repeated patterns)
-
-The number of random draws per day varies with trade count, which is path-dependent by nature.
+Same seed gives the same output; each day has different random draws.
 
 ### Validation
 
@@ -194,15 +161,25 @@ The calendar is validated for:
 - No duplicates
 - Sorted ascending
 
-## Configuration
+The config must carry the calendar keys, with `overnightshare` below 1 and `gapdayweight` non-negative.
 
-All tick simulation parameters come from `di.simtick` configuration. The `tradingdate` field is overridden for each day in the calendar.
+## Testing
 
-See `simtick.describe[]` for available parameters.
+```bash
+make test-simcalendar
+```
+
+or from a q session:
+
+```q
+q)k4unit:use`local.k4unit
+q)k4unit.moduletest`di.simcalendar
+```
 
 ## Future Extensions
 
-- **Overnight gaps**: Model price jumps between close and next open (requires variance recalibration)
+- **Per-day regimes and per-day seeds**: day-level volatility and volume multipliers, event days, half days, and a seed per date so any day can be regenerated alone
+- **Holiday calendar generator**: NYSE-rule trading days for a date range
 
 ## License
 
