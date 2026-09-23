@@ -2,6 +2,12 @@
 / Generates a parent order + child fills against an existing trades/quotes
 / market (from di.simtick / di.simcalendar), with configurable execution
 / quality (pacing, spread capture) to demonstrate good vs. bad execution.
+/ An order's configuration is composed from the market file's orders group
+/ and an order row (see compose); the market file also holds the algo menu
+/ and the defaults of a generated order flow, and the impact parameters
+
+simtick:use`di.simtick
+simconfig:use`di.simconfig
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -33,14 +39,14 @@ validate:{[cfg]
   / returns: cfg if valid, throws error otherwise
 
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
-  reqkeys,:`numfills`pacing`spreadcapture`ticksize`jitter`seed;
-  reqkeys,:`account`algo`capacity`latencyms`maxreplaces;
+  reqkeys,:`numchildren`pacing`spreadcapture`ticksize`jitter`seed;
+  reqkeys,:`account`algo`capacity`latencyms`maxreplaces`ordervenues`ordervenueshares`sweepticks;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
   if[(`date$cfg`starttime)<>`date$cfg`endtime; '"validate: starttime and endtime must fall on the same day"];
   if[0>=cfg`orderqty; '"validate: orderqty must be positive"];
-  if[0>=cfg`numfills; '"validate: numfills must be positive"];
+  if[0>=cfg`numchildren; '"validate: numchildren must be positive"];
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
   if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
@@ -49,6 +55,9 @@ validate:{[cfg]
   if[not cfg[`capacity] in `A`P; '"validate: capacity must be A (agency) or P (principal)"];
   if[0>cfg`latencyms; '"validate: latencyms must be zero or positive"];
   if[0>cfg`maxreplaces; '"validate: maxreplaces must be zero or positive"];
+  if[0>cfg`sweepticks; '"validate: sweepticks must be zero or positive"];
+  if[count[cfg`ordervenues]<>count cfg`ordervenueshares; '"validate: ordervenues and ordervenueshares must have the same length"];
+  if[1e-6<abs 1-sum cfg`ordervenueshares; '"validate: ordervenueshares must sum to 1"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -63,7 +72,7 @@ validate:{[cfg]
 
 schedule:{[cfg]
   / generate fill timestamps within [starttime,endtime)
-  / cfg: config dict with `starttime`endtime`numfills`pacing
+  / cfg: config dict with `starttime`endtime`numchildren`pacing
   / returns: list of nanosecond-precision timestamps, ascending
   /
   / pacing `even: uniformly spaced (patient, low-impact execution)
@@ -72,7 +81,7 @@ schedule:{[cfg]
   /   shows in the sizes (see .z.m.arrivalsizes), as a slicing algo sends a child every interval
   start:cfg`starttime;
   end:cfg`endtime;
-  n:cfg`numfills;
+  n:cfg`numchildren;
   dur:`long$end-start;
 
   / fractions strictly between 0 and 1, evenly spaced
@@ -199,7 +208,7 @@ arrivalsizes:{[cfg;trades;n]
   / of the window, and its share of each interval's volume, own / (own + market), stays within maxpct
   / cfg: config dict with `orderqty`starttime`endtime`urgency`maxpct
   / trades: market trades table (time-sorted) for the day
-  / n: number of intervals, one child each (numfills)
+  / n: number of intervals, one child each (numchildren)
   / returns: float quantities per interval, summing to orderqty
   start:cfg`starttime;
   dur:`long$cfg[`endtime]-start;
@@ -235,6 +244,19 @@ validateimpact:{[icfg]
   if[0D>icfg`taper; '"validateimpact: taper must be zero or positive"];
   if[not -16h=type icfg`closetime; '"validateimpact: closetime must be a timespan (time of day)"];
   icfg
+  };
+
+impactcfg:{[market]
+  / the impact configuration of a market (see impact): its orderimpact keys
+  / and its closing time
+  / market: the market dictionary (or any composed config carrying it)
+  / returns: `eta`beta`halflife`taper`closetime`permanent`model, validated
+  icfg:`eta`beta`halflife`taper`closetime`permanent`model!(
+    market`orderimpacteta;market`orderimpactbeta;
+    `timespan$`long$1000000000*market`orderimpacthalflifeseconds;
+    `timespan$`long$60000000000*market`orderimpacttaperminutes;
+    `timespan$market`closingtime;market`orderimpactpermanent;market`orderimpactmodel);
+  .z.m.validateimpact icfg
   };
 
 dailyvol:{[quotes]
@@ -328,7 +350,6 @@ impact:{[icfg;execs;trades;quotes]
 / ============================================================
 
 / lit venues a child is routed to, by share
-venues:([]venue:`XNAS`ARCX`BATS`EDGX;share:0.4 0.2 0.2 0.2)
 
 quoteat:{[quotes;t]
   / the quote in force at t (the first quote when t precedes all)
@@ -337,10 +358,10 @@ quoteat:{[quotes;t]
 
 aggressivefills:{[cfg;quotes;t;qty]
   / the fills of an aggressive child of qty sent at t: after latencyms,
-  / what the far touch displays fills there and the rest one tick beyond
+  / what the far touch displays fills there and the rest sweepticks beyond
   / (the book beyond the touch is not modelled: it is taken to hold the
   / rest), both removing liquidity at the same instant, as a sweep does
-  / cfg: config dict with `side`latencyms`ticksize
+  / cfg: config dict with `side`latencyms`ticksize`sweepticks
   / quotes: the day's quotes
   / t: send time
   / qty: quantity
@@ -353,7 +374,7 @@ aggressivefills:{[cfg;quotes;t;qty]
   f1:qty&disp;
   f2:qty-f1;
   r:([]time:enlist t+lat;price:enlist touch;qty:enlist f1;liquidity:enlist `R);
-  if[f2>0; r,:([]time:enlist t+lat;price:enlist touch+cfg[`ticksize]*$[buy;1;-1];qty:enlist f2;liquidity:enlist `R)];
+  if[f2>0; r,:([]time:enlist t+lat;price:enlist touch+cfg[`ticksize]*cfg[`sweepticks]*$[buy;1;-1];qty:enlist f2;liquidity:enlist `R)];
   select from r where qty>0
   };
 
@@ -461,7 +482,7 @@ execute:{[cfg;trades;quotes]
   / the order's children against the tape: one child per scheduled time
   / (jittered), sized by the pacing plus what the previous child left,
   / aggressive with probability spreadcapture and passive otherwise, each
-  / routed to a lit venue by share; then a final aggressive child before
+  / routed to one of ordervenues by share; then a final aggressive child before
   / endtime for whatever is left, so the order completes
   / cfg: order config dict
   / trades, quotes: the day's tables
@@ -472,7 +493,7 @@ execute:{[cfg;trades;quotes]
   targets:.z.m.sizing[cfg;trades;sched];
   ivals:.z.m.intervals[cfg;sched];
   aggressive:(n?1.0)<cfg`spreadcapture;
-  vens:venues[`venue] (sums venues`share) binr n?1.0;
+  vens:cfg[`ordervenues] (sums cfg`ordervenueshares) binr n?1.0;
   lat:`timespan$`long$1000000*cfg`latencyms;
   parts:();
   rolled:0;
@@ -528,12 +549,12 @@ intervals:{[cfg;filltimes]
   / the length of market the child was sized against, one timespan per fill,
   / which impact reads as the interval centred on the child (execs column
   / `interval, see childimpact)
-  / cfg: config dict with `starttime`endtime`numfills`pacing
+  / cfg: config dict with `starttime`endtime`numchildren`pacing
   / filltimes: scheduled fill timestamps from .z.m.schedule
   / returns: timespan per fill
   /
-  / pacing `even: the schedule's spacing, window/(numfills+1)
-  / pacing `arrival: the sizing interval, window/numfills
+  / pacing `even: the schedule's spacing, window/(numchildren+1)
+  / pacing `arrival: the sizing interval, window/numchildren
   / pacing `frontloaded: each child's bucket, from the previous fill (or
   /   starttime) to its own time
   dur:cfg[`endtime]-cfg`starttime;
@@ -566,7 +587,7 @@ marketday:{[cfg;t;name]
 
 run:{[cfg;trades;quotes]
   / main simulation entry point
-  / cfg: order configuration dictionary (typically loaded via loadconfig)
+  / cfg: order configuration dictionary (see compose)
   / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simcalendar)
   / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simcalendar, generatequotes:1b)
   /   both may hold other instruments and days; only the order's are used
@@ -580,7 +601,7 @@ run:{[cfg;trades;quotes]
   / another day was priced silently off the first or last quote of the day.
   /
   / Example:
-  /   cfg:first loadconfig`:presets.csv
+  /   cfg:compose[market;loadorders[files[]`orders]`good]
   /   result:di.simtick.run[tickcfg]  / with generatequotes:1b
   /   ordresult:run[cfg;result`trade;result`quote]
   /   ordresult`orders  / 1-row parent order table
@@ -610,22 +631,32 @@ run:{[cfg;trades;quotes]
 
 / the menu of algorithms generate draws from: the pacing and aggression
 / each stands for, and the arrival-pacing keys where they apply
-algos:([algo:`VWAP`IS`AGGRESSIVE`PASSIVE]pacing:`even`arrival`frontloaded`even;spreadcapture:0.1 0.35 0.9 0f;urgency:0n 2 0n 0n;maxpct:0n 0.2 0n 0n)
+flowkeys:`norders`accounts`algos`sizepct`windowminutes`seed`childrenperminute`ticksize`jitter`latencyms`maxreplaces`capacity`ordervenues`ordervenueshares`sweepticks
 
-flowdefaults:`norders`accounts`algos`sizepct`windowminutes`seed`ticksize`jitter`latencyms`maxreplaces`capacity!(5;`ACC1`ACC2`ACC3;`VWAP`IS`AGGRESSIVE`PASSIVE;0.005 0.05;10 60;0N;0.01;0.3;2.0;20;`A)
+menu:{[market]
+  / the algo menu of the market: each algo's pacing, aggression, urgency and cap
+  ([algo:market`algos] pacing:market`algopacings;spreadcapture:market`algospreadcaptures;urgency:market`algourgencies;maxpct:market`algomaxpcts)
+  };
 
-generate:{[spec;trades;quotes]
+generate:{[market;spec;trades;quotes]
   / an order flow: norders orders for every instrument and day in the
-  / market, each with a random side, account and algo (from the menu
-  / algos, which sets its pacing and aggression), a window of a random
+  / market, each with a random side, account and algo (from the market's
+  / menu, which sets its pacing and aggression), a window of a random
   / length inside the session, a size that is a random share of the day's
-  / volume in round lots, one child every 30 seconds, and its own seed
-  / spec: dict with any of `norders`accounts`algos`sizepct`windowminutes`seed`ticksize`jitter`latencyms`maxreplaces`capacity
-  /   (see flowdefaults for the rest): sizepct and windowminutes are (low;high) ranges,
+  / volume in round lots, childrenperminute children, and its own seed
+  / market: the market dictionary (or any composed config carrying its
+  /   orders group): the defaults of every spec key, the algo menu, and
+  /   the seed (its run default)
+  / spec: dict with any of `norders`accounts`algos`sizepct`windowminutes`seed`childrenperminute
+  /   `ticksize`jitter`latencyms`maxreplaces`capacity`ordervenues`ordervenueshares`sweepticks
+  /   overriding the market's: sizepct and windowminutes are (low;high) ranges,
   /   seed seeds the draws and gives every order its own seed (0N: unseeded)
   / trades, quotes: the market, any instruments and days (`sym`time`qty and `sym`time)
   / returns: a table of order configs, one row per order, the schema's keys
-  spec:flowdefaults,spec;
+  if[count unknown:(key spec) except .z.m.flowkeys; '"generate: unknown spec keys - ",", " sv string unknown];
+  spec:(.z.m.flowkeys#market),spec;
+  algomenu:.z.m.menu market;
+  if[count unknown:(spec`algos) except key[algomenu]`algo; '"generate: algos not on the market's menu - ",", " sv string unknown];
   if[not null spec`seed; system "S ",string spec`seed];
   / one row per instrument and day: the session from the quotes, the volume from the trades
   sessions:select open:first time,close:last time by sym,date:`date$time from `sym`time xasc quotes;
@@ -640,15 +671,16 @@ generate:{[spec;trades;quotes]
   pct:spec[`sizepct][0]+(m?1.0)*spec[`sizepct][1]-spec[`sizepct][0];
   qty:100*1|floor 0.5+(pct*d`volume)%100;
   algo:spec[`algos] m?count spec`algos;
-  menu:algos ([]algo:algo);
+  m0:algomenu ([]algo:algo);
   seeds:$[null spec`seed; m#0N; 1+(til[m]+7919*spec`seed) mod 2147483647];
-  (1_key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;
+  (key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;
     sym:d`sym;side:`BUY`SELL m?2;orderqty:qty;starttime:start;endtime:start+w;
-    numfills:5|`long$2*w%0D00:01;
-    pacing:menu`pacing;spreadcapture:menu`spreadcapture;ticksize:m#spec`ticksize;jitter:m#spec`jitter;
+    numchildren:5|`long$spec[`childrenperminute]*w%0D00:01;
+    pacing:m0`pacing;spreadcapture:m0`spreadcapture;ticksize:m#spec`ticksize;jitter:m#spec`jitter;
     account:spec[`accounts] m?count spec`accounts;algo:algo;capacity:m#spec`capacity;
     latencyms:m#spec`latencyms;maxreplaces:m#spec`maxreplaces;seed:seeds;
-    urgency:menu`urgency;maxpct:menu`maxpct)
+    ordervenues:m#enlist spec`ordervenues;ordervenueshares:m#enlist spec`ordervenueshares;sweepticks:m#spec`sweepticks;
+    urgency:m0`urgency;maxpct:m0`maxpct)
   };
 
 runmany:{[cfgs;trades;quotes]
@@ -664,76 +696,88 @@ runmany:{[cfgs;trades;quotes]
   r
   };
 
-runflow:{[spec;trades;quotes]
+runflow:{[market;spec;trades;quotes]
   / generate an order flow over the market and run it
-  / spec: see generate
+  / market, spec: see generate
   / trades, quotes: the market, any instruments and days (di.simcalendar's
   /   in-memory result, or its database's tables, serve as they are)
   / returns: dict `configs (the generated order configs) and the tables of runmany
-  cfgs:.z.m.generate[spec;trades;quotes];
+  cfgs:.z.m.generate[market;spec;trades;quotes];
   (enlist[`configs]!enlist cfgs),.z.m.runmany[cfgs;trades;quotes]
   };
 
 
 / ============================================================
-/ CONFIGURATION SCHEMA
+/ CONFIGURATION SCHEMA AND LAYERS
 / ============================================================
-
-/ configuration schema: column name -> (type; description)
-/ type codes: S=symbol, P=timestamp, F=float, J=long, B=boolean
+/ schema: key!(type;layer;group;description), see di.simconfig. An order
+/ row (di/simconfig/orders.csv, or a dictionary) gives the essential and
+/ order keys; the market file's orders group (and its session group for
+/ ticksize) gives the market keys, which a row may override; urgency and
+/ maxpct are read for arrival pacing only
 schema:()!()
-schema[`name]:            ("S";"preset name (key)")
-schema[`orderid]:         ("S";"unique order identifier")
-schema[`sym]:             ("S";"ticker symbol - must match the trades/quotes tables")
-schema[`side]:            ("S";"BUY or SELL")
-schema[`orderqty]:        ("J";"total order quantity")
-schema[`starttime]:       ("P";"execution window start (timestamp, matches trades/quotes date)")
-schema[`endtime]:         ("P";"execution window end (timestamp)")
-schema[`numfills]:        ("J";"number of child fills to generate")
-schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
-schema[`spreadcapture]:   ("F";"probability a child is aggressive (a marketable order crossing the spread) rather than passive (a limit at the near touch): 0=best, 1=worst")
-schema[`account]:         ("S";"the account the order is for")
-schema[`algo]:            ("S";"the algorithm working the order (a label: VWAP, IS, ...)")
-schema[`capacity]:        ("S";"A (agency) or P (principal)")
-schema[`latencyms]:       ("F";"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
-schema[`maxreplaces]:     ("J";"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
-schema[`jitter]:          ("F";"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
-schema[`ticksize]:        ("F";"minimum price increment (0.01 for US equities); fill prices sit on the tick or exactly at the midpoint (half ticks)")
-schema[`seed]:            ("J";"random seed (0N = no seed)")
-schema[`urgency]:         ("F";"arrival pacing only: Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
-schema[`maxpct]:          ("F";"arrival pacing only: participation cap per interval, own/(own+market), between 0 and 1")
+schema[`orderid]:("S";`essential;`order;"unique order identifier")
+schema[`sym]:("S";`essential;`order;"ticker symbol - must match the trades/quotes tables")
+schema[`side]:("S";`essential;`order;"BUY or SELL")
+schema[`orderqty]:("J";`essential;`order;"total order quantity")
+schema[`starttime]:("P";`essential;`order;"execution window start (timestamp, matches trades/quotes date)")
+schema[`endtime]:("P";`essential;`order;"execution window end (timestamp, same day)")
+schema[`numchildren]:("J";`order;`order;"number of child orders to send (a cleanup child may follow)")
+schema[`pacing]:("S";`order;`order;"child scheduling: even (patient), frontloaded (rushed) or arrival (urgency trajectory under a participation cap)")
+schema[`spreadcapture]:("F";`order;`order;"probability a child is aggressive (a marketable order crossing the spread) rather than passive (a limit at the near touch): 0=best, 1=worst")
+schema[`account]:("S";`order;`order;"the account the order is for")
+schema[`algo]:("S";`order;`order;"the algorithm working the order (a label: VWAP, IS, ...)")
+schema[`seed]:("J";`order;`order;"random seed of the jitter, the aggression and the venues (0N = no seed)")
+schema[`ticksize]:("F";`market;`session;"minimum price increment; fill prices sit on the tick or exactly at the midpoint (half ticks)")
+schema[`latencyms]:("F";`market;`orders;"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
+schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
+schema[`jitter]:("F";`market;`orders;"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
+schema[`capacity]:("S";`market;`orders;"A (agency) or P (principal)")
+schema[`ordervenues]:("SL";`market;`orders;"lit venues (MIC codes) the children are routed to")
+schema[`ordervenueshares]:("FL";`market;`orders;"their routing shares (sum to 1)")
+schema[`sweepticks]:("J";`market;`orders;"ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken")
+schema[`urgency]:("F";`optional;`order;"arrival pacing only (required there): Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
+schema[`maxpct]:("F";`optional;`order;"arrival pacing only (required there): participation cap per interval, own/(own+market), between 0 and 1")
 
-/ derive type string from schema
-csvtypes:raze first each value schema
+files:{[]
+  / the shipped market file and order rows
+  `market`orders!simconfig.path each ("markets/us_largecap.json";"orders.csv")
+  };
 
-loadconfig:{[filepath]
-  / load preset order configurations from CSV file
-  / filepath: file handle to CSV (e.g., `:presets.csv)
-  / returns: keyed table with preset name as key
-  /
-  / Example:
-  /   cfgs:loadconfig`:di/simorder/presets.csv
-  /   cfg:cfgs`good
-  /   run[cfg;trades;quotes]
-  if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  / the type string is applied by column position, so the header is checked
-  / against the schema first: any column order loads, a missing, unknown or
-  / repeated column throws instead of parsing values into the wrong types
-  hdr:`$csv vs first read0 filepath;
-  expected:key .z.m.schema;
-  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
-  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
-  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns - ",", " sv string distinct hdr where 1<count each group[hdr] hdr];
-  types:raze first each .z.m.schema hdr;
-  1!expected xcols (types;enlist csv) 0: filepath
+loadmarket:{[filepath] simtick.loadmarket filepath};
+
+loadorders:{[filepath]
+  / the order rows: a CSV keyed by name; the essential columns must be
+  / filled, any market key may be overridden, urgency and maxpct are for
+  / arrival pacing
+  t:simconfig.loadrows[.z.m.schema;filepath;`name];
+  req:(key .z.m.schema) where `essential=value[.z.m.schema][;1];
+  if[count missing:req where not req in cols t; '"loadorders: missing columns - ",", " sv string missing];
+  if[any raze null (0!t) req; '"loadorders: ",(", " sv string req)," must be filled on every row"];
+  t
+  };
+
+compose:{[market;order]
+  / the flat configuration of an order: the market's keys of the schema
+  / (its orders group and ticksize), then the order row's filled entries,
+  / cast, checked for unknown and missing keys and validated
+  / market: the market dictionary (loadmarket) or any composed config carrying it
+  / order: a row of loadorders (orders`good) or a dictionary with orderid,
+  /   sym, side, orderqty, starttime, endtime, numchildren, pacing,
+  /   spreadcapture, account, algo, seed and any override
+  mkeys:(key .z.m.schema) where `market=value[.z.m.schema][;1];
+  mk:(key[market] inter mkeys)#market;
+  none:(`symbol$())!();
+  .z.m.validate simconfig.compose[.z.m.schema;mk;order;none;none]
   };
 
 describe:{[]
-  / return configuration schema as a table
-  / Example:
-  /   simorder.describe[]
-  ([]param:key .z.m.schema;typ:first each value .z.m.schema;description:last each value .z.m.schema)
+  / the order schema as a table, followed by the market file's other
+  / orders keys (the algo menu, the flow defaults and the impact keys, held
+  / in di.simtick's schema)
+  own:simconfig.describe .z.m.schema;
+  own,?[simtick.describe[];((=;`group;enlist `orders);(not;(in;`param;enlist key .z.m.schema)));0b;()]
   };
 
 / export public interface
-export:([run;runmany;runflow;generate;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;loadconfig;describe])
+export:([run;runmany;runflow;generate;menu;compose;loadmarket;loadorders;files;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])

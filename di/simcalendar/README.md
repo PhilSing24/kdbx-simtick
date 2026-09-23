@@ -17,17 +17,20 @@ simtick ← simorder
 
 ## Installation
 
-Requires `di.simtick` as a sibling module:
+Requires `di.simtick` (and through it `di.simconfig`, which holds the shipped market, instrument and scenario files) as sibling modules:
 
 ```
 di/
-├── simtick/
+├── simconfig/
 │   ├── init.q
-│   └── presets.csv
+│   ├── markets/us_largecap.json
+│   ├── instruments.csv
+│   └── scenarios.csv
+├── simtick/
+│   └── init.q
 └── simcalendar/
     ├── init.q
     ├── calendar.csv
-    ├── presets.csv
     └── README.md
 ```
 
@@ -41,9 +44,13 @@ di/
 q)simtick:use`di.simtick
 q)simcalendar:use`di.simcalendar
 
-/ A tick configuration from simtick, joined with a calendar preset from this module
-q)tickcfg:simtick.loadconfig[`:di/simtick/presets.csv]`nvda_default
-q)cfg:tickcfg,simcalendar.loadconfig[`:di/simcalendar/presets.csv]`default
+/ A configuration composed from the layers (see di.simtick): the scenario
+/ row carries the calendar keys; the run dictionary sets the seed
+q)f:simtick.files[]
+q)market:simtick.loadmarket f`market
+q)instruments:simtick.loadinstruments f`instruments
+q)scenarios:simtick.loadscenarios f`scenarios
+q)cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
 
 / Load trading calendar
 q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
@@ -83,27 +90,41 @@ q)days
 
 `trade` and `quote` are written per date partition; `days` is a splayed table at the root, loaded with the database.
 
+### Several instruments
+
+`compose` gives every instrument of the table its configuration, on one scenario or one per instrument, and `runmany` runs them over the same calendar. The regime seed of a date is shared, so the instruments live the same market days (the same quiet and busy spells under the same scenario); each has its own tape and overnight gaps.
+
+```q
+q)cfgs:simcalendar.compose[market;instruments;scenarios;`normal;(enlist `seed)!enlist 42]
+q)cfgs:simcalendar.compose[market;instruments;scenarios;`NVDA`XOM`PG!`normal`normal`volatile;(enlist `seed)!enlist 42]
+q)result:simcalendar.runmany[cfgs;calendar;(::)]        / or a dbpath
+q)select sym,date,open,close,trades from result`days
+```
+
+In memory the trades and quotes of every instrument come merged and sorted by time, and the `days` table gets a `sym` column; on disk the partitions hold every instrument, sorted by `sym` then time. An instrument named in the scenario dictionary but not in the table, or a scenario not in the scenario table, throws an error naming it.
+
 ## API
 
 | Function | Description |
 |----------|-------------|
 | `simcalendar.run[cfg;calendar;dbpath]` | Run the simulation; returns a dict `trade`quote`days` in memory, or `dbpath` on disk |
 | `simcalendar.runstep[cfg;dst;state;day]` | One day of the run (the step `run` folds over the regimes table) |
-| `simcalendar.daycfg[cfg;day;startprice]` | The simtick config for one day from its row of the regimes or days table: date, closing time, open price, vol and intensity multipliers, jump intensity, seed |
+| `simcalendar.runmany[cfgs;calendar;dbpath]` | Run several instruments (a dictionary sym!config from `compose`) over the same calendar, merged |
+| `simcalendar.compose[market;instruments;scenarios;scenario;run]` | The configuration of every instrument, on one scenario name or a dictionary sym!name |
+| `simcalendar.daycfg[cfg;day;price]` | The simtick config for one day from its row of the regimes or days table: date, closing time, open price, vol and trades per day multiplied, jump intensity, base intensity derived, seed |
 | `simcalendar.overnight[cfg;ndays]` | One overnight log return over a gap of `ndays` calendar days |
 | `simcalendar.seeds[cfg;dates]` | The per-day seeds: a regime seed per date shared across instruments, the instrument's day seed and gap seed |
 | `simcalendar.regimes[cfg;calendar]` | The calendar with the day-level regime resolved: seeds, AR(1) state, volatility and volume multipliers, closing time, jump intensity |
 | `simcalendar.loadcalendar[filepath]` | Load a calendar from CSV, returns a calendar table |
 | `simcalendar.savecalendar[filepath;calendar]` | Write a calendar table to CSV |
 | `simcalendar.nysecalendar[from;to]` | The NYSE trading days between two dates, early closes at 13:00 |
-| `simcalendar.loadconfig[filepath]` | Load the calendar presets from CSV, returns keyed table |
 | `simcalendar.validate[calendar]` | Validate a calendar (a date list or a table) and return it as a table |
 | `simcalendar.validatecfg[cfg]` | Validate the calendar keys of a config |
-| `simcalendar.describe[]` | The calendar configuration schema |
+| `simcalendar.describe[]` | The calendar keys of the configuration schema |
 
 ## Configuration
 
-All tick parameters come from `di.simtick`'s configuration; `tradingdate` and `startprice` are set per day. The calendar keys come from this module's `presets.csv` and are joined onto the tick config. `loadconfig` checks the header against the schema like the other modules.
+A run takes a configuration composed by `di.simtick` from its four layers (market, instrument, scenario, run). The calendar keys below belong to the scenario layer, so `di/simconfig/scenarios.csv` carries them per scenario: `normal` has persistence 0.7, 30% spread and correlation 0.7; `volatile` long spells (persistence 0.8) with 60% spread and correlation 0.8. `tradingdate` and `price` are set per day by `daycfg`, which also multiplies `vol` and `tradesperday` by the day's regime and derives the day's `baseintensity` the way `simtick.compose` does (a half day trades about half a day).
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
@@ -114,12 +135,7 @@ All tick parameters come from `di.simtick`'s configuration; `tradingdate` and `s
 | `volregimesd` | Standard deviation of the log volatility multiplier across days, normalized so the mean daily variance is the configured one; 0 keeps every day at the configured vol | 0.3 |
 | `volumeregimesd` | Standard deviation of the log volume multiplier across days, driven by the same regime as the volatility | 0.3 |
 
-| Preset | Description |
-|--------|-------------|
-| `default` | 30% of the daily variance overnight, weekends at 1.5 nights, regimes with persistence 0.7, 30% spread and correlation 0.7 |
-| `nogap` | As default but no overnight return: each day opens exactly at the previous close |
-| `steady` | Overnight gaps but no regime: every day at the configured vol and intensity |
-| `turbulent` | Long spells (persistence 0.8) with 60% spread in vol and volume, correlation 0.8 |
+For no overnight gap set `overnightshare` and `gapdayweight` to 0; for no regime set the two spreads to 0. Either goes on a scenario row, or on the composed dictionary before the run.
 
 ## Calendar Format
 
@@ -211,7 +227,7 @@ q)k4unit:use`local.k4unit
 q)k4unit.moduletest`di.simcalendar
 ```
 
-The suite covers calendar validation and loading, the config keys, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, disk persistence and reproducibility.
+The suite (127 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory and to disk, disk persistence and reproducibility.
 
 ## Future Extensions
 

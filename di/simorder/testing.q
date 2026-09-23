@@ -4,19 +4,20 @@
 simtick:use`di.simtick
 simorder:use`di.simorder
 
-/ generate one day of market data (generatequotes defaults to 1 as of presets.csv update)
-tickcfgs:simtick.loadconfig`:di/simtick/presets.csv
-tickcfg:tickcfgs`nvda_default
+/ generate one day of market data on the shipped layers (quotes are returned by the market's run defaults)
+f:simtick.files[]
+market:simtick.loadmarket f`market
+tickcfg:simtick.compose[market;simtick.loadinstruments[f`instruments]`NVDA;simtick.loadscenarios[f`scenarios]`normal;(`symbol$())!()]
 result:simtick.run[tickcfg]
 trades:result`trade
 quotes:result`quote
 
 -1"trades: ",string[count trades]," rows, quotes: ",string[count quotes]," rows";
 
-/ load good/bad order presets
-ordcfgs:simorder.loadconfig`:di/simorder/presets.csv
-ordresult:simorder.run[ordcfgs`good;trades;quotes]
-badresult:simorder.run[ordcfgs`bad;trades;quotes]
+/ the good and bad order rows, composed with the market's orders keys
+orders:simorder.loadorders simorder.files[]`orders
+ordresult:simorder.run[simorder.compose[market;orders`good];trades;quotes]
+badresult:simorder.run[simorder.compose[market;orders`bad];trades;quotes]
 
 / sanity checks
 -1"good qty total: ",string sum ordresult[`executions]`qty;

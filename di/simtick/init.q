@@ -4,14 +4,8 @@
 nsperms:1000000
 nspersec:1000000000
 
-/ round lots of the `mixture quantity model and their weights (US equities:
-/ 100 shares dominates, then 200, 500, 300, 1000)
-roundlots:100 200 300 500 1000
-roundlotweights:0.5 0.2 0.1 0.12 0.08
-
-/ lit venues and their shares of on-exchange volume (US equities, MIC codes);
-/ off-exchange prints go to the TRF at the config's offexchangeshare
-venues:([]venue:`XNAS`XNYS`ARCX`BATS`EDGX`IEXG;share:0.42 0.06 0.14 0.14 0.14 0.10)
+/ configuration layers (market, instrument, scenario, run) composed by di.simconfig
+simconfig:use`di.simconfig
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -254,12 +248,12 @@ clocksteps:{[cfg;times]
 pricepath:{[cfg;times;jumps]
   / the price path at the given points: start price, diffusion steps by the
   / config's clock, and the jumps at or before each point
-  / cfg: config dict with `startprice`vol`drift`clock`tradingdays and the session keys
+  / cfg: config dict with `price`vol`drift`clock`tradingdays and the session keys
   / times: points in seconds from open, ascending
   / jumps: `time`factor table (see jump.events), possibly empty
   / returns: price per point
   times:`float$times;
-  path:cfg[`startprice]*prds .z.m.diffusion[cfg;.z.m.clocksteps[cfg;times]];
+  path:cfg[`price]*prds .z.m.diffusion[cfg;.z.m.clocksteps[cfg;times]];
   path*1f^(prds jumps`factor) jumps[`time] bin times
   };
 
@@ -270,14 +264,14 @@ price:{[cfg;times]
   / returns: list of prices corresponding to each time
   /
   / Required config keys:
-  /   openingtime, closingtime, tradingdays, pricemodel, startprice, vol, drift
+  /   openingtime, closingtime, tradingdays, pricemodel, price, vol, drift
   /   For jump model: jumpintensity, jumpmean, jumpvol
   /   clock (`calendar or `transaction, see clocksteps) defaults to `calendar
   /
-  / startprice is the price at the session open; a first time of 0 returns it
+  / price is the price at the session open; a first time of 0 returns it
   .z.m.val.nonempty[times;"times";"price"];
   if[any times<0; '"price: times must be non-negative"];
-  reqkeys:`openingtime`closingtime`tradingdays`pricemodel`startprice`vol`drift;
+  reqkeys:`openingtime`closingtime`tradingdays`pricemodel`price`vol`drift;
   .z.m.val.haskeys[cfg;reqkeys;"price"];
   duration:(`timespan$cfg[`closingtime])-`timespan$cfg`openingtime;
   jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration%nspersec]; ([]time:`float$();factor:`float$())];
@@ -306,18 +300,18 @@ qty.lognormal:{[n;cfg]
 
 qty.mixture:{[n;cfg]
   / a mixture of trade sizes as printed on a US tape: a share roundlotshare
-  / of round lots (100, 200, 300, 500, 1000 by roundlotweights), a share
-  / blockshare of blocks (lognormal, median blockqty, log-sd 0.5), and the
+  / of round lots (roundlots by roundlotweights), a share blockshare of
+  / blocks (lognormal, median blockqty, log-sd blockqtyvol), and the
   / rest irregular lots, lognormal with mean avgqty and log-sd qtyvol (mostly
   / odd lots for a large cap)
   / n: number of quantities
-  / cfg: config dict with `roundlotshare`blockshare`blockqty`avgqty`qtyvol`rngmodel
+  / cfg: config dict with `roundlotshare`blockshare`blockqty`blockqtyvol`roundlots`roundlotweights`avgqty`qtyvol`rngmodel
   / returns: list of n long quantities (minimum 1)
   u:n?1.0;
   isround:u<cfg`roundlotshare;
   isblock:(not isround)&u<cfg[`roundlotshare]+cfg`blockshare;
-  rq:roundlots (sums roundlotweights) binr n?1.0;
-  bq:floor 0.5+cfg[`blockqty]*exp 0.5*.z.m.rng.normal[n;cfg];
+  rq:cfg[`roundlots] (sums cfg`roundlotweights) binr n?1.0;
+  bq:floor 0.5+cfg[`blockqty]*exp cfg[`blockqtyvol]*.z.m.rng.normal[n;cfg];
   iq:.z.m.qty.lognormal[n;cfg];
   1|?[isround;rq;?[isblock;bq;iq]]
   };
@@ -330,7 +324,7 @@ qty.mean:{[cfg]
   model:cfg`qtymodel;
   $[model=`mixture;
     [r:cfg`roundlotshare; b:cfg`blockshare;
-     ((1-r+b)*cfg`avgqty)+(r*sum roundlots*roundlotweights)+b*cfg[`blockqty]*exp 0.125];
+     ((1-r+b)*cfg`avgqty)+(r*sum cfg[`roundlots]*cfg`roundlotweights)+b*cfg[`blockqty]*exp 0.5*cfg[`blockqtyvol]*cfg`blockqtyvol];
     `float$cfg`avgqty]
   };
 
@@ -363,23 +357,26 @@ quote.seeds:{[cfg;arrs]
 
 quote.activity:{[cfg;quotearrs]
   / local quote activity relative to its expected level: the quotes in the
-  / trailing minute over the number the intensity profile expects there,
-  / raised to spreadactivity; multiplies the mean spread, so bursts widen it
-  / cfg: config dict with `spreadactivity`quotespertrade`baseintensity`alpha`beta`profile
+  / trailing activitywindowseconds over the number the intensity profile
+  / expects there, clipped to activityclip and raised to spreadactivity;
+  / multiplies the mean spread, so bursts widen it
+  / cfg: config dict with `spreadactivity`activitywindowseconds`activityclip`quotespertrade`baseintensity`alpha`beta`profile
   / quotearrs: quote times in seconds from open, ascending
   / returns: float multiplier per quote, 1 when spreadactivity is 0
   n:count quotearrs;
   if[0=cfg`spreadactivity; :n#1f];
   duration:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
-  cnt:(til n)-quotearrs bin quotearrs-60f;
+  w:`float$cfg`activitywindowseconds;
+  cnt:(til n)-quotearrs bin quotearrs-w;
   rate:cfg[`quotespertrade]*cfg[`baseintensity]*.z.m.shape[cfg;quotearrs%duration]%1-cfg[`alpha]%cfg`beta;
-  ratio:(1+cnt)%1+rate*60f&quotearrs;
-  xexp[0.25|ratio&4;cfg`spreadactivity]
+  ratio:(1+cnt)%1+rate*w&quotearrs;
+  clip:cfg`activityclip;
+  xexp[clip[0]|ratio&clip[1];cfg`spreadactivity]
   };
 
 quote.generate:{[cfg;times;mids;activity]
   / quote table from the mid path sampled on the quote clock
-  / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`quotesizevol`imbalancesignal`ticksize`rngmodel
+  / cfg: config dict with `spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize`quotesizevol`quotelot`imbalancesignal`ticksize`rngmodel
   / times: quote timestamps, ascending, the first at the session open
   / mids: mid price at each time (the price path sampled on the quote clock)
   / activity: spread multiplier per quote from local activity (see quote.activity)
@@ -398,7 +395,7 @@ quote.generate:{[cfg;times;mids;activity]
   bid:ticksize*floor 0.5+(mids-0.5*ticks*ticksize)%ticksize;
   ask:bid+ticks*ticksize;
 
-  / sizes: lognormal around avgquotesize, in round lots, the bid side
+  / sizes: lognormal around avgquotesize, in lots of quotelot, the bid side
   / larger before the mid rises and the ask side before it falls
   / (imbalancesignal: the book leans toward the next move, weakly)
   lv:cfg`quotesizevol;
@@ -406,8 +403,9 @@ quote.generate:{[cfg;times;mids;activity]
   tilt:cfg[`imbalancesignal]*nextmove;
   bidsize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])+tilt-0.5*lv*lv;
   asksize:cfg[`avgquotesize]*exp (lv*.z.m.rng.normal[n;cfg])-tilt+0.5*lv*lv;
-  bidsize:100*1|floor 0.5+bidsize%100;
-  asksize:100*1|floor 0.5+asksize%100;
+  lot:cfg`quotelot;
+  bidsize:lot*1|floor 0.5+bidsize%lot;
+  asksize:lot*1|floor 0.5+asksize%lot;
   ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
   };
 
@@ -429,10 +427,10 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
   / the shift of the mid in force at each quote time from the signed trades
   / before it (a propagator): each trade moves the mid by impactticks ticks
   / times sqrt(qty/mean size) in its direction; a share impactpermanent of that
-  / stays, the rest halves every impacthalflife seconds. With persistent
+  / stays, the rest halves every impacthalflifeseconds. With persistent
   / signs this gives the tape price impact and partial reversion after a
   / trade, what markout curves measure
-  / cfg: config dict with `impactticks`impacthalflife`impactpermanent`ticksize`avgqty
+  / cfg: config dict with `impactticks`impacthalflifeseconds`impactpermanent`ticksize and the quantity keys
   / tradetimes: trade times in seconds from open, ascending
   / flow: `sign`qty of those trades (see flow.generate)
   / quotetimes: quote times in seconds from open, ascending
@@ -440,7 +438,7 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
   n:count tradetimes;
   if[(0=n) or 0=cfg`impactticks; :(count quotetimes)#0f];
   imp:cfg[`impactticks]*cfg[`ticksize]*flow[`sign]*sqrt flow[`qty]%.z.m.qty.mean cfg;
-  lam:log[2]%cfg`impacthalflife;
+  lam:log[2]%cfg`impacthalflifeseconds;
   perm:cfg`impactpermanent;
   / transient part in force just after each trade, and the permanent part
   trans:{[e;dt;a] a+e*exp neg dt}\[0f;lam*deltas tradetimes;(1-perm)*imp];
@@ -453,15 +451,15 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
 trade.generate:{[cfg;times;quotes;flow]
   / trades against the quote in force at their time: a buyer-initiated trade
   / takes the ask, a seller-initiated one the bid; a share of trades prints
-  / at the midpoint and a share a tenth of a tick inside the touch (price
-  / improvement)
-  / cfg: config dict with `midpointshare`improvementshare`ticksize`offexchangeshare
+  / at the midpoint and a share improvementtick of a tick inside the touch
+  / (price improvement); prices sit on the printgrid of a tick
+  / cfg: config dict with `midpointshare`improvementshare`improvementtick`printgrid`ticksize`offexchangeshare`offexchangeinside`venues`venueshares
   / times: trade timestamps, ascending, none before the first quote
   / quotes: quote table (see quote.generate)
   / flow: `sign`qty of the trades (see flow.generate)
   / returns: trade table `time`price`qty`aggressor`cond`venue, aggressor `B
   /   (buyer-initiated) or `S, cond `R (regular) or `I (odd lot, below 100),
-  /   venue a lit MIC code or `TRF; prices on the tenth-of-a-tick grid
+  /   venue a lit MIC code or `TRF
   n:count times;
   idx:quotes[`time] bin times;
   bid:quotes[`bid] idx;
@@ -474,19 +472,19 @@ trade.generate:{[cfg;times;quotes;flow]
   atmid:u<cfg`midpointshare;
   improved:(not atmid)&u<cfg[`midpointshare]+cfg`improvementshare;
   touch:?[sign>0;ask;bid];
-  price:?[atmid;mid;?[improved;touch-sign*0.1*cfg`ticksize;touch]];
-  grid:0.1*cfg`ticksize;
+  price:?[atmid;mid;?[improved;touch-sign*cfg[`improvementtick]*cfg`ticksize;touch]];
+  grid:cfg[`printgrid]*cfg`ticksize;
   price:grid*floor 0.5+price%grid;
 
-  / venue: midpoint and improved prints are almost all off-exchange (dark
-  / pools, wholesalers reporting to the TRF); prints at the touch are split
-  / so that the day's off-exchange share is offexchangeshare; lit prints
-  / spread over the venues by share
+  / venue: midpoint and improved prints are off-exchange with probability
+  / offexchangeinside (dark pools, wholesalers reporting to the TRF); prints
+  / at the touch are split so that the day's off-exchange share is
+  / offexchangeshare; lit prints spread over venues by venueshares
   inside:atmid|improved;
-  offinside:0.95;
+  offinside:cfg`offexchangeinside;
   offtouch:0f|(cfg[`offexchangeshare]-offinside*avg inside)%1-avg inside;
   isoff:(n?1.0)<?[inside;offinside;offtouch];
-  lit:venues[`venue] (sums venues`share) binr n?1.0;
+  lit:cfg[`venues] (sums cfg`venueshares) binr n?1.0;
   venue:?[isoff;`TRF;lit];
 
   qty:flow`qty;
@@ -543,7 +541,7 @@ validate:{[cfg]
   /   - Positive base intensity
   /   - Non-negative auction percentages
   /   - Positive volatility (zero vol produces degenerate flat price path)
-  /   - Positive start price (negative/zero price is economically invalid)
+  /   - Positive price (negative/zero price is economically invalid)
   /   - Positive tick size, positive quotespertrade, sidepersistence and the
   /     midpoint and improvement shares between 0 and 1 (shares summing to
   /     at most 1)
@@ -565,13 +563,26 @@ validate:{[cfg]
   if[0>min cfg`openauctionpct`closeauctionpct; '"validate: auction percentages must be zero or positive"];
   / check vol positive (zero produces NaN in log, flat path with no signal)
   if[0>=cfg`vol; '"validate: vol must be positive"];
-  / check startprice positive (GBM/jump models require positive initial price)
-  if[0>=cfg`startprice; '"validate: startprice must be positive"];
+  / check price positive (GBM/jump models require positive initial price)
+  if[0>=cfg`price; '"validate: price must be positive"];
   / microstructure keys: in the config since a preset must describe a run fully
-  reqkeys:`ticksize`spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize;
+  reqkeys:`ticksize`printgrid`spreadticks`spreadopenmult`spreadmidmult`spreadclosemult`spreaddecayminutes`avgquotesize;
+  reqkeys,:`activitywindowseconds`activityclip`quotelot`improvementtick`offexchangeinside`venues`venueshares;
+  reqkeys,:`roundlots`roundlotweights`blockqtyvol;
   reqkeys,:`quotespertrade`sidepersistence`midpointshare`improvementshare;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
+  if[not (0<cfg`printgrid)&1>=cfg`printgrid; '"validate: printgrid must be between 0 and 1"];
+  if[not cfg[`offexchangeinside] within 0 1; '"validate: offexchangeinside must be between 0 and 1"];
+  if[not cfg[`improvementtick] within 0 1; '"validate: improvementtick must be between 0 and 1"];
+  if[count[cfg`venues]<>count cfg`venueshares; '"validate: venues and venueshares must have the same length"];
+  if[1e-6<abs 1-sum cfg`venueshares; '"validate: venueshares must sum to 1"];
+  if[count[cfg`roundlots]<>count cfg`roundlotweights; '"validate: roundlots and roundlotweights must have the same length"];
+  if[1e-6<abs 1-sum cfg`roundlotweights; '"validate: roundlotweights must sum to 1"];
+  if[0>cfg`blockqtyvol; '"validate: blockqtyvol must be zero or positive"];
+  if[0>=cfg`quotelot; '"validate: quotelot must be positive"];
+  if[0>=cfg`activitywindowseconds; '"validate: activitywindowseconds must be positive"];
+  if[not (2=count cfg`activityclip)&(<). cfg`activityclip; '"validate: activityclip must be two ascending values"];
   if[1>cfg`spreadticks; '"validate: spreadticks must be at least 1"];
   if[0>=min cfg`spreadopenmult`spreadmidmult`spreadclosemult; '"validate: spread multipliers must be positive"];
   if[0>=cfg`spreaddecayminutes; '"validate: spreaddecayminutes must be positive"];
@@ -592,9 +603,9 @@ validate:{[cfg]
   if[0>cfg`jumpburst; '"validate: jumpburst must be zero or positive"];
   if[0>=cfg`jumpburstminutes; '"validate: jumpburstminutes must be positive"];
   / order-flow impact
-  .z.m.val.haskeys[cfg;`impactticks`impacthalflife`impactpermanent;"validate"];
+  .z.m.val.haskeys[cfg;`impactticks`impacthalflifeseconds`impactpermanent;"validate"];
   if[0>cfg`impactticks; '"validate: impactticks must be zero or positive"];
-  if[0>=cfg`impacthalflife; '"validate: impacthalflife must be positive"];
+  if[0>=cfg`impacthalflifeseconds; '"validate: impacthalflifeseconds must be positive"];
   if[not cfg[`impactpermanent] within 0 1; '"validate: impactpermanent must be between 0 and 1"];
   cfg
   };
@@ -674,93 +685,197 @@ run:{[cfg]
   $[cfg`generatequotes; `trade`quote!(trades;addsym[cfg`sym;quotes]); trades]
   };
 
-/ configuration schema: column name -> (type; description)
-/ type codes: S=symbol, D=date, U=minute, F=float, J=long, B=boolean
+/ ============================================================
+/ CONFIGURATION: SCHEMA AND LAYERS
+/ ============================================================
+/ schema: key!(type;layer;group;description), see di.simconfig. The essential
+/ layer is what a user sets for a stock; market keys come from the market
+/ file (and any of them can be overridden on an instrument row); scenario
+/ keys from the scenario row; run keys from the run dictionary (the market
+/ file carries their defaults); baseintensity is derived by compose
 schema:()!()
-schema[`name]:("S";"preset name (key)")
-schema[`sym]:("S";"ticker symbol")
-schema[`tradingdate]:("D";"simulation date")
-schema[`openingtime]:("U";"market open time")
-schema[`closingtime]:("U";"market close time")
-schema[`startprice]:("F";"initial price")
-schema[`seed]:("J";"random seed (0N = no seed, use null long)")
-schema[`rngmodel]:("S";"RNG model (`pseudo)")
-schema[`drift]:("F";"annualized drift")
-schema[`vol]:("F";"annualized volatility")
-schema[`tradingdays]:("J";"trading days per year")
-schema[`pricemodel]:("S";"price model (`gbm or `jump)")
-schema[`jumpintensity]:("F";"jump arrival rate (jumps/day)")
-schema[`jumpmean]:("F";"log jump mean")
-schema[`jumpvol]:("F";"log jump volatility")
-schema[`jumpburst]:("J";"extra trade immigrants seeded by each jump (each with its usual cascade); 0 = none")
-schema[`jumpburstminutes]:("F";"mean delay in minutes of those immigrants after the jump")
-schema[`clock]:("S";"clock of the diffusion: `calendar (variance grows with time, flat intraday vol) or `transaction (variance grows with activity: U-shaped vol, bursts)")
-schema[`baseintensity]:("F";"base trade arrival rate (trades/sec)")
-schema[`alpha]:("F";"Hawkes excitation parameter")
-schema[`beta]:("F";"Hawkes decay parameter (must be > alpha)")
-schema[`profile]:("*";"intraday intensity profile: space-separated positive weights, one per equal bin of the session (13 half hours), interpolated between bin midpoints")
-schema[`openauctionpct]:("F";"opening auction print as a fraction of the day's continuous volume (0 = none)")
-schema[`closeauctionpct]:("F";"closing auction print as a fraction of the day's continuous volume (0 = none)")
-schema[`qtymodel]:("S";"quantity model (`constant, `lognormal or `mixture: round lots, blocks and irregular lots)")
-schema[`avgqty]:("J";"average trade quantity (of the irregular lots under `mixture)")
-schema[`qtyvol]:("F";"quantity log volatility (lognormal and the irregular lots of the mixture)")
-schema[`roundlotshare]:("F";"mixture: share of trades that are round lots (100, 200, 300, 500, 1000)")
-schema[`blockshare]:("F";"mixture: share of trades that are blocks")
-schema[`blockqty]:("J";"mixture: median block size")
-schema[`offexchangeshare]:("F";"share of trades printed off-exchange (venue TRF); midpoint and improved prints are almost all off-exchange")
-schema[`primaryvenue]:("S";"primary listing venue (MIC), where the auction prints are")
-schema[`generatequotes]:("B";"generate quotes flag")
-schema[`spreadticks]:("F";"mean bid-ask spread in ticks through the day, at least 1 (the spread is 1 tick plus a Poisson excess)")
-schema[`spreadopenmult]:("F";"spread multiplier at the open, decaying to the midday one")
-schema[`spreadmidmult]:("F";"spread multiplier through the day")
-schema[`spreadclosemult]:("F";"spread multiplier at the close, reached by the same decay")
-schema[`spreaddecayminutes]:("F";"minutes over which the open and close spread multipliers decay toward the midday one (e-folding time)")
-schema[`spreadactivity]:("F";"exponent of local quote activity (trailing minute over its expected level) multiplying the mean spread; 0 = none")
-schema[`avgquotesize]:("J";"average quote size")
-schema[`ticksize]:("F";"minimum price increment; quotes are rounded to it, trades to a tenth of it (0.01 for US equities)")
-schema[`quotespertrade]:("F";"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")
-schema[`quotetradelink]:("F";"share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1; the rest arrive on the background quote clock")
-schema[`quotesizevol]:("F";"log volatility of quote sizes (lognormal around avgquotesize, in round lots of 100)")
-schema[`imbalancesignal]:("F";"log tilt of the quote sizes toward the side of the next mid move (bid larger before a rise); 0 = none")
-schema[`sidepersistence]:("F";"probability a trade's aggressor side repeats the previous trade's (0.5 = independent sides)")
-schema[`midpointshare]:("F";"share of trades printing at the midpoint")
-schema[`improvementshare]:("F";"share of trades printing a tenth of a tick inside the touch")
-schema[`impactticks]:("F";"order-flow impact: ticks an average-size trade moves the mid in its direction (0 = none), scaled by sqrt(qty/avgqty)")
-schema[`impacthalflife]:("F";"order-flow impact: seconds over which the transient part of a trade's impact halves")
-schema[`impactpermanent]:("F";"order-flow impact: share of a trade's impact that never decays, between 0 and 1")
+schema[`sym]:("S";`essential;`instrument;"ticker")
+schema[`price]:("F";`essential;`instrument;"price at the open of the (first) day")
+schema[`drift]:("F";`essential;`instrument;"expected annual return (annualized drift of the mid)")
+schema[`vol]:("F";`essential;`instrument;"annual volatility of the close-to-close return")
+schema[`tradesperday]:("J";`essential;`instrument;"average number of trades per day (long-run average over the day-to-day regime)")
+schema[`openingtime]:("U";`market;`session;"market open time")
+schema[`closingtime]:("U";`market;`session;"market close time")
+schema[`tradingdays]:("J";`market;`session;"trading days per year, for annualizing vol and drift")
+schema[`rngmodel]:("S";`market;`session;"random number source (`pseudo)")
+schema[`ticksize]:("F";`market;`session;"minimum price increment; quotes sit on it (0.01 for US equities)")
+schema[`printgrid]:("F";`market;`session;"fraction of a tick trade prints sit on (0.1: a tenth of a tick, for midpoint and improved prints)")
+schema[`clock]:("S";`market;`session;"clock of the diffusion: `transaction (variance grows with activity: U-shaped vol, bursts) or `calendar (variance grows with time, flat vol)")
+schema[`alpha]:("F";`market;`arrivals;"Hawkes excitation per event")
+schema[`beta]:("F";`market;`arrivals;"Hawkes decay (must be > alpha); the branching ratio is alpha/beta")
+schema[`profile]:("FL";`market;`arrivals;"intraday intensity profile: positive weights, one per equal bin of the session (13 half hours), interpolated between bin midpoints")
+schema[`jumpburst]:("J";`market;`arrivals;"extra trade immigrants seeded by each jump (each with its usual cascade); 0 = none")
+schema[`jumpburstminutes]:("F";`market;`arrivals;"mean delay in minutes of those immigrants after the jump")
+schema[`quotespertrade]:("F";`market;`arrivals;"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")
+schema[`quotetradelink]:("F";`market;`arrivals;"share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1")
+schema[`openauctionpct]:("F";`market;`auctions;"opening auction print as a fraction of the day's continuous volume (0 = none)")
+schema[`closeauctionpct]:("F";`market;`auctions;"closing auction print as a fraction of the day's continuous volume (0 = none)")
+schema[`qtymodel]:("S";`market;`sizes;"quantity model: `mixture (round lots, blocks and irregular lots), `lognormal or `constant")
+schema[`avgqty]:("J";`market;`sizes;"average trade quantity (of the irregular lots under `mixture)")
+schema[`qtyvol]:("F";`market;`sizes;"quantity log volatility (lognormal and the irregular lots of the mixture)")
+schema[`roundlotshare]:("F";`market;`sizes;"mixture: share of trades that are round lots")
+schema[`roundlots]:("JL";`market;`sizes;"mixture: the round-lot sizes")
+schema[`roundlotweights]:("FL";`market;`sizes;"mixture: the weights of the round-lot sizes (sum to 1)")
+schema[`blockshare]:("F";`market;`sizes;"mixture: share of trades that are blocks")
+schema[`blockqty]:("J";`market;`sizes;"mixture: median block size")
+schema[`blockqtyvol]:("F";`market;`sizes;"mixture: log volatility of block sizes")
+schema[`spreadticks]:("F";`market;`quotes;"mean bid-ask spread in ticks through the day, at least 1 (the spread is 1 tick plus a Poisson excess)")
+schema[`spreadopenmult]:("F";`market;`quotes;"spread multiplier at the open, decaying to the midday one")
+schema[`spreadmidmult]:("F";`market;`quotes;"spread multiplier through the day")
+schema[`spreadclosemult]:("F";`market;`quotes;"spread multiplier at the close, reached by the same decay")
+schema[`spreaddecayminutes]:("F";`market;`quotes;"minutes over which the open and close spread multipliers decay toward the midday one (e-folding time)")
+schema[`spreadactivity]:("F";`market;`quotes;"exponent of local quote activity (trailing window over its expected level) multiplying the mean spread; 0 = none")
+schema[`activitywindowseconds]:("F";`market;`quotes;"seconds of the trailing window that measures local quote activity")
+schema[`activityclip]:("FL";`market;`quotes;"lowest and highest activity ratio applied to the spread")
+schema[`avgquotesize]:("J";`market;`quotes;"average quote size")
+schema[`quotesizevol]:("F";`market;`quotes;"log volatility of quote sizes (lognormal around avgquotesize)")
+schema[`quotelot]:("J";`market;`quotes;"quote sizes are multiples of this lot")
+schema[`imbalancesignal]:("F";`market;`quotes;"log tilt of the quote sizes toward the side of the next mid move (bid larger before a rise); 0 = none")
+schema[`sidepersistence]:("F";`market;`trades;"probability a trade's aggressor side repeats the previous trade's (0.5 = independent sides)")
+schema[`midpointshare]:("F";`market;`trades;"share of trades printing at the midpoint")
+schema[`improvementshare]:("F";`market;`trades;"share of trades printing inside the touch (price improvement)")
+schema[`improvementtick]:("F";`market;`trades;"fraction of a tick an improved print sits inside the touch")
+schema[`offexchangeshare]:("F";`market;`trades;"share of trades printed off-exchange (venue TRF)")
+schema[`offexchangeinside]:("F";`market;`trades;"probability a midpoint or improved print is off-exchange")
+schema[`venues]:("SL";`market;`trades;"lit venues (MIC codes) trades print on")
+schema[`venueshares]:("FL";`market;`trades;"their shares of on-exchange trades (sum to 1)")
+schema[`primaryvenue]:("S";`market;`trades;"primary listing venue (MIC), where the auction prints are; NYSE names override it on their instrument row")
+schema[`impactticks]:("F";`market;`impact;"order-flow impact: ticks an average-size trade moves the mid in its direction (0 = none), scaled by sqrt(qty / mean size)")
+schema[`impacthalflifeseconds]:("F";`market;`impact;"order-flow impact: seconds over which the transient part of a trade's impact halves")
+schema[`impactpermanent]:("F";`market;`impact;"order-flow impact: share of a trade's impact that never decays, between 0 and 1")
+schema[`ordervenues]:("SL";`market;`orders;"di.simorder: lit venues (MIC codes) the child orders are routed to")
+schema[`ordervenueshares]:("FL";`market;`orders;"di.simorder: their routing shares (sum to 1)")
+schema[`latencyms]:("F";`market;`orders;"di.simorder: milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
+schema[`sweepticks]:("J";`market;`orders;"di.simorder: ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken")
+schema[`maxreplaces]:("J";`market;`orders;"di.simorder: how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
+schema[`jitter]:("F";`market;`orders;"di.simorder: random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
+schema[`capacity]:("S";`market;`orders;"di.simorder: A (agency) or P (principal), the default of the order rows")
+schema[`algos]:("SL";`market;`orders;"di.simorder: the algo menu an order flow draws from (labels)")
+schema[`algopacings]:("SL";`market;`orders;"di.simorder: each algo's pacing (even, frontloaded or arrival)")
+schema[`algospreadcaptures]:("FL";`market;`orders;"di.simorder: each algo's share of aggressive children, between 0 and 1")
+schema[`algourgencies]:("FL";`market;`orders;"di.simorder: each algo's urgency (arrival pacing only, null otherwise)")
+schema[`algomaxpcts]:("FL";`market;`orders;"di.simorder: each algo's participation cap (arrival pacing only, null otherwise)")
+schema[`norders]:("J";`market;`orders;"di.simorder: orders per instrument and day of a generated flow")
+schema[`accounts]:("SL";`market;`orders;"di.simorder: the accounts a generated flow draws from")
+schema[`sizepct]:("FL";`market;`orders;"di.simorder: lowest and highest order size of a generated flow, as a share of the day's volume")
+schema[`windowminutes]:("FL";`market;`orders;"di.simorder: shortest and longest order window of a generated flow, in minutes")
+schema[`childrenperminute]:("F";`market;`orders;"di.simorder: children per minute of window of a generated order (at least 5 children)")
+schema[`orderimpactmodel]:("S";`market;`orders;"di.simorder: impact model of the child executions, participation (p^beta) or sqrtlaw")
+schema[`orderimpacteta]:("F";`market;`orders;"di.simorder: impact coefficient, zero or positive (0 = no impact)")
+schema[`orderimpactbeta]:("F";`market;`orders;"di.simorder: participation exponent, positive (0.5 is the square-root law)")
+schema[`orderimpacthalflifeseconds]:("F";`market;`orders;"di.simorder: seconds over which the transient part of an execution's impact halves")
+schema[`orderimpacttaperminutes]:("F";`market;`orders;"di.simorder: minutes before the close over which the impact shift falls linearly to zero")
+schema[`orderimpactpermanent]:("F";`market;`orders;"di.simorder: share of each execution's impact that stays through the day, between 0 and 1")
+schema[`volmult]:("F";`scenario;`scenario;"multiplies the instrument's vol (applied once by compose, then 1)")
+schema[`volumemult]:("F";`scenario;`scenario;"multiplies the instrument's tradesperday (applied once by compose, then 1)")
+schema[`spreadmult]:("F";`scenario;`scenario;"multiplies the mean spread in ticks (applied once by compose, then 1); the result must stay at least 1")
+schema[`pricemodel]:("S";`scenario;`scenario;"price model (`gbm or `jump)")
+schema[`jumpintensity]:("F";`scenario;`scenario;"jump model: jumps per day")
+schema[`jumpmean]:("F";`scenario;`scenario;"jump model: mean of the log jump size")
+schema[`jumpvol]:("F";`scenario;`scenario;"jump model: standard deviation of the log jump size")
+schema[`overnightshare]:("F";`scenario;`calendar;"di.simcalendar: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded)")
+schema[`gapdayweight]:("F";`scenario;`calendar;"di.simcalendar: weight of each calendar day beyond the first in an overnight gap's variance")
+schema[`regimepersistence]:("F";`scenario;`calendar;"di.simcalendar: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded)")
+schema[`regimecorr]:("F";`scenario;`calendar;"di.simcalendar: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1")
+schema[`volregimesd]:("F";`scenario;`calendar;"di.simcalendar: log spread of the volatility multiplier across days, normalized so the mean daily variance is the configured one")
+schema[`volumeregimesd]:("F";`scenario;`calendar;"di.simcalendar: log spread of the volume multiplier across days")
+schema[`tradingdate]:("D";`run;`run;"the day simulated (the market file carries a default)")
+schema[`seed]:("J";`run;`run;"random seed (0N = unseeded; the market file carries a default)")
+schema[`generatequotes]:("B";`run;`run;"return the quotes as well as the trades (they are always generated)")
+schema[`baseintensity]:("F";`derived;`arrivals;"immigrant arrival rate before the profile and the cascades (trades/sec), derived by compose from tradesperday")
 
-/ derive type string from schema
-csvtypes:raze first each value schema
+files:{[]
+  / the shipped layer files: the US large-cap market, the instruments and the scenarios
+  `market`instruments`scenarios!simconfig.path each ("markets/us_largecap.json";"instruments.csv";"scenarios.csv")
+  };
+
+loadmarket:{[filepath] simconfig.loadmarket[.z.m.schema;filepath]};
+loadinstruments:{[filepath] simconfig.loadinstruments[.z.m.schema;filepath]};
+loadscenarios:{[filepath] simconfig.loadscenarios[.z.m.schema;filepath]};
+
+shapemean:{[cfg]
+  / the average of the interpolated intraday shape over the session,
+  / evaluated every second as the engine applies it
+  n:`long$((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  avg .z.m.shape[cfg;(0.5+til n)%n]
+  };
+
+intensityfor:{[cfg]
+  / baseintensity from tradesperday: the trades the jump bursts are expected
+  / to add are taken out, the branching ratio's cascades are taken out, and
+  / the rest is spread over the session at the profile's average level
+  n:cfg[`alpha]%cfg`beta;
+  burst:$[`jump=cfg`pricemodel; cfg[`jumpintensity]*cfg[`jumpburst]%1-n; 0f];
+  if[burst>=cfg`tradesperday;
+    '"compose: the jump bursts are expected to add ",string[`long$burst]," trades a day, more than tradesperday ",string cfg`tradesperday];
+  T:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  (cfg[`tradesperday]-burst)*(1-n)%T*.z.m.shapemean cfg
+  };
+
+derive:{[cfg]
+  / the scenario multipliers applied once (then set to 1, so a saved config
+  / is not multiplied again) and baseintensity derived
+  cfg[`vol]:cfg[`vol]*cfg`volmult;
+  cfg[`tradesperday]:`long$cfg[`tradesperday]*cfg`volumemult;
+  cfg[`spreadticks]:cfg[`spreadticks]*cfg`spreadmult;
+  cfg[`volmult`volumemult`spreadmult]:1 1 1f;
+  if[1>cfg`spreadticks; '"compose: spreadticks after spreadmult must be at least 1"];
+  cfg[`baseintensity]:.z.m.intensityfor cfg;
+  cfg
+  };
+
+compose:{[market;instrument;scenario;run]
+  / the flat configuration of a run: the layers composed (see di.simconfig),
+  / the scenario multipliers applied and baseintensity derived
+  / market: a market dictionary (loadmarket)
+  / instrument: an instrument row (loadinstruments[...]`NVDA) or a dictionary
+  /   with sym, price, drift, vol, tradesperday and any override
+  / scenario: a scenario row (loadscenarios[...]`normal)
+  / run: a dictionary with any of tradingdate, seed, generatequotes; the
+  /   market file's defaults apply otherwise
+  .z.m.derive simconfig.compose[.z.m.schema;market;instrument;scenario;run]
+  };
 
 loadconfig:{[filepath]
-  / load preset configurations from CSV file
-  / filepath: file handle to CSV (e.g., `:presets.csv)
-  / returns: keyed table with preset name as key
-  /
-  / Example:
-  /   cfgs:loadconfig`:di/simtick/presets.csv
-  /   cfg:cfgs`nvda_default
-  /   run[cfg]
-  if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  / the type string is applied by column position, so the header is checked
-  / against the schema first: any column order loads, a missing, unknown or
-  / repeated column throws instead of parsing values into the wrong types
-  hdr:`$csv vs first read0 filepath;
-  expected:key .z.m.schema;
-  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
-  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
-  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns - ",", " sv string distinct hdr where 1<count each group[hdr] hdr];
-  types:raze first each .z.m.schema hdr;
-  1!expected xcols (types;enlist csv) 0: filepath
+  / a saved flat configuration (see saveconfig). baseintensity is recomputed
+  / from tradesperday when both are present and must agree, so a hand-edited
+  / tradesperday cannot be ignored; it is derived when absent
+  cfg:simconfig.loadconfig[.z.m.schema;filepath];
+  if[not `tradesperday in key cfg; :cfg];
+  b:.z.m.intensityfor cfg;
+  if[`baseintensity in key cfg;
+    if[1e-6<abs (cfg[`baseintensity]-b)%b;
+      '"loadconfig: baseintensity ",string[cfg`baseintensity]," disagrees with tradesperday ",string[cfg`tradesperday]," (",string[b],")"]];
+  cfg[`baseintensity]:b;
+  cfg
+  };
+
+saveconfig:{[filepath;cfg] simconfig.saveconfig[filepath;cfg]};
+
+quickwith:{[sym;price;drift;vol;tradesperday;overrides]
+  / one day of one stock from the five essential values, on the shipped
+  / market and the normal scenario, with the market file's run defaults
+  / (date, seed) unless overridden
+  f:.z.m.files[];
+  ins:`sym`price`drift`vol`tradesperday!(sym;price;drift;vol;tradesperday);
+  cfg:.z.m.compose[.z.m.loadmarket f`market;ins;.z.m.loadscenarios[f`scenarios]`normal;overrides];
+  .z.m.run cfg
+  };
+
+quick:{[sym;price;drift;vol;tradesperday]
+  / simtick.quick[`NVDA;215.0;0.08;0.45;500000]
+  .z.m.quickwith[sym;price;drift;vol;tradesperday;(`symbol$())!()]
   };
 
 describe:{[]
-  / return configuration schema as a table
-  / useful for documentation and introspection
-  / Example:
-  /   simtick.describe[]
-  ([]param:key .z.m.schema;typ:first each value .z.m.schema;description:last each value .z.m.schema)
+  / the configuration schema as a table, the essential keys first
+  simconfig.describe .z.m.schema
   };
 
 / export public interface
-export:([run;arrivals;price;loadconfig;describe])
+export:([run;quick;quickwith;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])
