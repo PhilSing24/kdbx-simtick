@@ -1,0 +1,75 @@
+action,ms,bytes,lang,code,repeat,comment
+before,0,0,q,simconfig:use`di.simconfig,1,,Initialize module
+before,0,0,q,sch:()!(),1,,A toy schema
+before,0,0,q,sch[`sym]:("S";`essential;`id;"ticker"),1,,An essential symbol
+before,0,0,q,sch[`price]:("F";`essential;`id;"start price"),1,,An essential float
+before,0,0,q,sch[`drift]:("F";`essential;`id;"drift"),1,,Essential
+before,0,0,q,sch[`vol]:("F";`essential;`id;"vol"),1,,Essential
+before,0,0,q,sch[`tradesperday]:("J";`essential;`id;"trades per day"),1,,Essential long
+before,0,0,q,sch[`ticksize]:("F";`market;`quotes;"tick"),1,,A market float
+before,0,0,q,sch[`openingtime]:("U";`market;`session;"open"),1,,A market minute
+before,0,0,q,sch[`clock]:("S";`market;`price;"clock"),1,,A market symbol
+before,0,0,q,sch[`profile]:("FL";`market;`arrivals;"weights"),1,,A market float list
+before,0,0,q,sch[`venues]:("SL";`market;`trades;"venues"),1,,A market symbol list
+before,0,0,q,sch[`generatequotes]:("B";`run;`run;"quotes flag"),1,,A run boolean
+before,0,0,q,sch[`tradingdate]:("D";`run;`run;"date"),1,,A run date
+before,0,0,q,sch[`seed]:("J";`run;`run;"seed"),1,,A run long
+before,0,0,q,sch[`volmult]:("F";`scenario;`scenario;"vol multiplier"),1,,A scenario float
+before,0,0,q,sch[`baseintensity]:("F";`derived;`arrivals;"derived"),1,,A derived key
+before,0,0,q,mkt:`quotes`session`price`arrivals`trades`run!(enlist[`ticksize]!enlist 0.01;enlist[`openingtime]!enlist "09:30";enlist[`clock]!enlist "transaction";enlist[`profile]!enlist 1.6 1.2 1f;enlist[`venues]!enlist ("XNAS";"XNYS");`generatequotes`tradingdate`seed!(1b;"2026.08.18";42f)),1,,A market document with groups
+before,0,0,q,`:/tmp/simconfig_market.json 0: enlist .j.j mkt,1,,Written as JSON
+before,0,0,q,m:simconfig.loadmarket[sch;`:/tmp/simconfig_market.json],1,,Loaded
+comment,0,0,q,,1,,=== Market Tests ===
+true,0,0,q,99h=type m,1,,loadmarket returns a dictionary
+true,0,0,q,(asc key m)~asc `ticksize`openingtime`clock`profile`venues`generatequotes`tradingdate`seed,1,,The groups are flattened into keys
+true,0,0,q,09:30=m`openingtime,1,,A JSON string becomes a minute by the schema
+true,0,0,q,-7h=type m`seed,1,,A JSON number becomes a long where the schema says so
+true,0,0,q,`transaction=m`clock,1,,A JSON string becomes a symbol
+true,0,0,q,(m`profile)~1.6 1.2 1f,1,,A JSON array becomes a float list
+true,0,0,q,(m`venues)~`XNAS`XNYS,1,,A JSON array of strings becomes a symbol list
+true,0,0,q,2026.08.18=m`tradingdate,1,,A JSON string becomes a date
+true,0,0,q,1b~m`generatequotes,1,,A JSON boolean stays a boolean
+before,0,0,q,`:/tmp/simconfig_badmarket.json 0: enlist .j.j (enlist `x)!enlist enlist[`foo]!enlist 1,1,,A market document with an unknown key
+fail,0,0,q,simconfig.loadmarket[sch;`:/tmp/simconfig_badmarket.json],1,,An unknown market key throws error
+comment,0,0,q,,1,,=== Rows Tests ===
+before,0,0,q,`:/tmp/simconfig_instruments.csv 0: (csv sv ("sym";"price";"drift";"vol";"tradesperday";"ticksize";"profile");csv sv ("NVDA";"215";"0.08";"0.45";"500000";"";"");csv sv ("XOM";"166";"0.06";"0.22";"80000";"0.05";"1 1 1")),1,,An instruments file with two overrides on XOM (csv sv keeps commas out of the test code)
+before,0,0,q,ins:simconfig.loadinstruments[sch;`:/tmp/simconfig_instruments.csv],1,,Loaded
+true,0,0,q,99h=type ins,1,,loadinstruments returns a keyed table
+true,0,0,q,`NVDA`XOM~exec sym from ins,1,,Keyed by sym
+true,0,0,q,-7h=type ins[`NVDA]`tradesperday,1,,tradesperday is a long
+true,0,0,q,null ins[`NVDA]`ticksize,1,,An empty cell is null
+true,0,0,q,0.05=ins[`XOM]`ticksize,1,,A filled override cell is typed
+true,0,0,q,10h=type ins[`XOM]`profile,1,,A list column reads as a string until compose
+before,0,0,q,`:/tmp/simconfig_badins.csv 0: (csv sv ("sym";"price";"drift");csv sv ("NVDA";"215";"0.08")),1,,An instruments file without vol and tradesperday
+fail,0,0,q,simconfig.loadinstruments[sch;`:/tmp/simconfig_badins.csv],1,,Missing required columns throw error
+before,0,0,q,`:/tmp/simconfig_scenarios.csv 0: (csv sv ("name";"volmult");csv sv ("normal";"1.0");csv sv ("volatile";"1.5")),1,,A scenarios file
+before,0,0,q,sce:simconfig.loadscenarios[sch;`:/tmp/simconfig_scenarios.csv],1,,Loaded
+true,0,0,q,`normal`volatile~exec name from sce,1,,Scenarios keyed by name
+comment,0,0,q,,1,,=== Compose Tests ===
+before,0,0,q,cfg:simconfig.compose[sch;m;ins`NVDA;sce`normal;(`symbol$())!()],1,,NVDA on the normal scenario with the market's run defaults
+true,0,0,q,(asc key cfg)~asc (key sch) except `baseintensity,1,,The composed config has every schema key but the derived one
+true,0,0,q,0.01=cfg`ticksize,1,,NVDA takes the market's tick size
+true,0,0,q,215f=cfg`price,1,,And its own price
+true,0,0,q,-9h=type cfg`price,1,,Typed as a float
+true,0,0,q,2026.08.18=cfg`tradingdate,1,,The run defaults come from the market file
+before,0,0,q,xcfg:simconfig.compose[sch;m;ins`XOM;sce`volatile;`seed`tradingdate!(7;2026.08.19)],1,,XOM on volatile with a run dictionary
+true,0,0,q,0.05=xcfg`ticksize,1,,XOM overrides the market's tick size
+true,0,0,q,(xcfg`profile)~1 1 1f,1,,Its profile override is cast from the string to a float list
+true,0,0,q,1.5=xcfg`volmult,1,,The scenario's multiplier is taken
+true,0,0,q,(7=xcfg`seed)&2026.08.19=xcfg`tradingdate,1,,The run layer overrides the market's defaults
+before,0,0,q,mm:`ticksize _ m,1,,A market without the tick size
+fail,0,0,q,simconfig.compose[sch;mm;ins`NVDA;sce`normal;(`symbol$())!()],1,,A missing key throws error
+true,0,0,q,(@[{simconfig.compose[sch;mm;ins`NVDA;sce`normal;(`symbol$())!()];""};(::);{x}]) like "*ticksize (market layer)*",1,,And the error names the key and the layer that should supply it
+fail,0,0,q,simconfig.compose[sch;m;ins`NVDA;sce`normal;enlist[`foo]!enlist 1],1,,An unknown key throws error
+comment,0,0,q,,1,,=== Save and Reload Tests ===
+before,0,0,q,simconfig.saveconfig[`:/tmp/simconfig_saved.json;xcfg],1,,Save the composed config
+before,0,0,q,back:simconfig.loadconfig[sch;`:/tmp/simconfig_saved.json],1,,Load it back
+true,0,0,q,back~(key back)#xcfg,1,,A saved config reloads with the same keys and values
+true,0,0,q,(asc key back)~asc key xcfg,1,,And all of them
+true,0,0,q,(type each value back)~type each value xcfg,1,,With the same types
+comment,0,0,q,,1,,=== Describe Tests ===
+before,0,0,q,d:simconfig.describe sch,1,,The schema as a table
+true,0,0,q,`param`typ`layer`group`description~cols d,1,,describe has the layer and group columns
+true,0,0,q,`sym`price`drift`vol`tradesperday~5#d`param,1,,The essential keys come first
+true,0,0,q,(d[`layer]?`derived)>d[`layer]?`run,1,,Derived keys come last
+after,0,0,q,system"rm -f /tmp/simconfig_market.json /tmp/simconfig_badmarket.json /tmp/simconfig_instruments.csv /tmp/simconfig_badins.csv /tmp/simconfig_scenarios.csv /tmp/simconfig_saved.json",1,,Clean up
