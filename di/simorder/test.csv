@@ -9,7 +9,7 @@ before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
 before,0,0,q,d:`date$first trades`time,1,,Date of the simulated day
-before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`jitter`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;0.01;0.3;1),1,,Base order config fixture
+before,0,0,q,basecfg:`orderid`sym`side`orderqty`starttime`endtime`numfills`pacing`spreadcapture`ticksize`jitter`account`algo`capacity`latencyms`maxreplaces`seed!(`ORD001;`NVDA;`BUY;10000;d+0D09:35;d+0D09:45;20;`even;0.1;0.01;0.3;`ACC1;`VWAP;`A;2.0;20;1),1,,Base order config fixture
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:basecfg,1,,Setup bad config for starttime>=endtime
 before,0,0,q,badcfg1[`starttime]:badcfg1`endtime,1,,Set starttime equal to endtime
@@ -38,6 +38,12 @@ fail,0,0,q,simorder.run[badcfg12;trades;quotes],1,,Zero ticksize throws error
 before,0,0,q,badcfg13:basecfg,1,,Setup bad config for a jitter above 1
 before,0,0,q,badcfg13[`jitter]:1.5,1,,Set jitter above 1
 fail,0,0,q,simorder.run[badcfg13;trades;quotes],1,,Jitter above 1 throws error
+before,0,0,q,badcfg14:basecfg,1,,Setup bad config for an unknown capacity
+before,0,0,q,badcfg14[`capacity]:`X,1,,Set an unknown capacity
+fail,0,0,q,simorder.run[badcfg14;trades;quotes],1,,Unknown capacity throws error
+before,0,0,q,badcfg15:basecfg,1,,Setup bad config for a negative latency
+before,0,0,q,badcfg15[`latencyms]:-1f,1,,Set a negative latency
+fail,0,0,q,simorder.run[badcfg15;trades;quotes],1,,Negative latency throws error
 before,0,0,q,badcfg8:basecfg,1,,Setup bad config for a window on another day
 before,0,0,q,badcfg8[`starttime]:badcfg8[`starttime]-30D00:00,1,,Move starttime 30 days earlier
 before,0,0,q,badcfg8[`endtime]:badcfg8[`endtime]-30D00:00,1,,Move endtime 30 days earlier
@@ -139,82 +145,119 @@ true,0,0,q,all (mta[`price]>=mta`bid) & mta[`price]<=mta`ask,1,,Every moved prin
 true,0,0,q,(sum mt`qty)=sum trades`qty,1,,Volumes are unchanged
 before,0,0,q,t1:first impexecs`time,1,,First execution time
 true,0,0,q,((exec last bid from mq where time<=t1)-exec last bid from quotes where time<=t1)>0,1,,A buy moves the quote up at its first execution
-before,0,0,q,mprices:simorder.pricing[bigcfg;mq;impexecs`time],1,,Price the executions against the moved quotes
-before,0,0,q,mpa:aj[`time;([] time:impexecs`time; price:mprices);`time`bid`ask#mq],1,,Each execution with the quote in force at its time
-true,0,0,q,all (mpa[`price]>=mpa`bid) & mpa[`price]<=mpa`ask,1,,Executions priced against the moved market sit inside the NBBO
+before,0,0,q,mres:simorder.run[bigcfg;mt;mq],1,,Run the large order against the moved market
+before,0,0,q,mpa:aj[`time;select from mres`executions where liquidity=`R;`time`bid`ask#mq],1,,Its aggressive fills with the moved quote in force
+true,0,0,q,all (mpa[`price]>=mpa`ask)&mpa[`price]<=mpa[`ask]+bigcfg`ticksize,1,,Aggressive fills against the moved market are at its ask or one tick beyond
 true,0,0,q,(simorder.impact[@[icfg;`eta;:;0f];impexecs;trades;quotes])~`trades`quotes!(trades;quotes),1,,eta 0 leaves the market as it is
-comment,0,0,q,,1,,=== Pricing Tests ===
-before,0,0,q,midcfg:basecfg,1,,Setup mid-price config
-before,0,0,q,midcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
-before,0,0,q,midprices:simorder.pricing[midcfg;quotes;filltimes],1,,Generate mid prices
-true,0,0,q,all midprices>0,1,,All mid prices positive
-before,0,0,q,farcfg:basecfg,1,,Setup far-touch config
-before,0,0,q,farcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
-before,0,0,q,farprices:simorder.pricing[farcfg;quotes;filltimes],1,,Generate far-touch prices
-true,0,0,q,(avg farprices)>avg midprices,1,,BUY: far-touch prices average higher than mid
-before,0,0,q,sellmidcfg:basecfg,1,,Setup SELL mid config
-before,0,0,q,sellmidcfg[`side]:`SELL,1,,Set side to SELL
-before,0,0,q,sellmidcfg[`spreadcapture]:0.0,1,,Set spreadcapture to 0 (mid)
-before,0,0,q,sellmidprices:simorder.pricing[sellmidcfg;quotes;filltimes],1,,Generate SELL mid prices
-before,0,0,q,sellfarcfg:basecfg,1,,Setup SELL far-touch config
-before,0,0,q,sellfarcfg[`side]:`SELL,1,,Set side to SELL
-before,0,0,q,sellfarcfg[`spreadcapture]:1.0,1,,Set spreadcapture to 1 (far touch)
-before,0,0,q,sellfarprices:simorder.pricing[sellfarcfg;quotes;filltimes],1,,Generate SELL far-touch prices
-true,0,0,q,(avg sellfarprices)<avg sellmidprices,1,,SELL: far-touch prices average lower than mid
-before,0,0,q,mixcfg:basecfg,1,,Setup config for the spread capture mixture
-before,0,0,q,mixcfg[`numfills]:400,1,,Many fills to see the shares
-before,0,0,q,mixcfg[`spreadcapture]:0.3,1,,Three fills in ten aggressive
-before,0,0,q,mixtimes:simorder.schedule mixcfg,1,,Their times
-before,0,0,q,mixprices:simorder.pricing[mixcfg;quotes;mixtimes],1,,Their prices
-before,0,0,q,mixidx:0|quotes[`time] bin mixtimes,1,,The quote in force at each
-before,0,0,q,mixattouch:1e-9>abs mixprices-quotes[`ask] mixidx,1,,Fills at the ask
-before,0,0,q,mixmid:0.5*(quotes[`bid] mixidx)+quotes[`ask] mixidx,1,,The mid in force at each
-true,0,0,q,(avg mixattouch) within 0.2 0.4,1,,About spreadcapture of the fills cross the spread
-true,0,0,q,all 1e-9>abs (mixprices-mixmid) where not mixattouch,1,,The other fills are at the mid
-before,0,0,q,pidx:0|quotes[`time] bin filltimes,1,,Index of the quote in force at each fill
-true,0,0,q,all 1e-9>abs farprices-quotes[`ask] pidx,1,,BUY with spreadcapture 1 fills exactly at the ask
-true,0,0,q,all 1e-9>abs sellfarprices-quotes[`bid] pidx,1,,SELL with spreadcapture 1 fills exactly at the bid
-before,0,0,q,halfcfg:basecfg,1,,Setup half-spread config
-before,0,0,q,halfcfg[`spreadcapture]:0.5,1,,Set spreadcapture to 0.5
-before,0,0,q,halfprices:simorder.pricing[halfcfg;quotes;filltimes],1,,Generate half-spread prices
-before,0,0,q,inside:{[p;q;i] all (p>=q[`bid] i)&p<=q[`ask] i},1,,Every price inside the quote in force
-true,0,0,q,inside[midprices;quotes;pidx],1,,spreadcapture 0: every execution inside the quote in force
-true,0,0,q,inside[halfprices;quotes;pidx],1,,spreadcapture 0.5: every execution inside the quote in force
-true,0,0,q,inside[farprices;quotes;pidx],1,,spreadcapture 1: every execution inside the quote in force
-true,0,0,q,inside[sellmidprices;quotes;pidx],1,,SELL spreadcapture 0: every execution inside the quote in force
-true,0,0,q,inside[sellfarprices;quotes;pidx],1,,SELL spreadcapture 1: every execution inside the quote in force
-before,0,0,q,tickq:([] time:d+0D09:30 0D09:40; bid:100 100f; ask:100.02 100.01),1,,Two quotes: a two-tick spread until 09:40 then a one-tick spread
-before,0,0,q,tickmid:simorder.pricing[midcfg;tickq;filltimes],1,,Midpoint fills against them
-true,0,0,q,all 1e-9>abs 100.01-tickmid where filltimes<d+0D09:40,1,,On a two-tick spread the midpoint is a whole tick and the fill is exactly there (casting 0.5+x to long put it a tick above)
-true,0,0,q,all 1e-9>abs 100.005-tickmid where filltimes>=d+0D09:40,1,,On a one-tick spread the mid fill is at the half tick as midpoint trades print on the tape
-true,0,0,q,all ((tickmid>=100f)&tickmid<=100.01) where filltimes>=d+0D09:40,1,,On a one-tick spread the mid fill stays inside the quote
-comment,0,0,q,,1,,=== Order Tests ===
-before,0,0,q,ordertbl:simorder.buildorder[basecfg;quotes],1,,Build parent order table
-true,0,0,q,98h=type ordertbl,1,,buildorder returns table
-true,0,0,q,1=count ordertbl,1,,Order table has exactly one row
-true,0,0,q,`orderid`sym`side`orderqty`starttime`endtime`arrivalprice~cols ordertbl,1,,Order table has correct columns
-true,0,0,q,0<first ordertbl`arrivalprice,1,,Arrival price is positive
-comment,0,0,q,,1,,=== Executions/Run Tests ===
-before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run full order simulation (even pacing)
+comment,0,0,q,,1,,=== Execution Tests ===
+before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run the order (even pacing)
 true,0,0,q,99h=type ordresult,1,,run returns a dict
-true,0,0,q,`order`executions~key ordresult,1,,Dict has order and executions keys
-before,0,0,q,executions:ordresult`executions,1,,Extract executions table
-true,0,0,q,`orderid`execid`sym`side`time`price`qty`interval~cols executions,1,,Executions table has correct columns
+true,0,0,q,`orders`children`events`executions~key ordresult,1,,Dict has orders children events and executions
+before,0,0,q,ordertbl:ordresult`orders,1,,The parent order
+before,0,0,q,children:ordresult`children,1,,The child orders
+before,0,0,q,events:ordresult`events,1,,The lifecycle events
+before,0,0,q,executions:ordresult`executions,1,,The fills
+true,0,0,q,`orderid`account`algo`sym`side`orderqty`ordtype`limitprice`capacity`starttime`endtime`arrivalprice`filledqty`avgpx`status~cols ordertbl,1,,Order table has correct columns
+true,0,0,q,1=count ordertbl,1,,Order table has exactly one row
+true,0,0,q,0<first ordertbl`arrivalprice,1,,Arrival price is positive
+before,0,0,q,arrq:quotes 0|quotes[`time] bin basecfg`starttime,1,,The quote in force at starttime
+true,0,0,q,1e-9>abs (first ordertbl`arrivalprice)-0.5*arrq[`bid]+arrq`ask,1,,The arrival price is the mid at starttime
+true,0,0,q,(first ordertbl`filledqty)=basecfg`orderqty,1,,The order is filled in full
+true,0,0,q,`filled=first ordertbl`status,1,,And its status says so
+true,0,0,q,1e-9>abs (first ordertbl`avgpx)-(sum executions[`price]*executions`qty)%sum executions`qty,1,,avgpx is the volume-weighted fill price
+true,0,0,q,`childid`orderid`sym`side`qty`ordtype`limitprice`venue`sendtime`expiry`filledqty`status`replaces`interval~cols children,1,,Children table has correct columns
+true,0,0,q,(count children) within basecfg[`numfills]+0 1,1,,One child per scheduled time plus at most a cleanup child
+true,0,0,q,(1+til count children)~children`childid,1,,Children are numbered in order
+true,0,0,q,(sum children`filledqty)=basecfg`orderqty,1,,The children's fills sum to orderqty
+true,0,0,q,all children[`ordtype] in `MKT`LMT,1,,Children are marketable or limit orders
+true,0,0,q,all null exec limitprice from children where ordtype=`MKT,1,,Marketable children carry no limit
+true,0,0,q,all not null exec limitprice from children where ordtype=`LMT,1,,Limit children carry their limit
+true,0,0,q,all children[`venue] in `XNAS`ARCX`BATS`EDGX,1,,Children are routed to lit venues
+true,0,0,q,(asc children`sendtime)~children`sendtime,1,,Children are sent in order
+true,0,0,q,all (children[`status]=`filled)=children[`filledqty]=children`qty,1,,A child is filled when its fills equal its quantity and cancelled otherwise
+true,0,0,q,`execid`orderid`childid`sym`side`time`price`qty`venue`liquidity`capacity`interval~cols executions,1,,Executions table has correct columns
 true,0,0,q,all (`timespan$`long$(`long$basecfg[`endtime]-basecfg`starttime)%21)=executions`interval,1,,Even pacing: every execution carries the schedule's spacing as its interval
-before,0,0,q,exq:aj[`time;executions;`time`bid`ask#quotes],1,,Executions with the quote in force at their time
-true,0,0,q,all (exq[`price]>=exq`bid)&exq[`price]<=exq`ask,1,,Every execution is priced inside the quote in force
 true,0,0,q,(sum executions`qty)=basecfg`orderqty,1,,Executions quantities sum exactly to orderqty
 true,0,0,q,(asc executions`time)~executions`time,1,,Executions sorted by time
 true,0,0,q,all executions[`time]>basecfg`starttime,1,,All executions after starttime
 true,0,0,q,all executions[`time]<basecfg`endtime,1,,All executions before endtime
 true,0,0,q,all executions[`price]>0,1,,All execution prices positive
 true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
+true,0,0,q,all 1e-6>abs (executions[`price]%0.001)-floor 0.5+executions[`price]%0.001,1,,Fill prices sit on the tenth-of-a-tick grid
+true,0,0,q,all executions[`liquidity] in `A`R,1,,Each fill added or removed liquidity
+true,0,0,q,all `A=executions`capacity,1,,Fills carry the order's capacity
+true,0,0,q,all children[`filledqty]=0^(exec sum qty by childid from executions) children`childid,1,,Fills per child match the children's filledqty
+before,0,0,q,exq:aj[`time;executions;`time`bid`ask#quotes],1,,Executions with the quote in force at their time
+before,0,0,q,exr:select from exq where liquidity=`R,1,,Fills that removed liquidity
+true,0,0,q,all (exr[`price]>=exr`ask)&exr[`price]<=exr[`ask]+basecfg`ticksize,1,,BUY aggressive fills are at the ask in force or one tick beyond
+before,0,0,q,lastlimit:{[ev;t;c] last exec price from ev where (childid=c)&(time<=t)&event in `new`replace},1,,The child's limit in force at a time
+before,0,0,q,exa:select from executions where liquidity=`A,1,,Fills that added liquidity
+true,0,0,q,all 1e-9>abs exa[`price]-lastlimit[events]'[exa`time;exa`childid],1,,Passive fills are at the child's limit in force (the near touch it was pegged to)
+before,0,0,q,childvenue:exec first venue by childid from children,1,,Each child's venue
+before,0,0,q,passivechild:exec childid from executions where liquidity=`A,1,,The child of each passive fill
+true,0,0,q,all (exec venue from executions where liquidity=`A)=childvenue passivechild,1,,A passive fill is on the venue its child rests on
+comment,0,0,q,,1,,=== Event Tests ===
+true,0,0,q,`orderid`childid`time`event`qty`price`leavesqty~cols events,1,,Events table has correct columns
+true,0,0,q,all events[`event] in `new`ack`replace`cancel`fill`done,1,,Events are new ack replace cancel fill or done
+true,0,0,q,(asc events`time)~events`time,1,,Events sorted by time
+true,0,0,q,(count children)=count select from events where event=`new,1,,Every child has a new
+true,0,0,q,(count children)=count select from events where event=`ack,1,,Every child has an ack
+true,0,0,q,(sum children`replaces)=count select from events where event=`replace,1,,The replace events match the children's replace counts
+true,0,0,q,(exec sum qty from events where event=`fill)=basecfg`orderqty,1,,The fill events carry the order's quantity
+true,0,0,q,(count executions)=count select from events where event=`fill,1,,One fill event per execution
+true,0,0,q,(count select from children where status=`filled)=count select from events where event=`done,1,,Every filled child has a done
+true,0,0,q,(count select from children where status=`cancelled)=count select from events where event=`cancel,1,,Every cancelled child has a cancel
+true,0,0,q,all 0=exec leavesqty from events where event=`done,1,,Nothing is left at a done
+before,0,0,q,firstfill:exec min time by childid from events where event=`fill,1,,First fill per child
+before,0,0,q,acktime:exec first time by childid from events where event=`ack,1,,Ack per child
+true,0,0,q,all acktime[key firstfill]<value firstfill,1,,A child is acked before it fills
+comment,0,0,q,,1,,=== Aggression Tests ===
+before,0,0,q,aggcfg:basecfg,1,,Setup all-aggressive config
+before,0,0,q,aggcfg[`spreadcapture]:1f,1,,Every child aggressive
+before,0,0,q,aggres:simorder.run[aggcfg;trades;quotes],1,,Run it
+true,0,0,q,all `MKT=aggres[`children]`ordtype,1,,With spreadcapture 1 every child is marketable
+true,0,0,q,all `R=aggres[`executions]`liquidity,1,,And every fill removes liquidity
+true,0,0,q,0=count select from aggres`events where event in `replace`cancel,1,,Marketable children neither replace nor cancel
+before,0,0,q,pascfg:basecfg,1,,Setup all-passive config
+before,0,0,q,pascfg[`spreadcapture]:0f,1,,Every child passive
+before,0,0,q,pasres:simorder.run[pascfg;trades;quotes],1,,Run it
+true,0,0,q,all `LMT=exec ordtype from pasres`children where childid<=pascfg`numfills,1,,With spreadcapture 0 every scheduled child is a limit order
+true,0,0,q,all `A=exec liquidity from pasres`executions where childid<=pascfg`numfills,1,,And their fills add liquidity
+before,0,0,q,mixcfg:basecfg,1,,Setup config for the aggression mixture
+before,0,0,q,mixcfg[`numfills]:400,1,,Many children to see the share
+before,0,0,q,mixcfg[`spreadcapture]:0.3,1,,Three children in ten aggressive
+before,0,0,q,mixchildren:(simorder.run[mixcfg;trades;quotes])`children,1,,Its children
+true,0,0,q,(avg `MKT=exec ordtype from mixchildren where childid<=400) within 0.2 0.4,1,,About spreadcapture of the children are aggressive
+before,0,0,q,sellcfg:basecfg,1,,Setup SELL config
+before,0,0,q,sellcfg[`side]:`SELL,1,,Set side to SELL
+before,0,0,q,sellres:simorder.run[sellcfg;trades;quotes],1,,Run a SELL
+before,0,0,q,sellq:aj[`time;sellres`executions;`time`bid`ask#quotes],1,,Its fills with the quote in force
+before,0,0,q,sellr:select from sellq where liquidity=`R,1,,Its aggressive fills
+true,0,0,q,all (sellr[`price]<=sellr`bid)&sellr[`price]>=sellr[`bid]-sellcfg`ticksize,1,,SELL aggressive fills are at the bid in force or one tick below
+true,0,0,q,(sum sellres[`executions]`qty)=sellcfg`orderqty,1,,A SELL fills in full
 before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order simulation (frontloaded pacing)
 before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
-true,0,0,q,(sum frontexecutions`interval)=(last frontexecutions`time)-frontcfg`starttime,1,,Frontloaded pacing: the intervals tile the window from starttime to the last fill
+before,0,0,q,frontchildren:frontresult`children,1,,Its children
+true,0,0,q,(sum exec interval from frontchildren where childid<=frontcfg`numfills)=(last exec sendtime from frontchildren where childid<=frontcfg`numfills)-frontcfg`starttime,1,,Frontloaded pacing: the children's intervals tile the window from starttime to the last child
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
+comment,0,0,q,,1,,=== Rollover Tests ===
+before,0,0,q,pgresult:simtick.run[cfgs`pg_default],1,,A less liquid instrument
+before,0,0,q,pgtrades:pgresult`trade,1,,Its trades
+before,0,0,q,pgquotes:pgresult`quote,1,,Its quotes
+before,0,0,q,pgcfg:basecfg,1,,Setup a large passive order on it
+before,0,0,q,pgcfg[`sym]:`PG,1,,On PG
+before,0,0,q,pgcfg[`orderqty]:20000,1,,Large relative to its volume
+before,0,0,q,pgcfg[`endtime]:d+0D09:40,1,,Over five minutes
+before,0,0,q,pgcfg[`spreadcapture]:0f,1,,All passive
+before,0,0,q,pgres:simorder.run[pgcfg;pgtrades;pgquotes],1,,Run it
+true,0,0,q,0<count select from pgres`events where event=`cancel,1,,Some children are cancelled at expiry with quantity left
+true,0,0,q,(1+pgcfg`numfills)=count pgres`children,1,,A cleanup child completes the order
+true,0,0,q,`MKT=last pgres[`children]`ordtype,1,,The cleanup child is marketable
+true,0,0,q,(sum pgres[`executions]`qty)=pgcfg`orderqty,1,,The order still fills in full
+true,0,0,q,(exec qty-filledqty from pgres`children where status=`cancelled)~exec qty from pgres`events where event=`cancel,1,,A cancel carries the child's unfilled quantity
+true,0,0,q,(last pgres[`children]`qty)=pgcfg[`orderqty]-sum exec filledqty from pgres`children where childid<=pgcfg`numfills,1,,The cleanup child carries what the scheduled children left
 comment,0,0,q,,1,,=== Config Tests ===
 before,0,0,q,ordcfgs:simorder.loadconfig`:di/simorder/presets.csv,1,,Load the order presets
 true,0,0,q,`good`bad`arrival~exec name from ordcfgs,1,,The three presets load

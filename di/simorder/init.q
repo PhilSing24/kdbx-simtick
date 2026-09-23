@@ -34,6 +34,7 @@ validate:{[cfg]
 
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
   reqkeys,:`numfills`pacing`spreadcapture`ticksize`jitter`seed;
+  reqkeys,:`account`algo`capacity`latencyms`maxreplaces;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
@@ -45,6 +46,9 @@ validate:{[cfg]
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
   if[not cfg[`jitter] within 0 1; '"validate: jitter must be between 0 and 1"];
+  if[not cfg[`capacity] in `A`P; '"validate: capacity must be A (agency) or P (principal)"];
+  if[0>cfg`latencyms; '"validate: latencyms must be zero or positive"];
+  if[0>cfg`maxreplaces; '"validate: maxreplaces must be zero or positive"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -306,41 +310,175 @@ impact:{[icfg;execs;trades;quotes]
 
 
 / ============================================================
-/ PRICING - where each child fill happens vs. the spread
+/ EXECUTION - children against the tape
 / ============================================================
 
-pricing:{[cfg;quotes;filltimes]
-  / price each fill relative to the prevailing quote at fill time
-  / cfg: config dict with `side`spreadcapture`ticksize
-  / quotes: market quotes table (time-sorted) for the day
-  / filltimes: scheduled fill timestamps from .z.m.schedule
-  / returns: list of fill prices on the tenth-of-a-tick grid, as trades print
-  /   on the tape: a mid fill on a one-tick spread is at the half tick, not
-  /   rounded to the touch (which would be the far touch for a buy and the
-  /   near touch for a sell)
-  /
-  / each fill is aggressive with probability spreadcapture (it crosses the
-  / spread and prints at the far touch) and otherwise prints at the mid, so
-  / the mean spread capture is spreadcapture while fills differ, as they do:
-  / spreadcapture 0 = every fill at mid (best), 1 = every fill at the far
-  / touch (worst). The draw comes from the seeded stream
-  qtimes:quotes`time;
-  idx:0|qtimes bin filltimes;
+/ lit venues a child is routed to, by share
+venues:([]venue:`XNAS`ARCX`BATS`EDGX;share:0.4 0.2 0.2 0.2)
 
-  bid:quotes[`bid] idx;
-  ask:quotes[`ask] idx;
-  mid:0.5*bid+ask;
-  aggressive:(count filltimes)?1.0;
-  aggressive:aggressive<cfg`spreadcapture;
+quoteat:{[quotes;t]
+  / the quote in force at t (the first quote when t precedes all)
+  quotes 0|quotes[`time] bin t
+  };
 
-  prices:$[cfg[`side]=`BUY; ?[aggressive;ask;mid];
-    cfg[`side]=`SELL; ?[aggressive;bid;mid];
-    '"pricing: unknown side - ",string cfg`side];
+aggressivefills:{[cfg;quotes;t;qty]
+  / the fills of an aggressive child of qty sent at t: after latencyms,
+  / what the far touch displays fills there and the rest one tick beyond
+  / (the book beyond the touch is not modelled: it is taken to hold the
+  / rest), both removing liquidity at the same instant, as a sweep does
+  / cfg: config dict with `side`latencyms`ticksize
+  / quotes: the day's quotes
+  / t: send time
+  / qty: quantity
+  / returns: table `time`price`qty`liquidity
+  lat:`timespan$`long$1000000*cfg`latencyms;
+  q:.z.m.quoteat[quotes;t+lat];
+  buy:cfg[`side]=`BUY;
+  touch:$[buy;q`ask;q`bid];
+  disp:$[buy;q`asksize;q`bidsize];
+  f1:qty&disp;
+  f2:qty-f1;
+  r:([]time:enlist t+lat;price:enlist touch;qty:enlist f1;liquidity:enlist `R);
+  if[f2>0; r,:([]time:enlist t+lat;price:enlist touch+cfg[`ticksize]*$[buy;1;-1];qty:enlist f2;liquidity:enlist `R)];
+  select from r where qty>0
+  };
 
-  / nearest tenth of a tick: floor of x+0.5, not a cast, since `long$
-  / already rounds to nearest and casting x+0.5 rounds every price up
-  grid:0.1*cfg`ticksize;
-  grid*floor 0.5+prices%grid
+passivefills:{[cfg;trades;quotes;t;expiry;qty]
+  / a passive child: a limit at the near touch in force after latencyms,
+  / behind the size displayed there (its queue). It fills at its limit when
+  / prints by the opposite aggressor at or through the limit reach it: each
+  / such print takes from the queue first, then from the child. When the
+  / near touch moves away from the limit the algo re-pegs, a replace to the
+  / new touch behind its displayed size, up to maxreplaces times; after that
+  / the child rests where it is. What is left at expiry is cancelled (it
+  / rolls into the next child)
+  / cfg: config dict with `side`latencyms`maxreplaces
+  / trades, quotes: the day's tables
+  / t: send time
+  / expiry: when the child is cancelled
+  / qty: quantity
+  / returns: dict `fills (table time price qty liquidity), `events (table
+  /   time event qty price leavesqty), `leaves, `replaces, `limit
+  lat:`timespan$`long$1000000*cfg`latencyms;
+  buy:cfg[`side]=`BUY;
+  qt:quotes`time;
+  tt:trades`time;
+  s:t+lat;
+  q0:.z.m.quoteat[quotes;s];
+  L:$[buy;q0`bid;q0`ask];
+  Q:`float$$[buy;q0`bidsize;q0`asksize];
+  leaves:qty;
+  replaces:0;
+  pegging:1b;
+  fls:([]time:`timestamp$();price:`float$();qty:`long$();liquidity:`symbol$());
+  events:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#L;leavesqty:2#qty);
+  while[(leaves>0)&s<expiry;
+    / the segment ends at the next re-peg (the first later quote whose near
+    / touch has moved away from the limit) or at expiry
+    segend:expiry;
+    repeg:0b;
+    if[pegging;
+      j:1+qt bin s;
+      if[j<count qt;
+        later:j+til count[qt]-j;
+        moved:$[buy;(quotes[`bid] later)>L;(quotes[`ask] later)<L];
+        k:first where moved;
+        if[not null k; if[qt[later k]<expiry; segend:qt later k; repeg:1b]]]];
+    / prints in (s;segend] by the opposite aggressor at or through the limit
+    i0:1+tt bin s;
+    i1:tt bin segend;
+    if[i1>=i0;
+      pr:trades i0+til 1+i1-i0;
+      w:$[buy;(pr[`aggressor]=`S)&pr[`price]<=L;(pr[`aggressor]=`B)&pr[`price]>=L];
+      pr:pr where w;
+      if[count pr;
+        c:sums `float$pr`qty;
+        cum:leaves&`long$0f|c-Q;
+        f:deltas cum;
+        w:where f>0;
+        if[count w;
+          fls,:([]time:pr[`time] w;price:count[w]#L;qty:f w;liquidity:count[w]#`A);
+          events,:([]time:pr[`time] w;event:count[w]#`fill;qty:f w;price:count[w]#L;leavesqty:leaves-cum w);
+          leaves:leaves-last cum];
+        Q:0f|Q-last c]];
+    s:segend;
+    if[(leaves>0)&repeg;
+      $[replaces<cfg`maxreplaces;
+        [qn:.z.m.quoteat[quotes;s];
+         L:$[buy;qn`bid;qn`ask];
+         Q:`float$$[buy;qn`bidsize;qn`asksize];
+         replaces+:1;
+         events,:([]time:enlist s;event:enlist `replace;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
+        pegging:0b]]];
+  if[0=leaves; events,:([]time:enlist last fls`time;event:enlist `done;qty:enlist 0;price:enlist L;leavesqty:enlist 0)];
+  if[leaves>0; events,:([]time:enlist expiry;event:enlist `cancel;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
+  `fills`events`leaves`replaces`limit!(fls;events;leaves;replaces;L)
+  };
+
+child:{[cfg;trades;quotes;spec]
+  / one child order and what became of it
+  / cfg: order config dict
+  / trades, quotes: the day's tables
+  / spec: dict `id`t`expiry`qty`aggressive`venue`interval: the child's id,
+  /   send time, expiry, quantity, whether it is aggressive, its venue and
+  /   the interval it was sized against
+  / returns: dict `children (1-row table) `events (table with childid) `fills (table with childid)
+  id:spec`id; t:spec`t; expiry:spec`expiry; qty:spec`qty;
+  aggressive:spec`aggressive; venue:spec`venue; interval:spec`interval;
+  r:$[aggressive;
+    [f:.z.m.aggressivefills[cfg;quotes;t;qty];
+     lim:first f`price;
+     ev:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#lim;leavesqty:2#qty);
+     ev,:([]time:f`time;event:count[f]#`fill;qty:f`qty;price:f`price;leavesqty:qty-sums f`qty);
+     ev,:([]time:enlist last f`time;event:enlist `done;qty:enlist 0;price:enlist lim;leavesqty:enlist 0);
+     `fills`events`leaves`replaces`limit!(f;ev;0;0;0n)];
+    .z.m.passivefills[cfg;trades;quotes;t;expiry;qty]];
+  f:r`fills;
+  filled:sum f`qty;
+  row:([]childid:enlist id;orderid:enlist cfg`orderid;sym:enlist cfg`sym;side:enlist cfg`side;
+    qty:enlist qty;ordtype:enlist $[aggressive;`MKT;`LMT];limitprice:enlist r`limit;venue:enlist venue;
+    sendtime:enlist t;expiry:enlist expiry;filledqty:enlist filled;
+    status:enlist $[filled=qty;`filled;`cancelled];replaces:enlist r`replaces;interval:enlist interval);
+  `children`events`fills!(row;update childid:id from r`events;update childid:id,venue:venue,interval:interval from f)
+  };
+
+execute:{[cfg;trades;quotes]
+  / the order's children against the tape: one child per scheduled time
+  / (jittered), sized by the pacing plus what the previous child left,
+  / aggressive with probability spreadcapture and passive otherwise, each
+  / routed to a lit venue by share; then a final aggressive child before
+  / endtime for whatever is left, so the order completes
+  / cfg: order config dict
+  / trades, quotes: the day's tables
+  / returns: dict `children`events`executions
+  sched:.z.m.jittered[cfg;.z.m.schedule cfg];
+  n:count sched;
+  expiries:(1_sched),cfg`endtime;
+  targets:.z.m.sizing[cfg;trades;sched];
+  ivals:.z.m.intervals[cfg;sched];
+  aggressive:(n?1.0)<cfg`spreadcapture;
+  vens:venues[`venue] (sums venues`share) binr n?1.0;
+  lat:`timespan$`long$1000000*cfg`latencyms;
+  parts:();
+  rolled:0;
+  i:0;
+  while[i<n;
+    spec:`id`t`expiry`qty`aggressive`venue`interval!(i+1;sched i;expiries i;rolled+targets i;aggressive i;vens i;ivals i);
+    r:.z.m.child[cfg;trades;quotes;spec];
+    parts,:enlist r;
+    rolled:(rolled+targets i)-sum r[`fills]`qty;
+    i+:1];
+  if[rolled>0;
+    spec:`id`t`expiry`qty`aggressive`venue`interval!(n+1;cfg[`endtime]-2*lat;cfg`endtime;rolled;1b;vens n-1;last ivals);
+    r:.z.m.child[cfg;trades;quotes;spec];
+    parts,:enlist r];
+  children:raze parts[;`children];
+  events:`orderid`childid`time xcols update orderid:cfg`orderid from `time xasc raze parts[;`events];
+  fls:`time xasc raze parts[;`fills];
+  execs:([]execid:1+til count fls;orderid:count[fls]#cfg`orderid;childid:fls`childid;sym:count[fls]#cfg`sym;
+    side:count[fls]#cfg`side;time:fls`time;price:fls`price;qty:fls`qty;venue:fls`venue;
+    liquidity:fls`liquidity;capacity:count[fls]#cfg`capacity;interval:fls`interval);
+  `children`events`executions!(children;events;execs)
   };
 
 
@@ -348,24 +486,23 @@ pricing:{[cfg;quotes;filltimes]
 / ASSEMBLY
 / ============================================================
 
-buildorder:{[cfg;quotes]
-  / build the single-row parent order table, including arrival price
+buildorder:{[cfg;quotes;executions]
+  / the parent order: an algo order with its arrival price (the mid at
+  / starttime), what it filled and its average price
   / cfg: order config dict
-  / quotes: market quotes table for the day
+  / quotes: the day's quotes
+  / executions: its executions
   / returns: 1-row order table
-  qtimes:quotes`time;
-  idx:0|qtimes bin cfg`starttime;
-  bid:quotes[`bid] idx;
-  ask:quotes[`ask] idx;
-  arrivalprice:0.5*bid+ask;
-
-  ([]orderid:enlist cfg`orderid;
-    sym:enlist cfg`sym;
-    side:enlist cfg`side;
-    orderqty:enlist cfg`orderqty;
-    starttime:enlist cfg`starttime;
-    endtime:enlist cfg`endtime;
-    arrivalprice:enlist arrivalprice)
+  q:.z.m.quoteat[quotes;cfg`starttime];
+  filled:sum executions`qty;
+  ([]orderid:enlist cfg`orderid;account:enlist cfg`account;algo:enlist cfg`algo;
+    sym:enlist cfg`sym;side:enlist cfg`side;orderqty:enlist cfg`orderqty;
+    ordtype:enlist `ALGO;limitprice:enlist 0n;capacity:enlist cfg`capacity;
+    starttime:enlist cfg`starttime;endtime:enlist cfg`endtime;
+    arrivalprice:enlist 0.5*q[`bid]+q`ask;
+    filledqty:enlist filled;
+    avgpx:enlist $[filled>0;(sum executions[`price]*executions`qty)%filled;0n];
+    status:enlist $[filled=cfg`orderqty;`filled;`partial])
   };
 
 intervals:{[cfg;filltimes]
@@ -386,27 +523,6 @@ intervals:{[cfg;filltimes]
     cfg[`pacing]=`arrival; n#`timespan$`long$dur%n;
     cfg[`pacing]=`frontloaded; filltimes-(enlist cfg`starttime),-1_filltimes;
     '"intervals: unknown pacing - ",string cfg`pacing]
-  };
-
-buildexecutions:{[cfg;trades;quotes]
-  / build the child fills table
-  / cfg: order config dict
-  / trades: market trades table for the day
-  / quotes: market quotes table for the day
-  / returns: fills table, one row per child fill, with the interval each was
-  /   sized against (what impact needs, see intervals)
-  filltimes:.z.m.jittered[cfg;.z.m.schedule cfg];
-  sizes:.z.m.sizing[cfg;trades;filltimes];
-  prices:.z.m.pricing[cfg;quotes;filltimes];
-
-  ([]orderid:cfg[`orderid];
-    execid:1+til count filltimes;
-    sym:cfg[`sym];
-    side:cfg[`side];
-    time:filltimes;
-    price:prices;
-    qty:sizes;
-    interval:.z.m.intervals[cfg;filltimes])
   };
 
 
@@ -435,7 +551,9 @@ run:{[cfg;trades;quotes]
   / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simcalendar)
   / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simcalendar, generatequotes:1b)
   /   both may hold other instruments and days; only the order's are used
-  / returns: dict with `order`executions
+  / returns: dict `orders (the parent, 1 row), `children (one row per
+  /   child order), `events (the order's lifecycle: new, ack, replace,
+  /   cancel, fill, done) and `executions (the fills)
   /
   / throws when the tables have no rows for the order's sym on the day of
   / starttime, or when starttime precedes the first quote of that day (no
@@ -446,8 +564,8 @@ run:{[cfg;trades;quotes]
   /   cfg:first loadconfig`:presets.csv
   /   result:di.simtick.run[tickcfg]  / with generatequotes:1b
   /   ordresult:run[cfg;result`trade;result`quote]
-  /   ordresult`order  / 1-row order table
-  /   ordresult`executions  / child executions table
+  /   ordresult`orders  / 1-row parent order table
+  /   ordresult`executions  / fills
   cfg:.z.m.validate[cfg];
   .z.m.val.hascols[trades;`sym`time`price`qty;"run"];
   .z.m.val.hascols[quotes;`sym`time`bid`ask;"run"];
@@ -462,9 +580,8 @@ run:{[cfg;trades;quotes]
 
   if[not null cfg`seed; system "S ",string cfg`seed];
 
-  order:.z.m.buildorder[cfg;quotes];
-  executions:.z.m.buildexecutions[cfg;trades;quotes];
-  `order`executions!(order;executions)
+  r:.z.m.execute[cfg;trades;quotes];
+  `orders`children`events`executions!(.z.m.buildorder[cfg;quotes;r`executions];r`children;r`events;r`executions)
   };
 
 
@@ -484,7 +601,12 @@ schema[`starttime]:       ("P";"execution window start (timestamp, matches trade
 schema[`endtime]:         ("P";"execution window end (timestamp)")
 schema[`numfills]:        ("J";"number of child fills to generate")
 schema[`pacing]:          ("S";"fill scheduling: `even (patient), `frontloaded (rushed) or `arrival (urgency trajectory under a participation cap)")
-schema[`spreadcapture]:   ("F";"probability a fill is aggressive (crosses the spread, prints at the far touch) rather than at the mid: 0=best, 1=worst")
+schema[`spreadcapture]:   ("F";"probability a child is aggressive (a marketable order crossing the spread) rather than passive (a limit at the near touch): 0=best, 1=worst")
+schema[`account]:         ("S";"the account the order is for")
+schema[`algo]:            ("S";"the algorithm working the order (a label: VWAP, IS, ...)")
+schema[`capacity]:        ("S";"A (agency) or P (principal)")
+schema[`latencyms]:       ("F";"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
+schema[`maxreplaces]:     ("J";"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
 schema[`jitter]:          ("F";"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
 schema[`ticksize]:        ("F";"minimum price increment (0.01 for US equities); fill prices sit on a tenth of it, as trades print on the tape")
 schema[`seed]:            ("J";"random seed (0N = no seed)")
@@ -524,4 +646,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;loadconfig;describe])
