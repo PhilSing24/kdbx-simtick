@@ -1,11 +1,9 @@
 .venv/
 .vscode/
-local/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .DS_Store
-.vscode/
 db/
-di/simtick/testing.q
-data/*.parquet
+data/
+local/reference/

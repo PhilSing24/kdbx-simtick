@@ -38,12 +38,12 @@ Built to sit directly on top of `di.simtick`'s NVDA/NASDAQ presets. `run` keeps 
 This module models execution **outcome**, not execution **mechanics**. It does not simulate:
 
 - **Market impact inside `run`** — `run` prices an order against the market it is given and never moves it. Transient impact across orders is a separate step, `impact` (see [Market impact](#market-impact)), which a caller runs after every order's schedule and sizes and before pricing; there is no permanent impact, so nothing carries past the close
-- **Multi-venue routing** — all executions are implicitly single-venue; there's no NBBO, no smart order routing, no venue-level price improvement modeling
+- **Multi-venue routing** — executions carry no venue; the quotes they are priced against are the consolidated top of book (the NBBO), so there is no per-venue book, no smart order routing, no venue-level price improvement modeling
 - **Order book mechanics** — no queue position, no partial-fill-at-a-price-level dynamics; pricing is a direct function of `spreadcapture` against the prevailing quote, not a matching-engine simulation
 - **Multiple concurrent orders** — one order at a time; no portfolio-level or cross-order interaction
 - **Tape inclusion** — `trades` represents the market independent of this order; an order's own executions are not folded back into `trades`. This matches the standard "exclusive VWAP" TCA convention (benchmarking against the market rather than partly against yourself), but means anyone wanting an "inclusive" benchmark needs to union `trades` and `executions` themselves downstream.
 
-For these, a proper limit order book simulator (see `di.simbook`) or a multi-venue market model would be needed.
+For these, a limit order book simulator or a multi-venue market model would be needed.
 
 ### Next Steps
 
@@ -243,6 +243,12 @@ Presets should be calibrated as good/bad execution style pairs, matched against 
 `urgency` and `maxpct` are the last two columns of `presets.csv`; leave them empty for `even` and `frontloaded`.
 
 ## Testing
+
+```bash
+make test-simorder
+```
+
+or from a q session:
 
 ```q
 q)k4unit:use`local.k4unit
