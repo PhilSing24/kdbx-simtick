@@ -295,26 +295,6 @@ The `docs/` folder contains:
 
 The technical paper describes quotes as derived from the trades; the module now generates the quotes first, on their own clock, and the trades against them (see [Limitations](#limitations)). The paper also describes the arrivals as simulated by Ogata thinning. The module simulates the same process through its cluster representation instead (Hawkes and Oakes, 1974): immigrants arrive as an inhomogeneous Poisson process at the seasonal baseline, and every event spawns Poisson(`alpha`/`beta`) children at exponential delays, generation after generation. The two are equal in distribution, but the cluster form needs no upper bound on the intensity, so bursts are never capped (a fixed bound under-produced arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and it runs as vector operations.
 
-## Notebooks
-
-An interactive **[example](notebooks/simtickDemo.ipynb)** using PyKX is available in `notebooks/`.
-
-### Setup
-
-```bash
-cd di/simtick
-python -m venv .venv
-source .venv/bin/activate   # Linux/Mac
-pip install -r requirements.txt
-jupyter lab
-```
-
-### Available Notebooks
-
-| Notebook | Description |
-|----------|-------------|
-| `simtickDemo.ipynb` | Load module, run simulation, visualize price and quantity |
-
 ## Project Structure
 
 ```
@@ -323,12 +303,9 @@ di/simtick/
 ├── presets.csv      # Market scenario presets
 ├── test.csv         # Unit tests (k4unit format)
 ├── README.md        # This file
-├── requirements.txt # Python dependencies
-├── docs/
-│   ├── IntradayTickSimulatorPaper.pdf
-│   └── HawkesProcessesInFinance.pdf
-└── notebooks/
-    └── simtickDemo.ipynb
+└── docs/
+    ├── IntradayTickSimulatorPaper.pdf
+    └── HawkesProcessesInFinance.pdf
 ```
 
 ## License

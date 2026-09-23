@@ -2,7 +2,7 @@
 # Portable module development - no global installation required
 
 PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-export QPATH := $(QPATH):$(PROJECT_ROOT)
+export QPATH := $(PROJECT_ROOT):$(QPATH)
 
 .PHONY: repl test test-simtick test-simcalendar test-simorder help
 

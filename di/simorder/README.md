@@ -348,7 +348,6 @@ di/simorder/
 ├── presets.csv      # Order presets (good / bad / arrival)
 ├── test.csv         # Unit tests (k4unit format)
 ├── testing.q        # Manual test script
-├── notebooks/       # TCA parquet export notebook
 └── README.md        # This file
 ```
 
