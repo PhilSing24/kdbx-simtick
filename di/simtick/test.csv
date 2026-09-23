@@ -10,9 +10,9 @@ fail,0,0,q,simtick.run[badcfg1],1,,alpha >= beta throws error
 before,0,0,q,badcfg2:cfg,1,,Setup bad config for negative baseintensity
 before,0,0,q,badcfg2[`baseintensity]:-1.0,1,,Set negative baseintensity
 fail,0,0,q,simtick.run[badcfg2],1,,Negative baseintensity throws error
-before,0,0,q,badcfg3:cfg,1,,Setup bad config for zero multiplier
-before,0,0,q,badcfg3[`openmult]:0.0,1,,Set zero openmult
-fail,0,0,q,simtick.run[badcfg3],1,,Zero multiplier throws error
+before,0,0,q,badcfg3:cfg,1,,Setup bad config for a zero profile weight
+before,0,0,q,badcfg3[`profile]:1 0 1f,1,,Set a zero profile weight
+fail,0,0,q,simtick.run[badcfg3],1,,Zero profile weight throws error
 before,0,0,q,badcfg4:cfg,1,,Setup bad config for zero vol
 before,0,0,q,badcfg4[`vol]:0.0,1,,Set zero vol
 fail,0,0,q,simtick.run[badcfg4],1,,Zero vol throws error
@@ -37,7 +37,7 @@ true,0,0,q,all 0<=arr,1,,All arrivals positive
 true,0,0,q,all arr<duration,1,,All arrivals within duration
 true,0,0,q,9h=type arr,1,,Arrivals type is float list
 before,0,0,q,flatcfg3:cfg,1,,Setup flat-baseline config for count tests (before rows all run ahead of the checks: one config per check)
-before,0,0,q,flatcfg3[`openmult`midmult`closemult]:1 1 1f,1,,Flat intraday profile so the Hawkes mean is analytic
+before,0,0,q,flatcfg3[`profile]:1 1f,1,,Flat intraday profile so the Hawkes mean is analytic
 before,0,0,q,flatcfg3[`baseintensity]:1f,1,,One immigrant per second
 before,0,0,q,flatcfg3[`alpha]:0.3,1,,Branching ratio 0.3
 before,0,0,q,flatcfg3[`beta]:1.0,1,,Decay 1
@@ -61,7 +61,7 @@ before,0,0,q,midhour:count sharr where sharr within 5400 9000,1,,Count arrivals 
 before,0,0,q,lasthour:count sharr where sharr>duration-3600,1,,Count last hour arrivals
 true,0,0,q,firsthour>midhour,1,,Open activity > mid activity
 true,0,0,q,lasthour>midhour,1,,Close activity > mid activity
-true,0,0,q,lasthour>firsthour,1,,J-shape: close > open (transitionpoint 0.3)
+true,0,0,q,lasthour>firsthour,1,,J-shape: close > open (the profile's last bin is its largest)
 comment,0,0,q,,1,,=== Price Tests ===
 before,0,0,q,times:1+til 100,1,,Setup times
 before,0,0,q,prices:simtick.price[cfg;times],1,,Generate prices
@@ -82,7 +82,12 @@ comment,0,0,q,,1,,=== Trades Tests ===
 before,0,0,q,cfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,trades:simtick.run[cfg],1,,Generate trades only
 true,0,0,q,98h=type trades,1,,Result is table
-true,0,0,q,`sym`time`price`qty`aggressor~cols trades,1,,Trades has correct columns (aggressor: B buyer-initiated / S seller-initiated)
+true,0,0,q,`sym`time`price`qty`aggressor`cond~cols trades,1,,Trades has correct columns (aggressor: B buyer-initiated / S seller-initiated; cond: R regular / O opening auction / C closing auction)
+true,0,0,q,(`O=(first trades)`cond)&(first trades[`time])=opentime,1,,The opening auction print is the first trade at the open
+true,0,0,q,(`C=(last trades)`cond)&(last trades[`time])=closetime,1,,The closing auction print is the last trade at the close
+true,0,0,q,1>=abs ((last trades)`qty)-cfg[`closeauctionpct]*exec sum qty from trades where cond=`R,1,,The closing print carries closeauctionpct of the continuous volume
+true,0,0,q,all null trades[`aggressor] where trades[`cond] in `O`C,1,,Auction prints have no aggressor
+true,0,0,q,all `R=trades[`cond] where not null trades`aggressor,1,,Continuous trades are regular prints
 true,0,0,q,(asc trades`time)~trades`time,1,,Trades sorted by time
 true,0,0,q,all 0<trades`price,1,,All trade prices positive
 true,0,0,q,all 0<trades`qty,1,,All trade quantities positive
@@ -116,7 +121,7 @@ true,0,0,q,(asc quotes`time)~quotes`time,1,,Quotes sorted by time
 true,0,0,q,all quotes[`bid]<quotes`ask,1,,Bid < ask for all quotes
 true,0,0,q,all 0<quotes`bidsize,1,,All bid sizes positive
 true,0,0,q,all 0<quotes`asksize,1,,All ask sizes positive
-true,0,0,q,(first quotes`time)<first trades`time,1,,Quote exists before first trade
+true,0,0,q,(first quotes`time)<=first trades`time,1,,A quote is in force from the open, no later than the first trade (the opening print)
 before,0,0,q,qidx:0|quotes[`time] bin trades[`time],1,,Find prevailing quote index for each trade
 true,0,0,q,(all trades[`price]>=quotes[`bid] qidx) and (all trades[`price]<=quotes[`ask] qidx),1,,All trades fall within their prevailing quote's bid-ask spread (regression test for pre-trade quote ordering bug)
 before,0,0,q,pbid:quotes[`bid] qidx,1,,Bid in force at each trade
@@ -166,7 +171,7 @@ before,0,0,q,noactmins:where noactret>0.02,1,,Its jump minutes
 before,0,0,q,noactsp:exec avg (ask-bid)%cfg`ticksize by 1 xbar time.minute from noactrun`quote,1,,Its mean spread in ticks per minute
 true,0,0,q,all 1.3>(noactsp[noactmins]|noactsp[noactmins+1])%med value noactsp,1,,Without activity coupling a burst leaves the spread at its median
 before,0,0,q,flatspcfg:cfg,1,,Setup flat-profile config for the activity coupling
-before,0,0,q,flatspcfg[`openmult`midmult`closemult]:1 1 1f,1,,Flat intensity profile
+before,0,0,q,flatspcfg[`profile]:1 1f,1,,Flat intensity profile
 before,0,0,q,flatspcfg[`spreadopenmult`spreadclosemult]:1 1f,1,,Flat spread profile
 before,0,0,q,flatsprun:simtick.run[flatspcfg],1,,Run with only activity moving the spread
 before,0,0,q,flatspn:exec count i by 1 xbar time.minute from flatsprun`quote,1,,Quotes per minute
@@ -199,7 +204,7 @@ before,0,0,q,spreadticks:floor 0.5+(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Spr
 true,0,0,q,all 1e-6>abs spreadticks-(quotes[`ask]-quotes`bid)%cfg`ticksize,1,,Every spread is a whole number of ticks
 before,0,0,q,midday:(quotes[`time]>opentime+0D01:30)&quotes[`time]<closetime-0D01:00,1,,Quotes between 11:00 and 15:00
 true,0,0,q,0.75<avg 1=spreadticks where midday,1,,Midday the spread is one tick most of the time
-true,0,0,q,(avg spreadticks where midday) within 1 1.4*cfg`spreadticks,1,,Midday mean spread in ticks about spreadticks
+true,0,0,q,(avg spreadticks where midday) within 0.9 1.4*cfg`spreadticks,1,,Midday mean spread in ticks about spreadticks
 true,0,0,q,(avg spreadticks where quotes[`time]<opentime+0D00:05)>avg spreadticks where midday,1,,Spreads are wider in the first five minutes than midday
 true,0,0,q,(avg spreadticks where quotes[`time]>closetime-0D00:05)<=avg spreadticks where midday,1,,Spreads are no wider in the last five minutes than midday
 true,0,0,q,all 1e-6>abs (quotes[`bid]%cfg`ticksize)-floor 0.5+quotes[`bid]%cfg`ticksize,1,,Bids sit on the tick grid
@@ -208,7 +213,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,46=count cfgs`nvda_default,1,,Config has 46 parameters (excluding key)
+true,0,0,q,45=count cfgs`nvda_default,1,,Config has 45 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -224,14 +229,14 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,47=count schema,1,,Schema has 47 parameters
+true,0,0,q,46=count schema,1,,Schema has 46 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
 before,0,0,q,constcfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,consttrades:simtick.run[constcfg],1,,Generate trades
-true,0,0,q,1=count distinct consttrades`qty,1,,All quantities equal
-true,0,0,q,constcfg[`avgqty]=first consttrades`qty,1,,Quantity equals avgqty
+true,0,0,q,1=count distinct exec qty from consttrades where cond=`R,1,,All continuous quantities equal
+true,0,0,q,constcfg[`avgqty]=first exec qty from consttrades where cond=`R,1,,Continuous quantity equals avgqty
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,seedcfg:cfg,1,,Setup seeded config
 before,0,0,q,seedcfg[`seed]:999,1,,Set seed

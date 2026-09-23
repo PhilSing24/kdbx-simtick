@@ -71,24 +71,32 @@ rng.poisson:{[lams;maxk]
   k
   };
 
+profile:{[cfg]
+  / the intraday profile as float weights, from the config's `profile: a
+  / space-separated string (as in the CSV) or a list of numbers
+  / cfg: config dict with `profile
+  / returns: list of positive floats, one per equal bin of the session
+  p:cfg`profile;
+  w:$[10h=abs type p; "F"$" " vs (),p; `float$(),p];
+  if[(0=count w) or any null w; '"profile: must be a list of numbers (a space-separated string in the CSV)"];
+  w
+  };
+
 shape:{[cfg;progress]
-  / intraday intensity multiplier using cosine interpolation
-  / cfg: config dict with `openmult`midmult`closemult`transitionpoint
-  / progress: fraction of trading day elapsed (0 to 1)
-  / returns: intensity multiplier for current time
-  /
-  / transitionpoint controls when to switch from open->mid to mid->close
-  / 0.5 = symmetric (U-shape), 0.3 = asymmetric (J-shape)
-  / progress may be an atom or a list; the multiplier never exceeds the
-  / largest of the three, which arrivals relies on
-  openmult:cfg`openmult;
-  midmult:cfg`midmult;
-  closemult:cfg`closemult;
-  tp:cfg`transitionpoint;
-  early:progress<tp;
-  earlyvals:midmult+(openmult-midmult)*cos progress*acos[-1]%(2*tp);
-  latevals:midmult+(closemult-midmult)*sin (progress-tp)*acos[-1]%(2*1-tp);
-  ?[early;earlyvals;latevals]
+  / intraday intensity multiplier: the config's profile gives one weight per
+  / equal bin of the session (13 half hours for a 6.5-hour day), interpolated
+  / linearly between bin midpoints and flat beyond the first and last, so a
+  / flat midday and a spike in the last minutes are both expressible. The
+  / multiplier never exceeds the largest weight, which hawkes.process relies on
+  / cfg: config dict with `profile
+  / progress: fraction of trading day elapsed (0 to 1), atom or list
+  / returns: intensity multiplier for each progress
+  w:.z.m.profile cfg;
+  n:count w;
+  if[1=n; :$[0>type progress; first w; (count progress)#first w]];
+  x:0f|(n-1)&(progress*n)-0.5;
+  i:(n-2)&`long$floor x;
+  w[i]+(x-i)*w[i+1]-w[i]
   };
 
 poisson:{[rate;duration]
@@ -130,7 +138,7 @@ hawkes.process:{[cfg;baseintensity;extra]
   / spawns Poisson(alpha/beta) children at Exp(beta) delays, generation after
   / generation until a generation is empty. The union of all generations is
   / the process
-  / cfg: config dict with `alpha`beta`openingtime`closingtime and the shape keys
+  / cfg: config dict with `alpha`beta`openingtime`closingtime`profile
   / baseintensity: immigrant intensity before the intraday shape (per second)
   / extra: extra immigrant times in seconds from open (a shock, see hawkes.shock)
   / returns: ascending event times in seconds from session start
@@ -146,7 +154,7 @@ hawkes.process:{[cfg;baseintensity;extra]
 
   / immigrants: a homogeneous Poisson process at the day's peak baseline,
   / thinned by shape/maxmult (exact, since shape never exceeds maxmult)
-  maxmult:cfg[`openmult]|cfg[`midmult]|cfg`closemult;
+  maxmult:max .z.m.profile cfg;
   cand:.z.m.poisson[baseintensity*maxmult;duration];
   immigrants:cand where (count[cand]?1.0)<.z.m.shape[cfg;cand%duration]%maxmult;
   immigrants:asc immigrants,extra where extra<duration;
@@ -177,10 +185,8 @@ arrivals:{[cfg]
   / returns: ascending list of arrival times in seconds from session start
   /
   / Required config keys:
-  /   baseintensity, alpha, beta, openingtime, closingtime,
-  /   openmult, midmult, closemult, transitionpoint
-  reqkeys:`baseintensity`alpha`beta`openingtime`closingtime;
-  reqkeys,:`openmult`midmult`closemult`transitionpoint;
+  /   baseintensity, alpha, beta, openingtime, closingtime, profile
+  reqkeys:`baseintensity`alpha`beta`openingtime`closingtime`profile;
   .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
   .z.m.hawkes.process[cfg;cfg`baseintensity;`float$()]
   };
@@ -319,7 +325,7 @@ quote.activity:{[cfg;quotearrs]
   / local quote activity relative to its expected level: the quotes in the
   / trailing minute over the number the intensity profile expects there,
   / raised to spreadactivity; multiplies the mean spread, so bursts widen it
-  / cfg: config dict with `spreadactivity`quotespertrade`baseintensity`alpha`beta and the shape keys
+  / cfg: config dict with `spreadactivity`quotespertrade`baseintensity`alpha`beta`profile
   / quotearrs: quote times in seconds from open, ascending
   / returns: float multiplier per quote, 1 when spreadactivity is 0
   n:count quotearrs;
@@ -413,8 +419,8 @@ trade.generate:{[cfg;times;quotes;flow]
   / times: trade timestamps, ascending, none before the first quote
   / quotes: quote table (see quote.generate)
   / flow: `sign`qty of the trades (see flow.generate)
-  / returns: trade table `time`price`qty`aggressor, aggressor `B (buyer-
-  /   initiated) or `S; prices on the tenth-of-a-tick grid
+  / returns: trade table `time`price`qty`aggressor`cond, aggressor `B (buyer-
+  /   initiated) or `S, cond `R (regular); prices on the tenth-of-a-tick grid
   n:count times;
   idx:quotes[`time] bin times;
   bid:quotes[`bid] idx;
@@ -431,7 +437,26 @@ trade.generate:{[cfg;times;quotes;flow]
   grid:0.1*cfg`ticksize;
   price:grid*floor 0.5+price%grid;
 
-  ([]time:times;price:price;qty:flow`qty;aggressor:?[sign>0;`B;`S])
+  ([]time:times;price:price;qty:flow`qty;aggressor:?[sign>0;`B;`S];cond:n#`R)
+  };
+
+auction.prints:{[cfg;quotes;volume]
+  / the opening and closing auction prints: at the first and last mid, for
+  / openauctionpct and closeauctionpct of the continuous volume, cond `O and
+  / `C, with no aggressor; a print of zero quantity is left out
+  / cfg: config dict with `openauctionpct`closeauctionpct`closingtime`ticksize
+  / quotes: the day's quote table
+  / volume: the day's continuous volume
+  / returns: trade table `time`price`qty`aggressor`cond, up to two rows
+  ts:cfg`ticksize;
+  q0:first quotes;
+  q1:last quotes;
+  opent:q0`time;
+  closet:(`date$opent)+`timespan$cfg`closingtime;
+  mids:0.5*(q0[`bid]+q0`ask;q1[`bid]+q1`ask);
+  t:([]time:(opent;closet);price:ts*floor 0.5+mids%ts;
+    qty:`long$0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C);
+  select from t where qty>0
   };
 
 quote.spreadmults:{[cfg;times]
@@ -460,9 +485,9 @@ validate:{[cfg]
   /
   / Checks:
   /   - Hawkes stability: alpha < beta
-  /   - Positive multipliers: openmult, midmult, closemult > 0
+  /   - Positive profile weights
   /   - Positive base intensity
-  /   - Transitionpoint in valid range (prevents division by zero)
+  /   - Non-negative auction percentages
   /   - Positive volatility (zero vol produces degenerate flat price path)
   /   - Positive start price (negative/zero price is economically invalid)
   /   - Positive tick size, positive quotespertrade, sidepersistence and the
@@ -471,13 +496,13 @@ validate:{[cfg]
 
   / check Hawkes stability condition
   if[cfg[`alpha]>=cfg`beta; '"validate: Hawkes unstable - alpha must be < beta"];
-  / check multipliers positive
-  if[0>=min cfg`openmult`midmult`closemult; '"validate: multipliers must be positive"];
+  / check the intraday profile
+  if[0>=min .z.m.profile cfg; '"validate: profile weights must be positive"];
   / check base intensity
   if[0>=cfg`baseintensity; '"validate: baseintensity must be positive"];
-  / check transitionpoint bounds (prevents division by zero in shape function)
-  if[not cfg[`transitionpoint] within 0.01 0.99;
-    '"validate: transitionpoint must be between 0.01 and 0.99"];
+  / auctions
+  .z.m.val.haskeys[cfg;`openauctionpct`closeauctionpct;"validate"];
+  if[0>min cfg`openauctionpct`closeauctionpct; '"validate: auction percentages must be zero or positive"];
   / check vol positive (zero produces NaN in log, flat path with no signal)
   if[0>=cfg`vol; '"validate: vol must be positive"];
   / check startprice positive (GBM/jump models require positive initial price)
@@ -528,7 +553,8 @@ run:{[cfg]
   / as the mid, shifted by the impact of the signed order flow before each
   / quote (see flow.impact); a jump seeds a burst on both clocks (see
   / hawkes.shock) and local activity widens the spread (see quote.activity).
-  / Trades arrive on the trade clock and execute
+  / The opening and closing auction prints frame the session (see
+  / auction.prints). Trades arrive on the trade clock and execute
   / against the quote in force (see trade.generate), so every trade sits
   / inside its prevailing quote and carries an aggressor side
   /
@@ -570,7 +596,11 @@ run:{[cfg]
   / trades against the quote in force
   trades:$[n;
     .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes;flow];
-    ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$())];
+    ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$();cond:`symbol$())];
+
+  / the auction prints around the continuous session
+  auctions:.z.m.auction.prints[cfg;quotes;sum trades`qty];
+  trades:`time xasc trades,auctions;
 
   addsym:{[s;t] update `p#sym from `sym`time xcols update sym:s from t};
   trades:addsym[cfg`sym;trades];
@@ -601,10 +631,9 @@ schema[`clock]:("S";"clock of the diffusion: `calendar (variance grows with time
 schema[`baseintensity]:("F";"base trade arrival rate (trades/sec)")
 schema[`alpha]:("F";"Hawkes excitation parameter")
 schema[`beta]:("F";"Hawkes decay parameter (must be > alpha)")
-schema[`transitionpoint]:("F";"intraday shape parameter (0.3=J, 0.5=U)")
-schema[`openmult]:("F";"intensity multiplier at open")
-schema[`midmult]:("F";"intensity multiplier at midday")
-schema[`closemult]:("F";"intensity multiplier at close")
+schema[`profile]:("*";"intraday intensity profile: space-separated positive weights, one per equal bin of the session (13 half hours), interpolated between bin midpoints")
+schema[`openauctionpct]:("F";"opening auction print as a fraction of the day's continuous volume (0 = none)")
+schema[`closeauctionpct]:("F";"closing auction print as a fraction of the day's continuous volume (0 = none)")
 schema[`qtymodel]:("S";"quantity model (`constant or `lognormal)")
 schema[`avgqty]:("J";"average trade quantity")
 schema[`qtyvol]:("F";"quantity volatility (for lognormal)")
