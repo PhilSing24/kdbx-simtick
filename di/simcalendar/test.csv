@@ -12,6 +12,14 @@ fail,0,0,q,simcalendar.validate[2026.01.20],1,Non-list date throws error
 fail,0,0,q,simcalendar.validate[`date$()],1,Empty date list throws error
 fail,0,0,q,simcalendar.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
 fail,0,0,q,simcalendar.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
+fail,0,0,q,simcalendar.validate[([]day:2026.01.20 2026.01.21)],1,A table without a date column throws error
+fail,0,0,q,simcalendar.validate[([]date:2026.01.20 2026.01.21;foo:1 2)],1,A table with an unknown column throws error
+before,0,0,q,listcal:simcalendar.validate[2026.01.20 2026.01.21],1,A date list validated
+true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols listcal,1,A date list becomes a calendar table with the optional columns
+true,0,0,q,all null listcal`closingtime,1,Its optional columns are null (the config's values)
+before,0,0,q,badcfg3:cfg,1,Setup bad config for a regime persistence of 1
+before,0,0,q,badcfg3[`regimepersistence]:1f,1,Set regimepersistence to 1
+fail,0,0,q,simcalendar.run[badcfg3;calendar;(::)],1,regimepersistence of 1 throws error
 fail,0,0,q,simcalendar.run[cfgs`nvda_default;calendar;(::)],1,A tick config without the calendar keys throws error
 before,0,0,q,badcfg1:cfg,1,Setup bad config for overnightshare of 1
 before,0,0,q,badcfg1[`overnightshare]:1f,1,Set overnightshare to 1 (no intraday variance left)
@@ -21,12 +29,19 @@ before,0,0,q,badcfg2[`gapdayweight]:-1f,1,Set a negative gapdayweight
 fail,0,0,q,simcalendar.run[badcfg2;calendar;(::)],1,Negative gapdayweight throws error
 comment,0,0,q,,1,=== loadcalendar Tests ===
 fail,0,0,q,simcalendar.loadcalendar["/not/a/handle"],1,String filepath throws error
-true,0,0,q,14h=type calendar,1,loadcalendar returns date list
+true,0,0,q,98h=type calendar,1,loadcalendar returns a calendar table
+true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols calendar,1,With the date and the optional columns
 true,0,0,q,0<count calendar,1,Calendar is non-empty
-true,0,0,q,(asc calendar)~calendar,1,Calendar is sorted ascending
+true,0,0,q,(asc calendar`date)~calendar`date,1,Calendar is sorted ascending
+true,0,0,q,13:00=last calendar`closingtime,1,The shipped calendar's last day is a half day
+before,0,0,q,`:/tmp/simcalendar_dates.csv 0: csv 0: select date from calendar,1,A calendar file with the date column only
+true,0,0,q,(calendar`date)~(simcalendar.loadcalendar`:/tmp/simcalendar_dates.csv)`date,1,A date-only calendar file loads
+before,0,0,q,`:/tmp/simcalendar_badcal.csv 0: csv 0: update foo:1 from calendar,1,A calendar file with an unknown column
+fail,0,0,q,simcalendar.loadcalendar`:/tmp/simcalendar_badcal.csv,1,An unknown calendar column throws error
+after,0,0,q,system"rm -f /tmp/simcalendar_dates.csv /tmp/simcalendar_badcal.csv",1,Clean up calendar files
 comment,0,0,q,,1,=== Config Tests ===
 true,0,0,q,99h=type calcfgs,1,loadconfig returns keyed table
-true,0,0,q,`default`nogap~exec name from calcfgs,1,The two presets load
+true,0,0,q,`default`nogap`steady`turbulent~exec name from calcfgs,1,The four presets load
 before,0,0,q,`:/tmp/simcalendar_missing.csv 0: csv 0: delete gapdayweight from 0!calcfgs,1,Presets written without a column
 fail,0,0,q,simcalendar.loadconfig`:/tmp/simcalendar_missing.csv,1,A missing column throws error
 after,0,0,q,system"rm -f /tmp/simcalendar_missing.csv",1,Clean up preset file
@@ -48,8 +63,10 @@ comment,0,0,q,,1,=== Multi-Day Tests ===
 before,0,0,q,daycounts:select count i by "d"$time from trades,1,Count trades per day
 true,0,0,q,(count calendar)=count daycounts,1,All calendar days have trades
 true,0,0,q,all 0<exec x from daycounts,1,Each day has at least one trade
-true,0,0,q,`date`open`close`overnightret`trades`volume~cols days,1,Days table has correct columns
-true,0,0,q,calendar~days`date,1,One row per calendar day
+true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`x`open`close`overnightret`trades`volume~cols days,1,Days table has the regime columns then the day's results
+true,0,0,q,(calendar`date)~days`date,1,One row per calendar day
+true,0,0,q,all (exec time from trades where ("d"$time)=2026.08.20)<=2026.08.20D13:00,1,The half day's trades end by its closing time
+true,0,0,q,2026.08.20D13:00=last exec time from trades where ("d"$time)=2026.08.20,1,The half day's closing print is at 13:00
 true,0,0,q,(days`trades)~exec x from daycounts,1,The days table counts the trades of each day
 true,0,0,q,(days`volume)~value exec sum qty by "d"$time from trades,1,The days table sums the volume of each day
 true,0,0,q,(days`close)~value exec last price by "d"$time from trades,1,The close of each day is its last print
@@ -70,6 +87,48 @@ before,0,0,q,gapcfg[`overnightshare]:0.9,1,Most of the variance overnight
 before,0,0,q,gapdays:(simcalendar.run[gapcfg;calendar;(::)])`days,1,Days with a large overnight share
 true,0,0,q,(avg abs 1_gapdays`overnightret)>avg abs 1_days`overnightret,1,A larger overnightshare gives larger gaps
 true,0,0,q,(abs simcalendar.overnight[cfg;1])<0.2,1,overnight returns a log return of plausible size
+comment,0,0,q,,1,=== Seeds and Regimes Tests ===
+before,0,0,q,sd:simcalendar.seeds[cfg;calendar`date],1,The per-day seeds
+true,0,0,q,`date`regimeseed`dayseed`gapseed~cols sd,1,Seeds table has correct columns
+true,0,0,q,(count calendar)=count distinct sd`dayseed,1,Every day has its own seed
+true,0,0,q,all 0<sd`dayseed,1,Seeds are positive
+before,0,0,q,xomcfg:cfg,1,Setup config for another instrument
+before,0,0,q,xomcfg[`sym]:`XOM,1,Set the sym
+true,0,0,q,(sd`regimeseed)~(simcalendar.seeds[xomcfg;calendar`date])`regimeseed,1,The regime seed of a date is shared across instruments (the market's day)
+true,0,0,q,not (sd`dayseed)~(simcalendar.seeds[xomcfg;calendar`date])`dayseed,1,The day seed differs by instrument
+before,0,0,q,noseedcfg:cfg,1,Setup config without a seed
+before,0,0,q,noseedcfg[`seed]:0N,1,No seed
+true,0,0,q,all null (simcalendar.seeds[noseedcfg;calendar`date])`dayseed,1,Without a seed there are no day seeds
+before,0,0,q,longcal:2026.01.01+asc where not ((2026.01.01+til 730) mod 7) in 0 1,1,Two years of weekdays
+before,0,0,q,reg:simcalendar.regimes[cfg;longcal],1,Regimes over two years
+true,0,0,q,(count longcal)=count reg,1,One regime row per day
+true,0,0,q,(avg reg`volmult) within 0.85 1.15,1,The volatility multiplier averages about 1
+true,0,0,q,(dev log reg`volmult) within 0.6 1.4*cfg`volregimesd,1,The log volatility multiplier's spread is about volregimesd
+true,0,0,q,((1_reg`x) cor -1_reg`x) within 0.5 0.85,1,The regime persists from day to day (AR(1) at regimepersistence)
+true,0,0,q,0.9<(log reg`volmult) cor log reg`volumemult,1,Volume and volatility regimes move together
+true,0,0,q,reg~simcalendar.regimes[cfg;longcal],1,Same seed gives the same regimes
+before,0,0,q,shortcal:20#longcal,1,The first twenty days of the long calendar
+true,0,0,q,(20#reg`regimeseed)~(simcalendar.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in
+before,0,0,q,steadycfg:cfgs[`nvda_default] upsert calcfgs`steady,1,Config with no regime variation
+true,0,0,q,all 1f=(simcalendar.regimes[steadycfg;calendar])`volmult,1,With zero regime sds every day is at the configured vol
+before,0,0,q,evcal:update volumemult:3f from calendar where date=2026.08.19,1,Calendar with a triple-volume day
+before,0,0,q,evcfg:steadycfg,1,Setup config for the event calendar
+before,0,0,q,evcfg[`seed]:42,1,Set seed
+before,0,0,q,evcfg[`generatequotes]:0b,1,Trades only
+before,0,0,q,evdays:(simcalendar.run[evcfg;evcal;(::)])`days,1,Run the event calendar
+true,0,0,q,((evdays[`trades] 1)%evdays[`trades] 0) within 2.5 3.5,1,A volumemult of 3 in the calendar triples the day's trades
+before,0,0,q,jcal:update jumpintensity:20f from calendar where date=2026.08.19,1,Calendar with a jump day
+before,0,0,q,jcfg:evcfg,1,Setup config for the jump calendar
+before,0,0,q,jcfg[`jumpvol]:0.05,1,Large jumps
+before,0,0,q,jtrades:(simcalendar.run[jcfg;jcal;(::)])`trade,1,Run the jump calendar
+before,0,0,q,jmins:exec abs log last[price]%first price by 0D00:01 xbar time from jtrades,1,Absolute return per minute
+true,0,0,q,0<count where (jmins>0.02)&(`date$key jmins)=2026.08.19,1,The jump day has jumps
+true,0,0,q,0=count where (jmins>0.02)&(`date$key jmins)<>2026.08.19,1,The other days have none
+comment,0,0,q,,1,=== Regenerate One Day Tests ===
+before,0,0,q,day2:days 1,1,The second day's row
+before,0,0,q,alone:simtick.run simcalendar.daycfg[cfg;day2;day2`open],1,The second day regenerated alone from its row
+true,0,0,q,(exec price from trades where ("d"$time)=day2`date)~alone`price,1,It reproduces the second day's prices exactly
+true,0,0,q,(exec time from trades where ("d"$time)=day2`date)~alone`time,1,And its times
 comment,0,0,q,,1,=== Quotes Tests ===
 before,0,0,q,qcfg:cfg,1,Setup config with quotes
 before,0,0,q,qcfg[`generatequotes]:1b,1,Enable quote generation

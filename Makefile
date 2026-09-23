@@ -29,12 +29,12 @@ repl:
 test: test-simtick test-simcalendar test-simorder
 
 # Individual module tests
-# The runner is the local.k4unit module; each target exits non-zero when a check fails
+# The runner is the local.k4unit module; each target exits non-zero when a check fails or the suite aborts before any check
 test-simtick:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simtick; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simtick; exit $$[(0<count r)&all r`ok;0;1]' | q -q
 
 test-simcalendar:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simcalendar; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simcalendar; exit $$[(0<count r)&all r`ok;0;1]' | q -q
 
 test-simorder:
-	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simorder; exit $$[all r`ok;0;1]' | q -q
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simorder; exit $$[(0<count r)&all r`ok;0;1]' | q -q
