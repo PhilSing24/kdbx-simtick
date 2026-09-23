@@ -32,6 +32,19 @@ fail,0,0,q,simorder.run[badcfg6;trades;quotes],1,,spreadcapture above 1 throws e
 before,0,0,q,badcfg7:basecfg,1,,Setup bad config for negative spreadcapture
 before,0,0,q,badcfg7[`spreadcapture]:-0.1,1,,Set negative spreadcapture
 fail,0,0,q,simorder.run[badcfg7;trades;quotes],1,,Negative spreadcapture throws error
+before,0,0,q,badcfg8:basecfg,1,,Setup bad config for a window on another day
+before,0,0,q,badcfg8[`starttime]:badcfg8[`starttime]-30D00:00,1,,Move starttime 30 days earlier
+before,0,0,q,badcfg8[`endtime]:badcfg8[`endtime]-30D00:00,1,,Move endtime 30 days earlier
+fail,0,0,q,simorder.run[badcfg8;trades;quotes],1,,Window on a day the market data does not cover throws error
+before,0,0,q,badcfg9:basecfg,1,,Setup bad config for a window spanning two days
+before,0,0,q,badcfg9[`endtime]:badcfg9[`endtime]+1D00:00,1,,Move endtime to the next day
+fail,0,0,q,simorder.run[badcfg9;trades;quotes],1,,Window spanning two days throws error
+before,0,0,q,badcfg10:basecfg,1,,Setup bad config for a symbol absent from the market data
+before,0,0,q,badcfg10[`sym]:`XOM,1,,Set a symbol the tables do not hold
+fail,0,0,q,simorder.run[badcfg10;trades;quotes],1,,Symbol absent from the market data throws error
+before,0,0,q,badcfg11:basecfg,1,,Setup bad config for a start before the first quote
+before,0,0,q,badcfg11[`starttime]:d+0D09:00,1,,Set starttime before the open
+fail,0,0,q,simorder.run[badcfg11;trades;quotes],1,,Start before the first quote of the day throws error
 comment,0,0,q,,1,,=== Schedule Tests ===
 before,0,0,q,filltimes:simorder.schedule[basecfg],1,,Generate even-pacing fill schedule
 true,0,0,q,(count filltimes)=basecfg`numfills,1,,Schedule returns numfills timestamps
@@ -156,6 +169,12 @@ before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded execu
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
+comment,0,0,q,,1,,=== Mixed Market Tests ===
+before,0,0,q,xomresult:simtick.run[cfgs`xom_default],1,,Generate a second instrument for the same day
+before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table
+before,0,0,q,mixedquotes:`time xasc raze(quotes;xomresult`quote),1,,Quotes of both instruments in one table
+true,0,0,q,(simorder.run[basecfg;mixedtrades;mixedquotes])~simorder.run[basecfg;trades;quotes],1,,An order against mixed-instrument tables matches the single-instrument run
+true,0,0,q,(simorder.marketday[basecfg;mixedquotes;"quotes"])~quotes,1,,marketday returns the order's instrument and day only
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run

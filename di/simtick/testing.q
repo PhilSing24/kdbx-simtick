@@ -4,7 +4,7 @@ simtick:use`di.simtick
 
 / Load base config and modify for pure Poisson + no seasonality
 cfgs:simtick.loadconfig`:di/simtick/presets.csv
-cfg:cfgs`default
+cfg:cfgs`nvda_default
 
 / Pure Poisson: disable Hawkes excitation
 cfg[`alpha]:0.0

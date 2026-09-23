@@ -37,6 +37,7 @@ validate:{[cfg]
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
+  if[(`date$cfg`starttime)<>`date$cfg`endtime; '"validate: starttime and endtime must fall on the same day"];
   if[0>=cfg`orderqty; '"validate: orderqty must be positive"];
   if[0>=cfg`numfills; '"validate: numfills must be positive"];
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
@@ -364,12 +365,33 @@ buildexecutions:{[cfg;trades;quotes]
 / MAIN ENTRY POINT
 / ============================================================
 
+marketday:{[cfg;t;name]
+  / the rows of a market table for the order's instrument and day
+  / cfg: order config dict with `sym`starttime
+  / t: trades or quotes table with `sym`time
+  / name: table name for error context
+  / returns: rows for cfg`sym on the day of starttime, time-sorted; throws if none
+  d:`date$cfg`starttime;
+  r:`time xasc select from t where sym=cfg`sym,d=`date$time;
+  if[0=count r;
+    '"run: no ",name," for ",string[cfg`sym]," on ",string[d]," (",name," cover ",
+      (", " sv string distinct t`sym)," on ",(", " sv string distinct `date$t`time),")"];
+  r
+  };
+
+
 run:{[cfg;trades;quotes]
   / main simulation entry point
   / cfg: order configuration dictionary (typically loaded via loadconfig)
-  / trades: market trades table for the day (from di.simtick/di.simcalendar)
-  / quotes: market quotes table for the day (from di.simtick/di.simcalendar, generatequotes:1b)
+  / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simcalendar)
+  / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simcalendar, generatequotes:1b)
+  /   both may hold other instruments and days; only the order's are used
   / returns: dict with `order`executions
+  /
+  / throws when the tables have no rows for the order's sym on the day of
+  / starttime, or when starttime precedes the first quote of that day (no
+  / quote in force for the arrival price). Without these checks an order on
+  / another day was priced silently off the first or last quote of the day.
   /
   / Example:
   /   cfg:first loadconfig`:presets.csv
@@ -378,8 +400,16 @@ run:{[cfg;trades;quotes]
   /   ordresult`order  / 1-row order table
   /   ordresult`executions  / child executions table
   cfg:.z.m.validate[cfg];
-  .z.m.val.hascols[trades;`time`price`qty;"run"];
-  .z.m.val.hascols[quotes;`time`bid`ask;"run"];
+  .z.m.val.hascols[trades;`sym`time`price`qty;"run"];
+  .z.m.val.hascols[quotes;`sym`time`bid`ask;"run"];
+
+  / keep only the order's instrument and day, so tables holding several
+  / instruments or days (di.simcalendar in memory, di.simbasket) can be
+  / passed whole, and throw when the market does not cover the order
+  trades:.z.m.marketday[cfg;trades;"trades"];
+  quotes:.z.m.marketday[cfg;quotes;"quotes"];
+  if[cfg[`starttime]<first quotes`time;
+    '"run: starttime ",string[cfg`starttime]," is before the first quote at ",string first quotes`time];
 
   if[not null cfg`seed; system "S ",string cfg`seed];
 
@@ -434,4 +464,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;schedule;sizing;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;marketday;schedule;sizing;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
