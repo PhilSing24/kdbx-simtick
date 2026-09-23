@@ -429,7 +429,7 @@ run:{[cfg;trades;quotes]
   .z.m.val.hascols[quotes;`sym`time`bid`ask;"run"];
 
   / keep only the order's instrument and day, so tables holding several
-  / instruments or days (di.simcalendar in memory, di.simbasket) can be
+  / instruments or days (di.simcalendar in memory) can be
   / passed whole, and throw when the market does not cover the order
   trades:.z.m.marketday[cfg;trades;"trades"];
   quotes:.z.m.marketday[cfg;quotes;"quotes"];

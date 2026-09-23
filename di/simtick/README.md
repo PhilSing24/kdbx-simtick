@@ -67,21 +67,20 @@ For these advanced use cases, a full limit order book simulator with queue dynam
 
 ### Next Steps
 
-Two future modules will extend this simulator, using the KDB-X module framework's **sibling architecture**. Each module lives at the same level under `di/` and declares dependencies via relative module references.
+`di.simcalendar` extends this simulator, using the KDB-X module framework's **sibling architecture**. Each module lives at the same level under `di/` and declares dependencies via relative module references.
 
 **Module hierarchy:**
 
 ```
 di/
 ├── simtick/           # 1 instrument, 1 day (atomic unit)
-├── simcalendar/       # 1 instrument, N days (uses ..simtick)
-└── simbasket/         # M instruments, N days (uses ..simcalendar)
+└── simcalendar/       # 1 instrument, N days (uses ..simtick)
 ```
 
 **Dependency chain:**
 
 ```
-simtick ← simcalendar ← simbasket
+simtick ← simcalendar
 ```
 
 Each module builds on its predecessor. This design allows users to load only what they need while keeping each module focused on a single responsibility.
@@ -96,21 +95,6 @@ Each module builds on its predecessor. This design allows users to load only wha
 - Orchestrates `di.simtick` for each day
 - Carries forward closing price as next day's opening price (no overnight gap modeling)
 - Optional disk persistence to date-partitioned kdb+ database
-
----
-
-**`di.simbasket`** — Multiple correlated instruments over multiple trading days
-
-- Correlated price processes across instruments
-- Configurable correlation matrices
-- Synchronized or independent arrival processes
-
-Correlated price paths across assets are essential for:
-
-- **Portfolio risk management** — stress testing diversified portfolios under correlated drawdowns
-- **Value at Risk (VaR) and Expected Shortfall (ES)** — generating scenarios for tail risk estimation
-- **Cross-asset strategy testing** — pairs trading, statistical arbitrage, index replication
-
 
 ### Configuration
 
