@@ -4,6 +4,15 @@
 nsperms:1000000
 nspersec:1000000000
 
+/ round lots of the `mixture quantity model and their weights (US equities:
+/ 100 shares dominates, then 200, 500, 300, 1000)
+roundlots:100 200 300 500 1000
+roundlotweights:0.5 0.2 0.1 0.12 0.08
+
+/ lit venues and their shares of on-exchange volume (US equities, MIC codes);
+/ off-exchange prints go to the TRF at the config's offexchangeshare
+venues:([]venue:`XNAS`XNYS`ARCX`BATS`EDGX`IEXG;share:0.42 0.06 0.14 0.14 0.14 0.10)
+
 
 val.haskeys:{[cfg;reqkeys;fn]
   / check config dictionary has all required keys
@@ -295,6 +304,36 @@ qty.lognormal:{[n;cfg]
   `long$1|floor exp mu+qtyvol*eps
   };
 
+qty.mixture:{[n;cfg]
+  / a mixture of trade sizes as printed on a US tape: a share roundlotshare
+  / of round lots (100, 200, 300, 500, 1000 by roundlotweights), a share
+  / blockshare of blocks (lognormal, median blockqty, log-sd 0.5), and the
+  / rest irregular lots, lognormal with mean avgqty and log-sd qtyvol (mostly
+  / odd lots for a large cap)
+  / n: number of quantities
+  / cfg: config dict with `roundlotshare`blockshare`blockqty`avgqty`qtyvol`rngmodel
+  / returns: list of n long quantities (minimum 1)
+  u:n?1.0;
+  isround:u<cfg`roundlotshare;
+  isblock:(not isround)&u<cfg[`roundlotshare]+cfg`blockshare;
+  rq:roundlots (sums roundlotweights) binr n?1.0;
+  bq:`long$0.5+cfg[`blockqty]*exp 0.5*.z.m.rng.normal[n;cfg];
+  iq:.z.m.qty.lognormal[n;cfg];
+  1|?[isround;rq;?[isblock;bq;iq]]
+  };
+
+qty.mean:{[cfg]
+  / the expected trade size under the config's quantity model, the size
+  / an average trade's impact is scaled by
+  / cfg: config dict with `qtymodel and model-specific params
+  / returns: float
+  model:cfg`qtymodel;
+  $[model=`mixture;
+    [r:cfg`roundlotshare; b:cfg`blockshare;
+     ((1-r+b)*cfg`avgqty)+(r*sum roundlots*roundlotweights)+b*cfg[`blockqty]*exp 0.125];
+    `float$cfg`avgqty]
+  };
+
 qty.gen:{[n;cfg]
   / dispatch to appropriate quantity generator
   / n: number of quantities
@@ -303,6 +342,7 @@ qty.gen:{[n;cfg]
   model:cfg`qtymodel;
   $[model=`constant;  .z.m.qty.constant[n;cfg];
     model=`lognormal; .z.m.qty.lognormal[n;cfg];
+    model=`mixture;   .z.m.qty.mixture[n;cfg];
     '"qty.gen: unknown qtymodel - ",string model]
   };
 
@@ -388,7 +428,7 @@ flow.generate:{[cfg;n]
 flow.impact:{[cfg;tradetimes;flow;quotetimes]
   / the shift of the mid in force at each quote time from the signed trades
   / before it (a propagator): each trade moves the mid by impactticks ticks
-  / times sqrt(qty/avgqty) in its direction; a share impactpermanent of that
+  / times sqrt(qty/mean size) in its direction; a share impactpermanent of that
   / stays, the rest halves every impacthalflife seconds. With persistent
   / signs this gives the tape price impact and partial reversion after a
   / trade, what markout curves measure
@@ -399,7 +439,7 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
   / returns: float shift per quote time, in price units
   n:count tradetimes;
   if[(0=n) or 0=cfg`impactticks; :(count quotetimes)#0f];
-  imp:cfg[`impactticks]*cfg[`ticksize]*flow[`sign]*sqrt flow[`qty]%cfg`avgqty;
+  imp:cfg[`impactticks]*cfg[`ticksize]*flow[`sign]*sqrt flow[`qty]%.z.m.qty.mean cfg;
   lam:log[2]%cfg`impacthalflife;
   perm:cfg`impactpermanent;
   / transient part in force just after each trade, and the permanent part
@@ -415,12 +455,13 @@ trade.generate:{[cfg;times;quotes;flow]
   / takes the ask, a seller-initiated one the bid; a share of trades prints
   / at the midpoint and a share a tenth of a tick inside the touch (price
   / improvement)
-  / cfg: config dict with `midpointshare`improvementshare`ticksize
+  / cfg: config dict with `midpointshare`improvementshare`ticksize`offexchangeshare
   / times: trade timestamps, ascending, none before the first quote
   / quotes: quote table (see quote.generate)
   / flow: `sign`qty of the trades (see flow.generate)
-  / returns: trade table `time`price`qty`aggressor`cond, aggressor `B (buyer-
-  /   initiated) or `S, cond `R (regular); prices on the tenth-of-a-tick grid
+  / returns: trade table `time`price`qty`aggressor`cond`venue, aggressor `B
+  /   (buyer-initiated) or `S, cond `R (regular) or `I (odd lot, below 100),
+  /   venue a lit MIC code or `TRF; prices on the tenth-of-a-tick grid
   n:count times;
   idx:quotes[`time] bin times;
   bid:quotes[`bid] idx;
@@ -437,17 +478,30 @@ trade.generate:{[cfg;times;quotes;flow]
   grid:0.1*cfg`ticksize;
   price:grid*floor 0.5+price%grid;
 
-  ([]time:times;price:price;qty:flow`qty;aggressor:?[sign>0;`B;`S];cond:n#`R)
+  / venue: midpoint and improved prints are almost all off-exchange (dark
+  / pools, wholesalers reporting to the TRF); prints at the touch are split
+  / so that the day's off-exchange share is offexchangeshare; lit prints
+  / spread over the venues by share
+  inside:atmid|improved;
+  offinside:0.95;
+  offtouch:0f|(cfg[`offexchangeshare]-offinside*avg inside)%1-avg inside;
+  isoff:(n?1.0)<?[inside;offinside;offtouch];
+  lit:venues[`venue] (sums venues`share) binr n?1.0;
+  venue:?[isoff;`TRF;lit];
+
+  qty:flow`qty;
+  ([]time:times;price:price;qty:qty;aggressor:?[sign>0;`B;`S];cond:?[qty<100;`I;`R];venue:venue)
   };
 
 auction.prints:{[cfg;quotes;volume]
   / the opening and closing auction prints: at the first and last mid, for
   / openauctionpct and closeauctionpct of the continuous volume, cond `O and
   / `C, with no aggressor; a print of zero quantity is left out
-  / cfg: config dict with `openauctionpct`closeauctionpct`closingtime`ticksize
+  / cfg: config dict with `openauctionpct`closeauctionpct`closingtime`ticksize`primaryvenue
   / quotes: the day's quote table
   / volume: the day's continuous volume
-  / returns: trade table `time`price`qty`aggressor`cond, up to two rows
+  / returns: trade table `time`price`qty`aggressor`cond`venue, up to two rows,
+  /   venue the primary listing venue
   ts:cfg`ticksize;
   q0:first quotes;
   q1:last quotes;
@@ -455,7 +509,7 @@ auction.prints:{[cfg;quotes;volume]
   closet:(`date$opent)+`timespan$cfg`closingtime;
   mids:0.5*(q0[`bid]+q0`ask;q1[`bid]+q1`ask);
   t:([]time:(opent;closet);price:ts*floor 0.5+mids%ts;
-    qty:`long$0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C);
+    qty:`long$0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C;venue:2#cfg`primaryvenue);
   select from t where qty>0
   };
 
@@ -500,6 +554,12 @@ validate:{[cfg]
   if[0>=min .z.m.profile cfg; '"validate: profile weights must be positive"];
   / check base intensity
   if[0>=cfg`baseintensity; '"validate: baseintensity must be positive"];
+  / quantity mixture, venues
+  .z.m.val.haskeys[cfg;`roundlotshare`blockshare`blockqty`offexchangeshare`primaryvenue;"validate"];
+  if[not all cfg[`roundlotshare`blockshare`offexchangeshare] within 0 1;
+    '"validate: roundlotshare, blockshare and offexchangeshare must be between 0 and 1"];
+  if[1<cfg[`roundlotshare]+cfg`blockshare; '"validate: roundlotshare and blockshare must not exceed 1 together"];
+  if[0>=cfg`blockqty; '"validate: blockqty must be positive"];
   / auctions
   .z.m.val.haskeys[cfg;`openauctionpct`closeauctionpct;"validate"];
   if[0>min cfg`openauctionpct`closeauctionpct; '"validate: auction percentages must be zero or positive"];
@@ -554,7 +614,8 @@ run:{[cfg]
   / quote (see flow.impact); a jump seeds a burst on both clocks (see
   / hawkes.shock) and local activity widens the spread (see quote.activity).
   / The opening and closing auction prints frame the session (see
-  / auction.prints). Trades arrive on the trade clock and execute
+  / auction.prints), and one sequence number runs across quotes and
+  / trades in time order. Trades arrive on the trade clock and execute
   / against the quote in force (see trade.generate), so every trade sits
   / inside its prevailing quote and carries an aggressor side
   /
@@ -596,13 +657,19 @@ run:{[cfg]
   / trades against the quote in force
   trades:$[n;
     .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes;flow];
-    ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$();cond:`symbol$())];
+    ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$();cond:`symbol$();venue:`symbol$())];
 
   / the auction prints around the continuous session
   auctions:.z.m.auction.prints[cfg;quotes;sum trades`qty];
   trades:`time xasc trades,auctions;
 
-  addsym:{[s;t] update `p#sym from `sym`time xcols update sym:s from t};
+  / one sequence number across quotes and trades in time order, a quote
+  / before a trade at the same time (the quote is in force for the trade)
+  seq:1+rank (quotes`time),trades`time;
+  quotes:update seq:(count quotes)#seq from quotes;
+  trades:update seq:(count quotes)_seq from trades;
+
+  addsym:{[s;t] update `p#sym from `sym`time`seq xcols update sym:s from t};
   trades:addsym[cfg`sym;trades];
   $[cfg`generatequotes; `trade`quote!(trades;addsym[cfg`sym;quotes]); trades]
   };
@@ -634,9 +701,14 @@ schema[`beta]:("F";"Hawkes decay parameter (must be > alpha)")
 schema[`profile]:("*";"intraday intensity profile: space-separated positive weights, one per equal bin of the session (13 half hours), interpolated between bin midpoints")
 schema[`openauctionpct]:("F";"opening auction print as a fraction of the day's continuous volume (0 = none)")
 schema[`closeauctionpct]:("F";"closing auction print as a fraction of the day's continuous volume (0 = none)")
-schema[`qtymodel]:("S";"quantity model (`constant or `lognormal)")
-schema[`avgqty]:("J";"average trade quantity")
-schema[`qtyvol]:("F";"quantity volatility (for lognormal)")
+schema[`qtymodel]:("S";"quantity model (`constant, `lognormal or `mixture: round lots, blocks and irregular lots)")
+schema[`avgqty]:("J";"average trade quantity (of the irregular lots under `mixture)")
+schema[`qtyvol]:("F";"quantity log volatility (lognormal and the irregular lots of the mixture)")
+schema[`roundlotshare]:("F";"mixture: share of trades that are round lots (100, 200, 300, 500, 1000)")
+schema[`blockshare]:("F";"mixture: share of trades that are blocks")
+schema[`blockqty]:("J";"mixture: median block size")
+schema[`offexchangeshare]:("F";"share of trades printed off-exchange (venue TRF); midpoint and improved prints are almost all off-exchange")
+schema[`primaryvenue]:("S";"primary listing venue (MIC), where the auction prints are")
 schema[`generatequotes]:("B";"generate quotes flag")
 schema[`spreadticks]:("F";"mean bid-ask spread in ticks through the day, at least 1 (the spread is 1 tick plus a Poisson excess)")
 schema[`spreadopenmult]:("F";"spread multiplier at the open, decaying to the midday one")

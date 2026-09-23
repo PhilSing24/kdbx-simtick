@@ -27,6 +27,7 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 - **Microstructure** — quotes come first, on their own clock: the price path is the mid, the spread is a whole number of ticks (one most of the day, wider in the first minutes after the open), and trades execute against the quote in force. A buyer-initiated trade takes the ask and a seller-initiated one the bid, with a persistent aggressor side, a share of prints at the midpoint and a share with price improvement. Quote updates partly follow the trades, and quote sizes are lognormal round lots whose imbalance leans toward the next mid move. Trades carry an `aggressor` column, so effective spread, realized spread, Lee-Ready classification and markouts are all well defined.
 - **Order-flow impact** — a propagator: each signed trade moves the mid in its direction by `impactticks` ticks scaled by its size, a share `impactpermanent` of which stays while the rest halves every `impacthalflife` seconds. With persistent aggressor signs the tape shows price impact and partial reversion after a trade, what markout curves measure.
 - **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
+- **Tape attributes** — trade sizes as printed on a US tape (round lots, blocks and odd lots under `qtymodel:mixture`), a condition flag (`R` regular, `I` odd lot, `O` and `C` auction prints), a venue (lit MIC codes by share, or `TRF` for off-exchange prints, which is where midpoint and improved prints go), and one sequence number across quotes and trades. The quotes are one consolidated top of book, the NBBO; venues appear on trades only.
 
 ### Market Focus
 
@@ -158,11 +159,11 @@ q)simtick:use`di.simtick
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
 q)cfg:cfgs`nvda_default
 q)simtick.run[cfg]
-sym  time                          price  qty aggressor
--------------------------------------------------------
-NVDA 2026.08.18D09:30:00.041274736 215.02 74  B
-NVDA 2026.08.18D09:30:00.060939101 215    158 B
-NVDA 2026.08.18D09:30:00.085191564 214.98 309 S
+sym  time                          seq price   qty    aggressor cond venue
+--------------------------------------------------------------------------
+NVDA 2026.08.18D09:30:00.000000000 2   215     424347           O    XNAS
+NVDA 2026.08.18D09:30:00.100212953 7   215.011 7      S         I    TRF
+NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 ...
 ```
 
@@ -211,8 +212,13 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `clock` | `transaction` (variance per quote update: vol follows activity) or `calendar` (variance per second: flat vol) | `transaction` |
 | `jumpburst` | Extra trade immigrants seeded by each jump, each with its usual cascade | 3000 |
 | `jumpburstminutes` | Mean delay in minutes of those immigrants after the jump | 1.0 |
-| `qtymodel` | `lognormal` or `constant` | `lognormal` |
-| `avgqty` | Average trade size | 100 |
+| `qtymodel` | `mixture` (round lots, blocks, irregular lots), `lognormal` or `constant` | `mixture` |
+| `avgqty` | Average trade size (of the irregular lots under `mixture`) | 60 |
+| `roundlotshare` | Mixture: share of trades that are round lots of 100, 200, 300, 500 or 1000 | 0.35 |
+| `blockshare` | Mixture: share of trades that are blocks | 0.002 |
+| `blockqty` | Mixture: median block size | 10000 |
+| `offexchangeshare` | Share of trades printed off-exchange (`TRF`) | 0.42 |
+| `primaryvenue` | Primary listing venue, where the auction prints are | `XNAS` |
 | `seed` | Random seed (`0N` = no seed) | `42` |
 | `spreadticks` | Mean spread in ticks through the day (1 tick plus a Poisson excess) | 1.15 |
 | `spreadopenmult` | Spread multiplier at the open, decaying to the midday one | 2.5 |
@@ -247,13 +253,13 @@ q)k4unit.moduletest`di.simtick
 | Arrivals | 9 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9; 1-second counts overdispersed with excitation, Poisson without |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 17 | Correct schema with aggressor and cond, the opening and closing auction prints at the open and close with closeauctionpct of the continuous volume and no aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level realized vol matches the configured vol, hourly vol follows activity on the transaction clock and is flat on the calendar clock |
-| Quotes | 39 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without, a jump seeds a burst of trades, the burst widens the spread with activity coupling and not without, with flat profiles the spread tracks activity, per-second quote counts follow trade counts with the trade link and not without, sizes in round lots, the size imbalance leans toward the next mid move with the signal and not without |
+| Trades | 26 | Correct schema with aggressor, cond, venue and seq, round-lot, odd-lot and block shares, cond I on odd lots, venues in the MIC set with about offexchangeshare on the TRF and auctions on the primary venue, sequence ascending, the opening and closing auction prints at the open and close with closeauctionpct of the continuous volume and no aggressor, sorted times, positive prices/qty, integer qty, within session, prices on the tenth-of-a-tick grid, day-level realized vol matches the configured vol, hourly vol follows activity on the transaction clock and is flat on the calendar clock |
+| Quotes | 43 | Correct schema, sorted times, bid < ask, positive sizes, first quote at the open, every trade inside its prevailing quote, shares at the touch, midpoint and inside the touch match the config, buys at the ask and sells at the bid, aggressor signs persist, about quotespertrade quotes per trade, spread a whole number of ticks and at least one, one tick most of the time midday with a mean about spreadticks, wider in the first five minutes and no wider in the last five, bids and asks on the tick grid, signed 1-second markout positive with impact and zero without, a jump seeds a burst of trades, the burst widens the spread with activity coupling and not without, with flat profiles the spread tracks activity, per-second quote counts follow trade counts with the trade link and not without, sizes in round lots, seq ascending and one sequence across quotes and trades starting with the opening quote, midpoint prints off-exchange, the size imbalance leans toward the next mid move with the signal and not without |
 | Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **98** | |
+| **Total** | **110** | |
 
 ## Documentation
 

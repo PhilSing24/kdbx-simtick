@@ -48,7 +48,7 @@ q)calendar:simcalendar.loadcalendar[`:di/simcalendar/calendar.csv]
 / Run multi-day simulation (in-memory)
 q)trades:simcalendar.run[cfg;calendar;(::)]
 q)cols trades
-`sym`time`price`qty`aggressor`cond
+`sym`time`seq`price`qty`aggressor`cond`venue
 q)count trades
 180778
 ```

@@ -82,12 +82,21 @@ comment,0,0,q,,1,,=== Trades Tests ===
 before,0,0,q,cfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,trades:simtick.run[cfg],1,,Generate trades only
 true,0,0,q,98h=type trades,1,,Result is table
-true,0,0,q,`sym`time`price`qty`aggressor`cond~cols trades,1,,Trades has correct columns (aggressor: B buyer-initiated / S seller-initiated; cond: R regular / O opening auction / C closing auction)
+true,0,0,q,`sym`time`seq`price`qty`aggressor`cond`venue~cols trades,1,,Trades has correct columns (aggressor: B buyer-initiated / S seller-initiated; cond: R regular / I odd lot / O opening auction / C closing auction; venue: MIC or TRF)
+before,0,0,q,conttrades:select from trades where cond in `R`I,1,,Continuous trades
+true,0,0,q,(avg 0=conttrades[`qty] mod 100) within 0.3 0.5,1,,About roundlotshare of continuous trades are round lots (a few irregular lots land on a multiple of 100 too)
+true,0,0,q,(avg conttrades[`qty]<100) within 0.4 0.7,1,,Most of the rest are odd lots (irregular lots with mean avgqty)
+true,0,0,q,0<count select from conttrades where qty>=5000,1,,Some trades are blocks
+true,0,0,q,all (conttrades[`cond]=`I)=conttrades[`qty]<100,1,,cond I marks exactly the odd lots
+true,0,0,q,all trades[`venue] in `TRF`XNAS`XNYS`ARCX`BATS`EDGX`IEXG,1,,Venues are the lit MIC codes or TRF
+true,0,0,q,(avg `TRF=conttrades`venue) within 0.35 0.5,1,,About offexchangeshare of trades print off-exchange
+true,0,0,q,all cfg[`primaryvenue]=trades[`venue] where trades[`cond] in `O`C,1,,Auction prints are on the primary venue
+true,0,0,q,(asc trades`seq)~trades`seq,1,,Trade sequence numbers ascend with time
 true,0,0,q,(`O=(first trades)`cond)&(first trades[`time])=opentime,1,,The opening auction print is the first trade at the open
 true,0,0,q,(`C=(last trades)`cond)&(last trades[`time])=closetime,1,,The closing auction print is the last trade at the close
-true,0,0,q,1>=abs ((last trades)`qty)-cfg[`closeauctionpct]*exec sum qty from trades where cond=`R,1,,The closing print carries closeauctionpct of the continuous volume
+true,0,0,q,1>=abs ((last trades)`qty)-cfg[`closeauctionpct]*exec sum qty from trades where cond in `R`I,1,,The closing print carries closeauctionpct of the continuous volume
 true,0,0,q,all null trades[`aggressor] where trades[`cond] in `O`C,1,,Auction prints have no aggressor
-true,0,0,q,all `R=trades[`cond] where not null trades`aggressor,1,,Continuous trades are regular prints
+true,0,0,q,all (trades[`cond] where not null trades`aggressor) in `R`I,1,,Continuous trades are regular or odd-lot prints
 true,0,0,q,(asc trades`time)~trades`time,1,,Trades sorted by time
 true,0,0,q,all 0<trades`price,1,,All trade prices positive
 true,0,0,q,all 0<trades`qty,1,,All trade quantities positive
@@ -116,7 +125,10 @@ before,0,0,q,trades:result`trade,1,,Extract trades
 before,0,0,q,quotes:result`quote,1,,Extract quotes
 true,0,0,q,99h=type result,1,,Result with quotes is dict
 true,0,0,q,`trade`quote~key result,1,,Dict has trade and quote keys
-true,0,0,q,`sym`time`bid`ask`bidsize`asksize~cols quotes,1,,Quotes has correct columns
+true,0,0,q,`sym`time`seq`bid`ask`bidsize`asksize~cols quotes,1,,Quotes has correct columns
+true,0,0,q,(asc quotes`seq)~quotes`seq,1,,Quote sequence numbers ascend with time
+true,0,0,q,(count[quotes]+count trades)=count distinct raze (quotes`seq;trades`seq),1,,One sequence runs across quotes and trades without a gap or a repeat
+true,0,0,q,(1=first quotes`seq)&2=first trades`seq,1,,The opening quote is first in the sequence and the opening print second
 true,0,0,q,(asc quotes`time)~quotes`time,1,,Quotes sorted by time
 true,0,0,q,all quotes[`bid]<quotes`ask,1,,Bid < ask for all quotes
 true,0,0,q,all 0<quotes`bidsize,1,,All bid sizes positive
@@ -130,6 +142,7 @@ before,0,0,q,attouch:(1e-9>abs trades[`price]-pbid)|1e-9>abs trades[`price]-pask
 before,0,0,q,atmid:1e-9>abs trades[`price]-0.5*pbid+pask,1,,Trades printing at the midpoint
 true,0,0,q,(avg attouch) within 0.7 0.9,1,,About 80% of trades print at the touch (1 - midpointshare - improvementshare)
 true,0,0,q,(avg atmid) within 0.08 0.16,1,,About 12% of trades print at the midpoint (midpointshare)
+true,0,0,q,0.9<avg `TRF=trades[`venue] where atmid,1,,Midpoint prints are off-exchange
 true,0,0,q,(avg not attouch|atmid) within 0.04 0.12,1,,About 8% of trades print a tenth of a tick inside the touch (improvementshare)
 true,0,0,q,all 1e-9>abs (trades[`price]-pask) where attouch&trades[`aggressor]=`B,1,,Buyer-initiated trades at the touch print at the ask
 true,0,0,q,all 1e-9>abs (trades[`price]-pbid) where attouch&trades[`aggressor]=`S,1,,Seller-initiated trades at the touch print at the bid
@@ -213,7 +226,7 @@ comment,0,0,q,,1,,=== Config Tests ===
 true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
 true,0,0,q,`name~first cols cfgs,1,,First column is name
 true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,45=count cfgs`nvda_default,1,,Config has 45 parameters (excluding key)
+true,0,0,q,50=count cfgs`nvda_default,1,,Config has 50 parameters (excluding key)
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
@@ -229,14 +242,14 @@ comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
 true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,46=count schema,1,,Schema has 46 parameters
+true,0,0,q,51=count schema,1,,Schema has 51 parameters
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model
 before,0,0,q,constcfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,consttrades:simtick.run[constcfg],1,,Generate trades
-true,0,0,q,1=count distinct exec qty from consttrades where cond=`R,1,,All continuous quantities equal
-true,0,0,q,constcfg[`avgqty]=first exec qty from consttrades where cond=`R,1,,Continuous quantity equals avgqty
+true,0,0,q,1=count distinct exec qty from consttrades where cond in `R`I,1,,All continuous quantities equal
+true,0,0,q,constcfg[`avgqty]=first exec qty from consttrades where cond in `R`I,1,,Continuous quantity equals avgqty
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,seedcfg:cfg,1,,Setup seeded config
 before,0,0,q,seedcfg[`seed]:999,1,,Set seed
