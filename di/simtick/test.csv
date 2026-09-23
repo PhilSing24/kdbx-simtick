@@ -1,7 +1,11 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize module
-before,0,0,q,cfgs:simtick.loadconfig`:di/simtick/presets.csv,1,,Load presets
-before,0,0,q,cfg:cfgs`nvda_default,1,,Get default config
+before,0,0,q,f:simtick.files[],1,,The shipped layer files
+before,0,0,q,market:simtick.loadmarket f`market,1,,Load the market layer
+before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,,Load the instruments
+before,0,0,q,scenarios:simtick.loadscenarios f`scenarios,1,,Load the scenarios
+before,0,0,q,norun:(`symbol$())!(),1,,No run override: the market file defaults (date and seed)
+before,0,0,q,cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;norun],1,,Compose the NVDA normal day
 before,0,0,q,duration:23400,1,,Session duration in seconds (6.5 hours)
 comment,0,0,q,,1,,=== Validation Tests ===
 before,0,0,q,badcfg1:cfg,1,,Setup bad config for alpha >= beta
@@ -19,12 +23,12 @@ fail,0,0,q,simtick.run[badcfg4],1,,Zero vol throws error
 before,0,0,q,badcfg5:cfg,1,,Setup bad config for negative vol
 before,0,0,q,badcfg5[`vol]:-0.1,1,,Set negative vol
 fail,0,0,q,simtick.run[badcfg5],1,,Negative vol throws error
-before,0,0,q,badcfg6:cfg,1,,Setup bad config for zero startprice
-before,0,0,q,badcfg6[`startprice]:0.0,1,,Set zero startprice
-fail,0,0,q,simtick.run[badcfg6],1,,Zero startprice throws error
-before,0,0,q,badcfg7:cfg,1,,Setup bad config for negative startprice
-before,0,0,q,badcfg7[`startprice]:-1.0,1,,Set negative startprice
-fail,0,0,q,simtick.run[badcfg7],1,,Negative startprice throws error
+before,0,0,q,badcfg6:cfg,1,,Setup bad config for zero price
+before,0,0,q,badcfg6[`price]:0.0,1,,Set zero price
+fail,0,0,q,simtick.run[badcfg6],1,,Zero price throws error
+before,0,0,q,badcfg7:cfg,1,,Setup bad config for negative price
+before,0,0,q,badcfg7[`price]:-1.0,1,,Set negative price
+fail,0,0,q,simtick.run[badcfg7],1,,Negative price throws error
 before,0,0,q,badcfg8:cfg,1,,Setup bad config for impactpermanent above 1
 before,0,0,q,badcfg8[`impactpermanent]:1.5,1,,Set impactpermanent above 1
 fail,0,0,q,simtick.run[badcfg8],1,,impactpermanent above 1 throws error
@@ -67,13 +71,13 @@ before,0,0,q,times:1+til 100,1,,Setup times
 before,0,0,q,prices:simtick.price[cfg;times],1,,Generate prices
 true,0,0,q,(count times)=count prices,1,,Price count matches input
 true,0,0,q,all 0<prices,1,,All prices positive
-true,0,0,q,(abs cfg[`startprice]-first prices)<0.05*cfg`startprice,1,,First price close to startprice (small initial diffusion step)
+true,0,0,q,(abs cfg[`price]-first prices)<0.05*cfg`price,1,,First price close to price (small initial diffusion step)
 before,0,0,q,longtimes:1+til 10000,1,,Setup longer times for vol test
 before,0,0,q,longprices:simtick.price[cfg;longtimes],1,,Generate more prices
 before,0,0,q,logreturns:1_log longprices%prev longprices,1,,Calculate log returns
 before,0,0,q,realizedvol:(dev logreturns)*sqrt 252*9999,1,,Annualize realized vol (transaction clock: the 9999 steps share one trading day's variance)
 true,0,0,q,realizedvol within 0.1 0.8,1,,Realized vol within tolerance of input vol
-before,0,0,q,jumpcfg:cfgs`nvda_jumpy,1,,Get jump config
+before,0,0,q,jumpcfg:simtick.compose[market;instruments`NVDA;scenarios`jumpy;norun],1,,Compose the NVDA jumpy day
 before,0,0,q,jumpcfg[`seed]:42,1,,Set seed
 before,0,0,q,jumpprices:simtick.price[jumpcfg;times],1,,Generate jump prices
 true,0,0,q,(count times)=count jumpprices,1,,Jump model returns correct count
@@ -108,7 +112,7 @@ true,0,0,q,all trades[`time]<=closetime,1,,All trades at or before close
 before,0,0,q,minbars:select last price by 1 xbar time.minute from trades,1,,One-minute bars of the run
 true,0,0,q,((dev 1_log p%prev p:exec price from minbars)*sqrt 252*390) within 0.75 1.25*cfg`vol,1,,Day-level realized vol from 1-minute bars within 25% of the configured vol
 before,0,0,q,hourvol:exec (dev 1_log price%prev price)*sqrt 252*390 by minute.hh from minbars,1,,Realized vol by hour
-true,0,0,q,(hourvol[15]%hourvol 11)>1.3,1,,Transaction clock: realized vol follows activity (the last hour trades several times more than 11:00 and is more volatile)
+true,0,0,q,((hourvol[9]+hourvol 15)%hourvol[11]+hourvol 12)>1.15,1,,Transaction clock: realized vol follows activity (the open and the last hour trade about twice as much as midday and are more volatile)
 before,0,0,q,calcfg:cfg,1,,Setup calendar-clock config
 before,0,0,q,calcfg[`clock]:`calendar,1,,Variance per second instead of per quote update
 before,0,0,q,caltrades:simtick.run[calcfg],1,,Trades on the calendar clock
@@ -163,7 +167,7 @@ before,0,0,q,nisigns:1-2*nitrades[`aggressor]=`S,1,,Its aggressor signs
 before,0,0,q,nimid0:(aj[`time;select time from nitrades;niqmid])`mid,1,,Mid in force at each trade without impact
 before,0,0,q,nimid1:(aj[`time;update time:time+0D00:00:01 from select time from nitrades;niqmid])`mid,1,,Mid one second later without impact
 true,0,0,q,(abs avg nisigns*nimid1-nimid0)<0.1*cfg`ticksize,1,,Without impact the signed 1-second markout is zero
-before,0,0,q,burstcfg:cfgs`nvda_jumpy,1,,Setup jump config for burst tests
+before,0,0,q,burstcfg:jumpcfg,1,,Setup jump config for burst tests
 before,0,0,q,burstcfg[`jumpvol]:0.05,1,,Large jumps so the jump minutes stand out
 before,0,0,q,burstcfg[`jumpintensity]:5.0,1,,Several jumps a day
 before,0,0,q,burstcfg[`seed]:7,1,,Fixed seed
@@ -223,26 +227,81 @@ true,0,0,q,(avg spreadticks where quotes[`time]>closetime-0D00:05)<=avg spreadti
 true,0,0,q,all 1e-6>abs (quotes[`bid]%cfg`ticksize)-floor 0.5+quotes[`bid]%cfg`ticksize,1,,Bids sit on the tick grid
 true,0,0,q,all 1e-6>abs (quotes[`ask]%cfg`ticksize)-floor 0.5+quotes[`ask]%cfg`ticksize,1,,Asks sit on the tick grid
 comment,0,0,q,,1,,=== Config Tests ===
-true,0,0,q,99h=type cfgs,1,,loadconfig returns keyed table
-true,0,0,q,`name~first cols cfgs,1,,First column is name
-true,0,0,q,99h=type cfgs`nvda_default,1,,Preset lookup returns dict
-true,0,0,q,50=count cfgs`nvda_default,1,,Config has 50 parameters (excluding key)
+true,0,0,q,99h=type instruments,1,,loadinstruments returns a keyed table
+true,0,0,q,`NVDA`XOM`PG~exec sym from instruments,1,,The three instruments load
+true,0,0,q,`normal`volatile`jumpy~exec name from scenarios,1,,The three scenarios load
+true,0,0,q,99h=type cfg,1,,compose returns a dictionary
+true,0,0,q,(count cfg)=count simtick.schema,1,,The composed config holds every schema key
+true,0,0,q,`NVDA=cfg`sym,1,,sym comes from the instrument row
+true,0,0,q,215f=cfg`price,1,,price comes from the instrument row
 true,0,0,q,-9h=type cfg`vol,1,,vol is float
 true,0,0,q,-11h=type cfg`pricemodel,1,,pricemodel is symbol
 true,0,0,q,-14h=type cfg`tradingdate,1,,tradingdate is date
-before,0,0,q,fullcfgs:0!simtick.loadconfig`:di/simtick/presets.csv,1,,Presets as a plain table
-before,0,0,q,`:/tmp/simtick_reordered.csv 0: csv 0: (reverse cols fullcfgs) xcols fullcfgs,1,,Presets written with the columns in reverse order
-true,0,0,q,(simtick.loadconfig`:/tmp/simtick_reordered.csv)~simtick.loadconfig`:di/simtick/presets.csv,1,,Columns in any order load to the same presets
-before,0,0,q,`:/tmp/simtick_missing.csv 0: csv 0: delete vol from fullcfgs,1,,Presets written without the vol column
-fail,0,0,q,simtick.loadconfig`:/tmp/simtick_missing.csv,1,,A missing column throws error instead of parsing values into the wrong types
-before,0,0,q,`:/tmp/simtick_unknown.csv 0: csv 0: update foo:1 from fullcfgs,1,,Presets written with an extra column
-fail,0,0,q,simtick.loadconfig`:/tmp/simtick_unknown.csv,1,,An unknown column throws error
-after,0,0,q,system"rm -f /tmp/simtick_reordered.csv /tmp/simtick_missing.csv /tmp/simtick_unknown.csv",1,,Clean up preset files
+true,0,0,q,-17h=type cfg`openingtime,1,,openingtime is minute
+true,0,0,q,11h=type cfg`venues,1,,venues is a symbol list
+true,0,0,q,7h=type cfg`roundlots,1,,roundlots is a long list
+true,0,0,q,9h=type cfg`activityclip,1,,activityclip is a float list
+true,0,0,q,2026.08.18=cfg`tradingdate,1,,The date is the market file run default
+true,0,0,q,42=cfg`seed,1,,The seed is the market file run default
+before,0,0,q,fivecfg:simtick.compose[market;`sym`price`drift`vol`tradesperday!(`ACME;100.0;0.05;0.3;100000);scenarios`normal;norun],1,,A five-value instrument composes
+true,0,0,q,`ACME=fivecfg`sym,1,,The five-value instrument keeps its sym
+true,0,0,q,fivecfg[`spreadticks]=market`spreadticks,1,,Its spread is the market one
+before,0,0,q,xomcfg:simtick.compose[market;instruments`XOM;scenarios`normal;norun],1,,Compose XOM
+true,0,0,q,1.2=xomcfg`spreadticks,1,,An instrument row overrides a market key
+true,0,0,q,`XNYS=xomcfg`primaryvenue,1,,XOM lists on NYSE
+before,0,0,q,volcfg:simtick.compose[market;instruments`NVDA;scenarios`volatile;norun],1,,Compose NVDA volatile
+true,0,0,q,1e-9>abs volcfg[`vol]-0.45*1.45,1,,The scenario multiplies the instrument vol
+true,0,0,q,650000=volcfg`tradesperday,1,,The scenario multiplies tradesperday
+true,0,0,q,1e-9>abs volcfg[`spreadticks]-1.15*1.3,1,,The scenario multiplies the spread
+true,0,0,q,1 1 1f~volcfg`volmult`volumemult`spreadmult,1,,The multipliers are 1 once applied
+true,0,0,q,7=simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 7]`seed,1,,A run override replaces the default seed
+before,0,0,q,badsce:scenarios`normal,1,,A scenario with a spread multiplier below the tick
+before,0,0,q,badsce[`spreadmult]:0.5,1,,Set spreadmult to a half
+fail,0,0,q,simtick.compose[market;instruments`NVDA;badsce;norun],1,,A spread below one tick after spreadmult throws error
+fail,0,0,q,simtick.compose[delete ticksize from market;instruments`NVDA;scenarios`normal;norun],1,,A missing key throws error naming its layer
+fail,0,0,q,simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `foo)!enlist 1],1,,An unknown key throws error
+fail,0,0,q,simtick.compose[market;`sym`price`drift`vol!(`ACME;100.0;0.05;0.3);scenarios`normal;norun],1,,An instrument without tradesperday throws error
+before,0,0,q,`:/tmp/simtick_noname.csv 0: csv 0: delete sym from 0!instruments,1,,Instruments written without the sym column
+fail,0,0,q,simtick.loadinstruments`:/tmp/simtick_noname.csv,1,,An instrument file without sym throws error
+before,0,0,q,`:/tmp/simtick_unknown.csv 0: csv 0: update foo:1 from 0!instruments,1,,Instruments written with an extra column
+fail,0,0,q,simtick.loadinstruments`:/tmp/simtick_unknown.csv,1,,An unknown column throws error
+comment,0,0,q,,1,,=== Derivation Tests ===
+before,0,0,q,smallins:`sym`price`drift`vol`tradesperday!(`SML;50.0;0.05;0.3;20000),1,,A small instrument for the count checks
+before,0,0,q,smallcfg:simtick.compose[market;smallins;scenarios`normal;(enlist `generatequotes)!enlist 0b],1,,Compose it without jumps
+before,0,0,q,contcount:{[c;s] c[`seed]:s; count select from simtick.run[c] where cond in `R`I},1,,Continuous trades of one seeded run
+before,0,0,q,meancount:avg contcount[smallcfg] each 1+til 20,1,,Mean continuous trade count over twenty seeds
+true,0,0,q,(abs meancount-20000)<0.02*20000,1,,The derived intensity gives tradesperday trades within 2%
+before,0,0,q,jumpins:smallins,1,,The same instrument with smaller jump bursts
+before,0,0,q,jumpins[`jumpburst]:300,1,,Three hundred immigrants per jump
+before,0,0,q,jsmallcfg:simtick.compose[market;jumpins;scenarios`jumpy;(enlist `generatequotes)!enlist 0b],1,,Compose it with jumps
+true,0,0,q,jsmallcfg[`baseintensity]<smallcfg`baseintensity,1,,The expected burst trades are taken out of the base intensity
+before,0,0,q,jumpmean:avg contcount[jsmallcfg] each 1+til 20,1,,Mean continuous trade count with jumps
+true,0,0,q,(abs jumpmean-20000)<0.02*20000,1,,With jumps the count is still tradesperday within 2%
+before,0,0,q,burstins:smallins,1,,An instrument whose bursts exceed its trades
+before,0,0,q,burstins[`tradesperday]:5000,1,,Fewer trades than the default bursts would add
+fail,0,0,q,simtick.compose[market;burstins;scenarios`jumpy;norun],1,,Expected burst trades above tradesperday throw error
+true,0,0,q,1e-9>abs cfg[`baseintensity]-simtick.intensityfor cfg,1,,intensityfor recomputes the composed base intensity
+comment,0,0,q,,1,,=== Quick and Saved Config Tests ===
+true,0,0,q,result~simtick.quick[`NVDA;215.0;0.08;0.45;500000],1,,quick equals compose and run on the shipped files
+true,0,0,q,not result~simtick.quickwith[`NVDA;215.0;0.08;0.45;500000;(enlist `seed)!enlist 7],1,,quickwith takes a run override
+before,0,0,q,simtick.saveconfig[`:/tmp/simtick_saved.json;cfg],1,,Save the composed config
+before,0,0,q,saved:simtick.loadconfig`:/tmp/simtick_saved.json,1,,Load it back
+true,0,0,q,saved~cfg,1,,A saved config reloads unchanged
+true,0,0,q,result~simtick.run saved,1,,A saved config replays the run
+before,0,0,q,simtick.saveconfig[`:/tmp/simtick_nobase.json;(key[cfg] except `baseintensity)#cfg],1,,Save it without baseintensity
+true,0,0,q,1e-9>abs cfg[`baseintensity]-(simtick.loadconfig`:/tmp/simtick_nobase.json)`baseintensity,1,,loadconfig derives baseintensity from tradesperday
+before,0,0,q,editcfg:cfg,1,,A saved config whose tradesperday was edited by hand
+before,0,0,q,editcfg[`tradesperday]:600000,1,,Change tradesperday without baseintensity
+before,0,0,q,simtick.saveconfig[`:/tmp/simtick_edited.json;editcfg],1,,Save it
+fail,0,0,q,simtick.loadconfig`:/tmp/simtick_edited.json,1,,A baseintensity that disagrees with tradesperday throws error
+after,0,0,q,system"rm -f /tmp/simtick_noname.csv /tmp/simtick_unknown.csv /tmp/simtick_saved.json /tmp/simtick_nobase.json /tmp/simtick_edited.json",1,,Clean up config files
 comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
-true,0,0,q,`param`typ`description~cols schema,1,,describe has correct columns
-true,0,0,q,51=count schema,1,,Schema has 51 parameters
+true,0,0,q,`param`typ`layer`group`description~cols schema,1,,describe has correct columns
+true,0,0,q,(count schema)=count simtick.schema,1,,describe lists every parameter
+true,0,0,q,`sym`price`drift`vol`tradesperday~5#exec param from schema,1,,The essential five come first
+true,0,0,q,all `essential=5#exec layer from schema,1,,and are the essential layer
 comment,0,0,q,,1,,=== Constant Qty Tests ===
 before,0,0,q,constcfg:cfg,1,,Setup constant qty config
 before,0,0,q,constcfg[`qtymodel]:`constant,1,,Set constant model

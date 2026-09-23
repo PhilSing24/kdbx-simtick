@@ -29,7 +29,7 @@ You can start simple and add realism one step at a time:
 
 ### Market focus
 
-The presets are calibrated for **US large-cap stocks** (NVDA on NASDAQ, XOM and PG on NYSE):
+The shipped market file and instruments are calibrated for **US large-cap stocks** (NVDA on NASDAQ, XOM and PG on NYSE):
 
 - Busy open and close, quiet midday, with opening and closing auctions
 - Spreads widest just after the open, one tick most of the day, slightly tighter at the close
@@ -39,11 +39,11 @@ The presets are calibrated for **US large-cap stocks** (NVDA on NASDAQ, XOM and 
 
 ### Use cases
 
-**Stress testing and scenarios**: generate severe but plausible days. Lower `baseintensity` for a liquidity drought, use `pricemodel` `jump` for gap moves, or raise `vol` for turbulent markets, and see how your systems behave.
+**Stress testing and scenarios**: generate severe but plausible days. Lower `tradesperday` for a liquidity drought, use `pricemodel` `jump` for gap moves, or raise `vol` for turbulent markets, and see how your systems behave.
 
 **Sensitivity testing**: vary one parameter at a time to see how a strategy or analysis responds to volatility, trading rate or spreads.
 
-**System development**: load-test data pipelines by raising the trading rate, for example `baseintensity` from 8.25 to 50 with a higher `alpha` for intense bursts, and check that databases, queues and processing keep up.
+**System development**: load-test data pipelines by raising the trading rate, for example `tradesperday` from 500,000 to 3,000,000 with a higher `alpha` for intense bursts, and check that databases, queues and processing keep up.
 
 **Demos and training**: feed dashboards, visualizations or trading screens without connecting to a live market.
 
@@ -51,7 +51,7 @@ The presets are calibrated for **US large-cap stocks** (NVDA on NASDAQ, XOM and 
 
 - **Best bid and offer only**: there is no order book depth and no queue beyond the displayed size at the best prices.
 - **One-way link between quotes and trades**: trades trigger quote updates, but quotes do not trigger trades.
-- **Quotes per trade**: the presets use 4 to keep the data small; real large caps show 10 to 30 (`quotespertrade`).
+- **Quotes per trade**: the shipped market uses 4 to keep the data small; real large caps show 10 to 30 (`quotespertrade`).
 - **Instruments are independent**: running several instruments gives separate days that do not move together.
 - **Quote sizes lean toward the next price move**: this reproduces a real regularity, but the model uses the known next move to do it, so the signal is cleaner than in real data. Keep it in mind before training predictive models on the output.
 - **Price improvement**: trades slightly inside the spread sit on a tenth of a tick, and a small share of them are assigned to lit exchanges, where real prices would be on the tick or at the midpoint.
@@ -88,13 +88,11 @@ q)simtick:use`di.simtick
 
 ## Usage
 
-The shipped presets return trades and quotes together:
+The simplest run takes the five values that describe a stock: its ticker, price, annual drift, annual volatility and trades per day. Everything else comes from the shipped market file:
 
 ```q
 q)simtick:use`di.simtick
-q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
-q)cfg:cfgs`nvda_default
-q)result:simtick.run cfg
+q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000]
 q)result`trade
 sym  time                          seq price   qty    aggressor cond venue
 --------------------------------------------------------------------------
@@ -105,7 +103,20 @@ NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 q)result`quote
 ```
 
-For trades only, turn quotes off before running:
+`quick` is reproducible: the date and the seed are the run defaults of the market file. `quickwith` takes a sixth argument with any run override, for example `` (enlist `seed)!enlist 7 `` or `` `tradingdate`generatequotes!(2026.09.01;0b) ``.
+
+For anything beyond that, compose a configuration from the four layers and run it:
+
+```q
+q)f:simtick.files[]                         / the shipped market, instruments and scenarios
+q)market:simtick.loadmarket f`market
+q)instruments:simtick.loadinstruments f`instruments
+q)scenarios:simtick.loadscenarios f`scenarios
+q)cfg:simtick.compose[market;instruments`XOM;scenarios`volatile;(enlist `seed)!enlist 7]
+q)result:simtick.run cfg
+```
+
+For trades only, turn quotes off in the run layer, or on the composed configuration before running:
 
 ```q
 q)cfg[`generatequotes]:0b
@@ -118,120 +129,40 @@ The first trade is the opening auction (`cond` `O`), which has no aggressor.
 
 | Function | Description |
 |----------|-------------|
+| `simtick.quick[sym;price;drift;vol;tradesperday]` | One day of one stock from its five essential values, on the shipped market and the normal scenario |
+| `simtick.quickwith[sym;price;drift;vol;tradesperday;run]` | The same with a run override (date, seed, quotes) |
+| `simtick.compose[market;instrument;scenario;run]` | The flat configuration of a run from the four layers, with the scenario multipliers applied and `baseintensity` derived |
 | `simtick.run[cfg]` | Full simulation: a dictionary with `trade` and `quote` when `generatequotes` is 1, otherwise the trade table |
 | `simtick.arrivals[cfg]` | Trade arrival times only, in seconds from the open |
 | `simtick.price[cfg;times]` | Prices at the given times |
-| `simtick.loadconfig[filepath]` | Load presets from a CSV file |
-| `simtick.describe[]` | All configuration parameters, with their types and descriptions |
+| `simtick.files[]` | The paths of the shipped market, instrument and scenario files |
+| `simtick.loadmarket[filepath]` | A market file (JSON) as a flat dictionary |
+| `simtick.loadinstruments[filepath]` | An instrument file (CSV) as a table keyed by `sym` |
+| `simtick.loadscenarios[filepath]` | A scenario file (CSV) as a table keyed by `name` |
+| `simtick.saveconfig[filepath;cfg]` | Write a composed configuration to a JSON file |
+| `simtick.loadconfig[filepath]` | Read it back; `baseintensity` is checked against `tradesperday` |
+| `simtick.intensityfor[cfg]` | The base intensity that gives `tradesperday` trades under the configuration |
+| `simtick.describe[]` | Every parameter with its type, layer, group and description |
 
 ## Configuration
 
-A run is driven by a configuration dictionary holding every parameter. Rather than building it by hand, load it from a CSV file.
+A run is driven by a flat dictionary holding every parameter, which `compose` builds from four layers so that nobody has to look at seventy keys to simulate a stock:
 
-`presets.csv` contains three scenarios for each of NVDA, XOM and PG, named `<sym>_<scenario>`:
+| Layer | What it holds | Shipped as |
+|-------|---------------|------------|
+| market | How a market works: session times, tick size, arrival clustering and intraday profile, sizes, spreads, venues and their shares, impact. Also the run defaults (date, seed, quotes) | `di/simconfig/markets/us_largecap.json`, grouped by topic |
+| instrument | What makes a stock itself: `sym`, `price`, `drift`, `vol`, `tradesperday`, and any market key it overrides (XOM and PG override `spreadticks` and `primaryvenue`) | `di/simconfig/instruments.csv`, one row per stock |
+| scenario | What makes a day type: multipliers of vol, trades per day and spread, the jump model, and the day-to-day regime keys read by `di.simcalendar` | `di/simconfig/scenarios.csv`: `normal`, `volatile`, `jumpy` |
+| run | What changes between two runs of the same stock: `tradingdate`, `seed`, `generatequotes` | a dictionary, empty for the market defaults |
 
-| Preset | Description |
-|--------|-------------|
-| `nvda_default`, `xom_default`, `pg_default` | A normal trading day |
-| `nvda_volatile`, `xom_volatile`, `pg_volatile` | Higher volatility and stronger clustering (earnings, macro events) |
-| `nvda_jumpy`, `xom_jumpy`, `pg_jumpy` | Sudden price jumps (news, guidance), each followed by a burst of trading |
+The layers are composed in that order, a later one overriding an earlier one. `compose` is strict: every value is cast to the type of the schema, an unknown key throws, and a missing key throws naming the layer that should supply it. There are no silent defaults. The scenario multipliers are applied once and then set to 1, so a saved configuration is not multiplied again.
 
-The three stocks differ in trading rate (`baseintensity`), price, spread and listing venue. They currently share the same volatility.
+`baseintensity`, the immigrant rate of the Hawkes process, is derived from `tradesperday`: the trades the jump bursts are expected to add are taken out, the cascades (a share `alpha/beta` of all trades) are taken out, and the rest is spread over the session at the average level of the intraday profile. `loadconfig` recomputes it, so a hand-edited `tradesperday` in a saved file is honoured and a `baseintensity` that disagrees with it throws.
 
-Every parameter is a column of the file, so a preset describes a run completely. `loadconfig` checks the header against the schema: columns can be in any order, and a missing, unknown or repeated column raises an error instead of loading values into the wrong types. You can:
+To edit the layers, add a row to the instrument or scenario file, copy the market file for another market, or pass your own dictionaries: `compose` takes any dictionary for the instrument, so `` `sym`price`drift`vol`tradesperday!(`ACME;100.0;0.05;0.3;100000) `` is a complete instrument. The loaders take any path.
 
-- Use a preset directly: `` cfg:cfgs`nvda_default ``
-- Change a value for one run: `` cfg[`vol]:0.65 ``
-- Add rows to the file for your own scenarios
-- Write your own CSV with the same columns
+Every parameter, with its type, layer, group and description, is listed in [docs/parameters.md](docs/parameters.md), generated from `simtick.describe[]`. The shared loading and composition code is in `di.simconfig`.
 
-To list every parameter with its description:
-
-```q
-q)simtick.describe[]
-```
-
-## Configuration parameters
-
-All parameters, with the values of the `nvda_default` preset.
-
-**Session**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `sym` | Ticker symbol | `` `NVDA `` |
-| `tradingdate` | Date to simulate | 2026.08.18 |
-| `openingtime`, `closingtime` | Session open and close | 09:30, 16:00 |
-| `startprice` | Price at the open | 215.00 |
-| `seed` | Random seed (`0N` for none) | 42 |
-| `rngmodel` | Random number generator | `pseudo` |
-| `tradingdays` | Trading days per year, used to annualize `vol` and `drift` | 252 |
-
-**Price**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `drift` | Annual drift | 0.05 |
-| `vol` | Annual volatility | 0.45 |
-| `pricemodel` | `gbm` (continuous) or `jump` (with sudden jumps) | `gbm` |
-| `jumpintensity` | Jump model: average number of jumps per day | 2.0 |
-| `jumpmean`, `jumpvol` | Jump model: mean and standard deviation of the log jump size | 0.0, 0.02 |
-| `jumpburst` | Extra trades started by each jump; each can trigger follow-up trades, so the burst grows larger | 3000 |
-| `jumpburstminutes` | Average delay, in minutes, of those extra trades after the jump | 1.0 |
-| `clock` | `transaction`: volatility follows trading activity (U-shaped, higher in bursts); `calendar`: constant through the day | `transaction` |
-
-**Trade arrivals**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `baseintensity` | Base trading rate in trades per second, before the intraday profile and the follow-up trades | 8.25 |
-| `alpha` | How strongly each trade triggers more trades (0 = no clustering) | 0.3 |
-| `beta` | How fast that effect fades (must be greater than `alpha`) | 1.0 |
-| `profile` | Intraday activity weights, one per half hour, space-separated in the CSV | `1.6 1.2 1.0 ... 1.8` |
-| `openauctionpct` | Opening auction size as a share of the day's continuous volume | 0.01 |
-| `closeauctionpct` | Closing auction size as a share of the day's continuous volume | 0.08 |
-
-**Trade sizes**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `qtymodel` | `mixture` (round lots, odd lots and blocks), `lognormal` or `constant` | `mixture` |
-| `avgqty` | Average size of the odd lots (or of all trades under `lognormal` and `constant`) | 60 |
-| `qtyvol` | Spread of those sizes (log standard deviation) | 0.9 |
-| `roundlotshare` | Share of trades that are round lots of 100, 200, 300, 500 or 1000 shares | 0.35 |
-| `blockshare` | Share of trades that are blocks | 0.002 |
-| `blockqty` | Median block size | 10000 |
-
-**Quotes**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `generatequotes` | Return the quotes as well as the trades | 1b |
-| `ticksize` | Minimum price increment | 0.01 |
-| `spreadticks` | Average spread in ticks | 1.15 |
-| `spreadopenmult` | Spread multiplier at the open | 2.5 |
-| `spreadmidmult` | Spread multiplier through the day | 1.0 |
-| `spreadclosemult` | Spread multiplier at the close | 0.9 |
-| `spreaddecayminutes` | Minutes for the open and close effects to fade | 15 |
-| `spreadactivity` | How much busy periods widen the spread (0 = not at all) | 0.5 |
-| `quotespertrade` | Average number of quote updates per trade | 4 |
-| `quotetradelink` | Share of quote updates triggered by trades | 0.5 |
-| `avgquotesize` | Average size at the bid and at the ask, in shares | 500 |
-| `quotesizevol` | Spread of the quote sizes (log standard deviation), in round lots of 100 | 0.6 |
-| `imbalancesignal` | How much bid and ask sizes lean toward the next price move (0 = not at all) | 0.15 |
-
-**Trades against the quotes**
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `sidepersistence` | Probability that a trade has the same side (buy or sell) as the previous one (0.5 = independent) | 0.7 |
-| `midpointshare` | Share of trades at the midpoint | 0.12 |
-| `improvementshare` | Share of trades a tenth of a tick inside the bid or ask | 0.08 |
-| `offexchangeshare` | Share of trades reported off-exchange (`TRF`) | 0.42 |
-| `primaryvenue` | Listing exchange, where the auctions take place | `XNAS` |
-| `impactticks` | Ticks an average-size trade moves the price in its direction, scaled by the square root of its relative size (0 = no impact) | 0.25 |
-| `impacthalflife` | Seconds for the fading part of a trade's impact to halve | 30 |
-| `impactpermanent` | Share of a trade's impact that never fades | 0.3 |
 
 ## Testing
 
@@ -252,17 +183,19 @@ q)k4unit.moduletest`di.simtick
 
 | Group | Tests | What is checked |
 |-------|-------|-----------------|
-| Validation | 9 | Invalid configurations raise the right error |
+| Validation | 8 | Invalid configurations raise the right error |
 | Arrivals | 9 | Arrival times are sorted and within the session; counts match the theoretical Hawkes average; trades cluster with `alpha` above 0 and not without |
 | Shape | 3 | The intraday pattern: busier at the open and close than at midday |
-| Price | 6 | Prices positive, start at `startprice`, volatility within tolerance, jump model works |
+| Price | 6 | Prices positive, start at `price`, volatility within tolerance, jump model works |
 | Trades | 26 | Columns and types, trade sizes, condition codes, venues and off-exchange share, auctions, sequence numbers, prices on the grid, volatility over the day and by hour |
-| Quotes | 43 | Every trade within its quote, buys at the ask and sells at the bid, side persistence, quotes per trade, spreads in whole ticks and their pattern through the day, market impact, bursts after jumps, quote updates following trades, quote sizes and their lean toward the next move |
-| Config | 10 | CSV loading: types, columns in any order, missing or unknown columns rejected |
-| Describe | 3 | The parameter list |
+| Quotes | 42 | Every trade within its quote, buys at the ask and sells at the bid, side persistence, quotes per trade, spreads in whole ticks and their pattern through the day, market impact, bursts after jumps, quote updates following trades, quote sizes and their lean toward the next move |
+| Config | 31 | The layers load and compose: types, instrument overrides, scenario multipliers applied once, run overrides, missing and unknown keys rejected, a spread below one tick rejected |
+| Derivation | 5 | `baseintensity` from `tradesperday`: the mean trade count over twenty seeds within 2%, with and without jumps; bursts beyond `tradesperday` rejected |
+| Quick and saved | 6 | `quick` equals compose and run; a saved configuration reloads unchanged and replays; `baseintensity` derived or checked on reload |
+| Describe | 5 | The parameter list, the essential five first |
 | Constant quantity | 2 | All sizes equal `avgqty` |
 | Reproducibility | 1 | The same seed gives the same output |
-| **Total** | **110** | |
+| **Total** | **144** | |
 
 ## Documentation
 
@@ -274,9 +207,13 @@ The `docs/` folder contains:
 ## Project structure
 
 ```
+di/simconfig/
+├── init.q           # layered configuration shared by the modules
+├── markets/us_largecap.json
+├── instruments.csv
+└── scenarios.csv
 di/simtick/
 ├── init.q           # module code
-├── presets.csv      # market scenario presets
 ├── test.csv         # unit tests (k4unit format)
 ├── testing.q        # manual test script
 ├── README.md        # this file

@@ -1,0 +1,31 @@
+{
+  "session": {
+    "openingtime": "09:30", "closingtime": "16:00", "tradingdays": 252, "rngmodel": "pseudo",
+    "ticksize": 0.01, "printgrid": 0.1, "clock": "transaction"
+  },
+  "arrivals": {
+    "alpha": 0.3, "beta": 1.0,
+    "profile": [1.6, 1.2, 1.0, 0.85, 0.75, 0.7, 0.65, 0.7, 0.75, 0.85, 1.0, 1.2, 1.8],
+    "jumpburst": 3000, "jumpburstminutes": 1.0,
+    "quotespertrade": 4, "quotetradelink": 0.5
+  },
+  "auctions": { "openauctionpct": 0.01, "closeauctionpct": 0.08 },
+  "sizes": {
+    "qtymodel": "mixture", "avgqty": 60, "qtyvol": 0.9,
+    "roundlotshare": 0.35, "roundlots": [100, 200, 300, 500, 1000], "roundlotweights": [0.5, 0.2, 0.1, 0.12, 0.08],
+    "blockshare": 0.002, "blockqty": 10000, "blockqtyvol": 0.5
+  },
+  "quotes": {
+    "spreadticks": 1.15, "spreadopenmult": 2.5, "spreadmidmult": 1.0, "spreadclosemult": 0.9, "spreaddecayminutes": 15,
+    "spreadactivity": 0.5, "activitywindowseconds": 60, "activityclip": [0.25, 4],
+    "avgquotesize": 500, "quotesizevol": 0.6, "quotelot": 100, "imbalancesignal": 0.15
+  },
+  "trades": {
+    "sidepersistence": 0.7, "midpointshare": 0.12, "improvementshare": 0.08, "improvementtick": 0.1,
+    "offexchangeshare": 0.42, "offexchangeinside": 0.95,
+    "venues": ["XNAS", "XNYS", "ARCX", "BATS", "EDGX", "IEXG"], "venueshares": [0.42, 0.06, 0.14, 0.14, 0.14, 0.10],
+    "primaryvenue": "XNAS"
+  },
+  "impact": { "impactticks": 0.25, "impacthalflifeseconds": 30, "impactpermanent": 0.3 },
+  "run": { "tradingdate": "2026.08.18", "seed": 42, "generatequotes": true }
+}

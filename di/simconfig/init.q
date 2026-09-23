@@ -156,7 +156,11 @@ saveconfig:{[filepath;cfg]
   / the composed configuration as one JSON file, so a run is reproducible
   / from it alone (see loadconfig)
   if[not -11h=type filepath; '"saveconfig: filepath must be a file handle"];
-  filepath 0: enlist .j.j cfg
+  / floats written at full precision (.j.j follows \P), so the reload replays exactly
+  prec:system"P"; system"P 17";
+  r:@[{[f;c] f 0: enlist .j.j c; ::}[filepath;];cfg;{[e] e}];
+  system"P ",string prec;
+  if[10h=type r; 'r];
   };
 
 loadconfig:{[schema;filepath]

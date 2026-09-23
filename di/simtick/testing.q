@@ -3,8 +3,8 @@
 simtick:use`di.simtick
 
 / Load base config and modify for pure Poisson + no seasonality
-cfgs:simtick.loadconfig`:di/simtick/presets.csv
-cfg:cfgs`nvda_default
+f:simtick.files[]
+cfg:simtick.compose[simtick.loadmarket f`market;simtick.loadinstruments[f`instruments]`NVDA;simtick.loadscenarios[f`scenarios]`normal;(`symbol$())!()]
 
 / Pure Poisson: disable Hawkes excitation
 cfg[`alpha]:0.0
