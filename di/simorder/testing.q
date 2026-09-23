@@ -25,7 +25,7 @@ badresult:simorder.run[ordcfgs`bad;trades;quotes]
 vwap:{[e](sum e[`price]*e[`qty])%sum e`qty};
 goodvwap:vwap ordresult`executions;
 badvwap:vwap badresult`executions;
-arrival:first ordresult[`order]`arrivalprice;
+arrival:first ordresult[`orders]`arrivalprice;
 
 -1"arrival price: ",string arrival;
 -1"good VWAP: ",string[goodvwap]," (",string[10000*(goodvwap-arrival)%arrival]," bps)";
