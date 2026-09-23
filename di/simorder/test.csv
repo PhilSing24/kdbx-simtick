@@ -112,7 +112,8 @@ true,0,0,q,(lateshift 0)=0.5,1,,The taper halves a move 5 minutes before the clo
 before,0,0,q,sig:simorder.dailyvol quotes,1,,Daily volatility of the fixture
 true,0,0,q,(sig>0) & sig<1,1,,Daily volatility is a positive fraction
 before,0,0,q,bigres:simorder.run[bigcfg;trades;quotes],1,,Run the large arrival order
-before,0,0,q,impexecs:update interval:0D00:00:30 from `time`side`qty#bigres`executions,1,,Its executions with their 30-second intervals
+before,0,0,q,impexecs:`time`side`qty`interval#bigres`executions,1,,Its executions with the intervals they were sized in
+true,0,0,q,all 0D00:00:30=impexecs`interval,1,,Arrival pacing: 20 fills over 10 minutes carry 30-second intervals
 true,0,0,q,all 0<simorder.childimpact[icfg;impexecs;trades;sig],1,,Every child has a positive impact
 before,0,0,q,moved:simorder.impact[icfg;impexecs;trades;quotes],1,,Move the market by the large order's impact
 before,0,0,q,mq:moved`quotes,1,,Moved quotes
@@ -157,7 +158,10 @@ before,0,0,q,ordresult:simorder.run[basecfg;trades;quotes],1,,Run full order sim
 true,0,0,q,99h=type ordresult,1,,run returns a dict
 true,0,0,q,`order`executions~key ordresult,1,,Dict has order and executions keys
 before,0,0,q,executions:ordresult`executions,1,,Extract executions table
-true,0,0,q,`orderid`execid`sym`side`time`price`qty~cols executions,1,,Executions table has correct columns
+true,0,0,q,`orderid`execid`sym`side`time`price`qty`interval~cols executions,1,,Executions table has correct columns
+true,0,0,q,all (`timespan$`long$(`long$basecfg[`endtime]-basecfg`starttime)%21)=executions`interval,1,,Even pacing: every execution carries the schedule's spacing as its interval
+before,0,0,q,exq:aj[`time;executions;`time`bid`ask#quotes],1,,Executions with the quote in force at their time
+true,0,0,q,all (exq[`price]>=exq`bid)&exq[`price]<=exq`ask,1,,Every execution is priced inside the quote in force
 true,0,0,q,(sum executions`qty)=basecfg`orderqty,1,,Executions quantities sum exactly to orderqty
 true,0,0,q,(asc executions`time)~executions`time,1,,Executions sorted by time
 true,0,0,q,all executions[`time]>basecfg`starttime,1,,All executions after starttime
@@ -167,8 +171,20 @@ true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
 before,0,0,q,frontresult:simorder.run[frontcfg;trades;quotes],1,,Run full order simulation (frontloaded pacing)
 before,0,0,q,frontexecutions:frontresult`executions,1,,Extract frontloaded executions table
 true,0,0,q,(sum frontexecutions`qty)=frontcfg`orderqty,1,,Frontloaded executions sum exactly to orderqty (regression: rounding/floor conservation)
+true,0,0,q,(sum frontexecutions`interval)=(last frontexecutions`time)-frontcfg`starttime,1,,Frontloaded pacing: the intervals tile the window from starttime to the last fill
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
+comment,0,0,q,,1,,=== Config Tests ===
+before,0,0,q,ordcfgs:simorder.loadconfig`:di/simorder/presets.csv,1,,Load the order presets
+true,0,0,q,`good`bad`arrival~exec name from ordcfgs,1,,The three presets load
+before,0,0,q,fullordcfgs:0!ordcfgs,1,,Presets as a plain table
+before,0,0,q,`:/tmp/simorder_reordered.csv 0: csv 0: (reverse cols fullordcfgs) xcols fullordcfgs,1,,Presets written with the columns in reverse order
+true,0,0,q,(simorder.loadconfig`:/tmp/simorder_reordered.csv)~ordcfgs,1,,Columns in any order load to the same presets
+before,0,0,q,`:/tmp/simorder_missing.csv 0: csv 0: delete side from fullordcfgs,1,,Presets written without the side column
+fail,0,0,q,simorder.loadconfig`:/tmp/simorder_missing.csv,1,,A missing column throws error instead of parsing values into the wrong types
+before,0,0,q,`:/tmp/simorder_unknown.csv 0: csv 0: update foo:1 from fullordcfgs,1,,Presets written with an extra column
+fail,0,0,q,simorder.loadconfig`:/tmp/simorder_unknown.csv,1,,An unknown column throws error
+after,0,0,q,system"rm -f /tmp/simorder_reordered.csv /tmp/simorder_missing.csv /tmp/simorder_unknown.csv",1,,Clean up preset files
 comment,0,0,q,,1,,=== Mixed Market Tests ===
 before,0,0,q,xomresult:simtick.run[cfgs`xom_default],1,,Generate a second instrument for the same day
 before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table

@@ -18,6 +18,7 @@ The module is designed around a single core idea: **execution quality is a confi
 - **Volume-aware sizing** — under `even` pacing, child execution sizes are weighted by real market volume in each time bucket (pulled from `trades`), not a naive flat split
 - **Spread-aware pricing** — each execution is priced relative to the prevailing bid/ask (from `quotes`) at its timestamp, placed between mid and the far touch according to `spreadcapture`
 - **Exact quantity conservation** — child execution quantities always sum exactly to the parent order's `orderqty`, regardless of rounding or minimum-size flooring
+- **Interval per execution** — each execution carries the length of market it was sized against (`interval`, a timespan: the schedule's spacing under `even`, the sizing interval under `arrival`, the child's bucket under `frontloaded`), which is what `impact` reads
 - **Arrival price benchmark** — the parent order table carries the mid price at `starttime`, ready for implementation-shortfall calculations
 
 ### Market Focus
@@ -67,6 +68,8 @@ Simulations are driven by a configuration dictionary. Rather than building one m
 q)cfgs:simorder.loadconfig`:di/simorder/presets.csv
 q)cfg:cfgs`good
 ```
+
+`loadconfig` checks the header against the schema: columns may come in any order, and a missing, unknown or repeated column throws rather than parsing values into the wrong types.
 
 To see all available parameters and their descriptions:
 ```q
@@ -119,10 +122,10 @@ orderid sym  side orderqty starttime                     endtime                
 ORD001  NVDA BUY  10000    2026.08.18D09:35:00.000000000 2026.08.18D09:45:00.000000000 215.235
 
 q)ordresult`executions
-orderid execid sym  side time                          price  qty
------------------------------------------------------------------
-ORD001  1      NVDA BUY  2026.08.18D09:35:28.571428571 215.42 495
-ORD001  2      NVDA BUY  2026.08.18D09:35:57.142857143 215.33 538
+orderid execid sym  side time                          price  qty interval
+------------------------------------------------------------------------------------
+ORD001  1      NVDA BUY  2026.08.18D09:35:28.571428571 215.42 495 0D00:00:28.571428571
+ORD001  2      NVDA BUY  2026.08.18D09:35:57.142857143 215.33 538 0D00:00:28.571428571
 ...
 ```
 
@@ -174,7 +177,7 @@ Prices are unchanged: each child is priced against the prevailing quote by `spre
 
 ```q
 q)icfg:`eta`beta`halflife`taper`closetime!(0.01;0.5;0D00:05;0D00:05;0D16:00)
-q)execs:update interval:0D00:00:30 from `time`side`qty#arrresult`executions
+q)execs:`time`side`qty`interval#arrresult`executions
 q)moved:simorder.impact[icfg;execs;trades;quotes]
 q)prices:simorder.pricing[arrcfg;moved`quotes;execs`time]
 ```
@@ -203,6 +206,7 @@ q)prices:simorder.pricing[arrcfg;moved`quotes;execs`time]
 | `simorder.validateimpact[icfg]` | Validate an impact configuration |
 | `simorder.pricing[cfg;quotes;filltimes]` | Generate child execution prices only |
 | `simorder.marketday[cfg;t;name]` | Rows of a trades or quotes table for the order's instrument and day, time-sorted; throws if none |
+| `simorder.intervals[cfg;filltimes]` | The interval each fill was sized against, one timespan per fill |
 | `simorder.buildorder[cfg;quotes]` | Build the 1-row parent order table only |
 | `simorder.buildexecutions[cfg;trades;quotes]` | Build the child executions table only |
 | `simorder.loadconfig[filepath]` | Load presets from CSV |
@@ -252,13 +256,14 @@ q)k4unit.moduletest`di.simorder
 | Schedule | 5 | Output properties: correct count, sorted, within window, frontloaded gaps widen over time |
 | Sizing | 7 | Exact quantity conservation (even and frontloaded), minimum size respected, frontloaded concentrates quantity early |
 | Arrival pacing | 18 | Missing or out-of-range urgency and maxpct throw; trajectory endpoints, shape, sinh(1)/sinh(2) at mid-window, urgency ordering, even at vanishing urgency; cap carry-forward, backfill and excess beyond capacity; schedule count and window; exact quantity conservation; participation per interval within maxpct for an order of 15% of the window's volume |
-| Market impact | 17 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, executions priced against the moved market inside the NBBO, eta 0 leaves the market as it is |
+| Market impact | 18 | Missing keys, zero halflife and negative eta throw; shift in force at its own time, halved after one halflife, quartered after two, gone at the close, halved by the taper five minutes before it; positive daily volatility and child impact; one quote added per execution time, no locked or crossed quote, prints inside the moved quotes, volumes unchanged, a buy moves the quote up, executions priced against the moved market inside the NBBO, eta 0 leaves the market as it is |
 | Pricing | 5 | Positive prices, BUY far-touch priced above mid, SELL far-touch priced below mid |
 | Order | 4 | Correct schema, single row, positive arrival price |
-| Executions/Run | 12 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty |
+| Executions/Run | 15 | Dict shape, correct schema, exact quantity conservation end-to-end (even, frontloaded, arrival), time bounds, sorted, positive price/qty, every execution inside the quote in force, intervals per pacing |
+| Config | 4 | Presets load; columns in any order load identically, a missing or unknown column throws |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **78** | |
+| **Total** | **86** | |
 
 The fixture is one simulated day from `di.simtick`'s `nvda_default` preset; order windows are set on that day's date.
 

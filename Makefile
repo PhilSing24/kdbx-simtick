@@ -4,7 +4,7 @@
 PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export QPATH := $(QPATH):$(PROJECT_ROOT)
 
-.PHONY: repl test test-simtick test-simcalendar help
+.PHONY: repl test test-simtick test-simcalendar test-simorder help
 
 # Default target
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "  make test            - Run all module tests"
 	@echo "  make test-simtick    - Run simtick tests only"
 	@echo "  make test-simcalendar - Run simcalendar tests only"
+	@echo "  make test-simorder   - Run simorder tests only"
 	@echo ""
 	@echo "Usage example:"
 	@echo "  make repl"
@@ -25,11 +26,15 @@ repl:
 	q
 
 # Run all tests
-test: test-simtick test-simcalendar
+test: test-simtick test-simcalendar test-simorder
 
 # Individual module tests
+# The runner is the local.k4unit module; each target exits non-zero when a check fails
 test-simtick:
-	q -c "k4unit:use\`di.k4unit; k4unit.moduletest\`di.simtick; exit 0"
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simtick; exit $$[all r`ok;0;1]' | q -q
 
 test-simcalendar:
-	q -c "k4unit:use\`di.k4unit; k4unit.moduletest\`di.simcalendar; exit 0"
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simcalendar; exit $$[all r`ok;0;1]' | q -q
+
+test-simorder:
+	echo 'k4unit:use`local.k4unit; r:k4unit.moduletest`di.simorder; exit $$[all r`ok;0;1]' | q -q

@@ -24,7 +24,7 @@ This flexibility allows the same module to serve quick prototypes and sophistica
 - **Intraday seasonality** — trading activity is high at open and close, low at midday. Configurable U-shape or J-shape patterns.
 - **Price dynamics** — GBM with optional jump-diffusion captures continuous price movement and occasional discontinuities.
 - **Microstructure** — bid-ask spreads that widen at open/close, quote updates between trades.
-- **Realistic pricing** — trade prices and quote bid/ask rounded to the nearest cent (US equity tick size).
+- **Realistic pricing** — trade prices and quote bid/ask rounded to the configured tick size (`ticksize`, 0.01 for US equities).
 
 ### Market Focus
 
@@ -109,9 +109,9 @@ Correlated price paths across assets are essential for:
 
 Simulations are driven by a configuration dictionary containing all model parameters (arrival rates, volatility, spread settings, etc.). Rather than building these manually, the module reads configurations from a **CSV file**.
 
-A ready-to-use file `presets.csv` is included with three market scenarios calibrated for NVDA (default, volatile, jumpy). You can:
+A ready-to-use file `presets.csv` is included with three market scenarios (default, volatile, jumpy) for each of NVDA, XOM and PG. Every knob of a run is a column of the preset, including the tick size and the quote-generation settings, so a preset describes a run fully. `loadconfig` checks the header against the schema: columns may come in any order, and a missing, unknown or repeated column throws rather than parsing values into the wrong types. You can:
 
-- Use presets directly: `cfg:cfgs`default`
+- Use presets directly: `cfg:cfgs`nvda_default`
 - Modify values for specific runs: `cfg[`vol]:0.65`
 - Add new rows to define custom scenarios
 - Create your own CSV following the same schema
@@ -150,7 +150,7 @@ q)simtick:use`di.simtick
 ```q
 q)simtick:use`di.simtick
 q)cfgs:simtick.loadconfig`:di/simtick/presets.csv
-q)cfg:cfgs`default
+q)cfg:cfgs`nvda_default
 q)simtick.run[cfg]
 sym  time                          price    qty
 -----------------------------------------------
@@ -204,6 +204,10 @@ Presets are calibrated for NVDA (NASDAQ large-cap tech):
 | `avgqty` | Average trade size | 100 |
 | `seed` | Random seed (`0N` = no seed) | `42` |
 | `basespread` | Base bid-ask spread (fraction) | 0.0001 |
+| `ticksize` | Minimum price increment; prices and quotes are rounded to it | 0.01 |
+| `maxquoteupdates` | Maximum intermediate quote updates between two trades | 10 |
+| `initquotejitterms` | Jitter range (ms) on the initial quote's offset before the first trade | 100 |
+| `quoteticksize` | Noise on the mid of intermediate quotes, as a fraction of price | 0.0001 |
 | `generatequotes` | Generate quotes flag | 0b |
 | `openmult` | Opening intensity multiplier | 1.5 |
 | `midmult` | Midday intensity multiplier | 0.5 |
@@ -221,16 +225,16 @@ q)k4unit.moduletest`di.simtick
 | Group | Tests | Description |
 |-------|-------|-------------|
 | Validation | 7 | Bad configs throw correct errors (alpha >= beta, negative intensity, zero multipliers, zero/negative vol, zero/negative startprice) |
-| Arrivals | 7 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9 |
+| Arrivals | 9 | Output properties: non-empty, sorted, positive, within duration, correct type; count matches the Hawkes mean for a flat baseline at branching ratios 0.3 and 0.9; 1-second counts overdispersed with excitation, Poisson without |
 | Shape | 3 | Intraday pattern: open > mid, close > mid, J-shape verification |
 | Price | 6 | Positive prices, startprice correct, realized vol within tolerance, jump model works |
-| Trades | 8 | Correct schema, sorted times, positive prices/qty, integer qty, within session |
-| Quotes | 8 | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade |
-| Config | 7 | Keyed table, correct column count, correct types (float, symbol, date) |
+| Trades | 11 | Correct schema, sorted times, positive prices/qty, integer qty, within session, prices on the tick grid, day-level and hourly realized vol from 1-minute bars match the configured vol |
+| Quotes | 12 | Correct schema, sorted times, bid < ask, positive sizes, quote before first trade, every trade inside its prevailing quote, at least one quote per trade, spread at least one tick, bids and asks on the tick grid |
+| Config | 10 | Keyed table, correct column count, correct types (float, symbol, date); columns in any order load identically, a missing or unknown column throws |
 | Describe | 3 | Returns table, correct columns, correct parameter count |
 | Constant Qty | 2 | All quantities equal, quantity equals avgqty |
 | Reproducibility | 1 | Same seed produces same output |
-| **Total** | **53** | |
+| **Total** | **65** | |
 
 ## Documentation
 

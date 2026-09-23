@@ -1,17 +1,5 @@
 / di.simtick - realistic intraday tick simulator
 
-/ quote generation: maximum intermediate quote updates between trades
-/ caps computation cost for large time gaps
-maxquoteupdates:10
-
-/ quote generation: random jitter range for initial quote offset (milliseconds)
-/ adds realism by varying the pre-trade quote timing
-initquotejitterms:100
-
-/ price movement: fractional tick size for intermediate quote mid-price drift
-/ controls how much the mid moves between trades (as fraction of price)
-quoteticksize:0.0001
-
 / time unit conversions
 nsperms:1000000
 nspersec:1000000000
@@ -287,9 +275,11 @@ quote.generate:{[cfg;trades]
   pretradeoffset:cfg`pretradeoffset;
   quoteupdaterate:cfg`quoteupdaterate;
   avgquotesize:cfg`avgquotesize;
+  ticksize:cfg`ticksize;
 
   / === 1. initial quote (before first trade) ===
-  initoffset:`timespan$`long$nsperms*pretradeoffset+first 1?initquotejitterms;
+  jitter:$[0<cfg`initquotejitterms; first 1?cfg`initquotejitterms; 0];
+  initoffset:`timespan$`long$nsperms*pretradeoffset+jitter;
   inittime:tradetimes[0]-initoffset;
   initprice:tradeprices[0];
   initspread:basespread*initprice*cfg`spreadopenmult;
@@ -343,13 +333,13 @@ quote.generate:{[cfg;trades]
   allasksizes:(enlist avgquotesize),intresult[`asksizes],preasksizes;
 
   / build table, enforce minimum size of 1, sort by time
-  / round bid/ask to nearest cent consistent with trade price rounding
+  / round bid/ask to the tick size consistent with trade price rounding
   / enforce bid < ask after rounding - tight spreads can collapse to bid=ask
   quotes:([]time:alltimes;bid:allbids;ask:allasks;bidsize:allbidsizes;asksize:allasksizes);
   quotes:update bidsize:1|bidsize,asksize:1|asksize,
-    bid:0.01*`long$0.5+bid%0.01,
-    ask:0.01*`long$0.5+ask%0.01 from quotes;
-  quotes:update ask:bid+0.01 from quotes where bid>=ask;
+    bid:ticksize*`long$0.5+bid%ticksize,
+    ask:ticksize*`long$0.5+ask%ticksize from quotes;
+  quotes:update ask:bid+ticksize from quotes where bid>=ask;
   `time xasc quotes
   };
 
@@ -366,8 +356,8 @@ quote.intermediates:{[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quote
   nextprices:tradeprices 1+til n-1;
   gaps:`long$(nexttimes-prevtimes)%nsperms;
 
-  / number of intermediate quotes per gap (capped)
-  nupdates:maxquoteupdates&`long$floor quoteupdaterate*gaps%1000;
+  / number of intermediate quotes per gap (capped at maxquoteupdates)
+  nupdates:cfg[`maxquoteupdates]&`long$floor quoteupdaterate*gaps%1000;
 
   / filter gaps that are too short (need room for quotes before pretradeoffset)
   mingap:2*pretradeoffset;
@@ -398,7 +388,7 @@ quote.intermediates:{[cfg;tradetimes;tradeprices;basespread;pretradeoffset;quote
 
   / prices: interpolate from prev toward next trade price, plus noise
   midprices:gapprevprices+fractions*(gapnextprices-gapprevprices);
-  noise:quoteticksize*midprices*.z.m.rng.normal[totint;cfg];
+  noise:cfg[`quoteticksize]*midprices*.z.m.rng.normal[totint;cfg];
   midprices+:noise;
 
   / spreads (vectorized across all intermediate quotes)
@@ -450,6 +440,8 @@ validate:{[cfg]
   /   - Transitionpoint in valid range (prevents division by zero)
   /   - Positive volatility (zero vol produces degenerate flat price path)
   /   - Positive start price (negative/zero price is economically invalid)
+  /   - Positive tick size; non-negative quote knobs (maxquoteupdates,
+  /     initquotejitterms, quoteticksize)
 
   / check Hawkes stability condition
   if[cfg[`alpha]>=cfg`beta; '"validate: Hawkes unstable - alpha must be < beta"];
@@ -464,6 +456,12 @@ validate:{[cfg]
   if[0>=cfg`vol; '"validate: vol must be positive"];
   / check startprice positive (GBM/jump models require positive initial price)
   if[0>=cfg`startprice; '"validate: startprice must be positive"];
+  / tick size and quote knobs: in the config since a preset must describe a run fully
+  .z.m.val.haskeys[cfg;`ticksize`maxquoteupdates`initquotejitterms`quoteticksize;"validate"];
+  if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
+  if[0>cfg`maxquoteupdates; '"validate: maxquoteupdates must be zero or positive"];
+  if[0>cfg`initquotejitterms; '"validate: initquotejitterms must be zero or positive"];
+  if[0>cfg`quoteticksize; '"validate: quoteticksize must be zero or positive"];
   cfg
   };
 
@@ -498,9 +496,9 @@ run:{[cfg]
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
   times:basetime+`timespan$`long$arrs*nspersec;
 
-  / generate prices and round to nearest cent (US equity tick size)
+  / generate prices and round to the tick size
   prices:.z.m.price[cfg;arrs];
-  prices:0.01*`long$0.5+prices%0.01;
+  prices:cfg[`ticksize]*`long$0.5+prices%cfg`ticksize;
 
   / generate quantities
   qtys:.z.m.qty.gen[n;cfg];
@@ -551,6 +549,10 @@ schema[`spreadclosemult]:("F";"spread multiplier at close")
 schema[`pretradeoffset]:("J";"min ms before trade for quote")
 schema[`quoteupdaterate]:("F";"quote updates per second")
 schema[`avgquotesize]:("J";"average quote size")
+schema[`ticksize]:("F";"minimum price increment; trade prices and quotes are rounded to it (0.01 for US equities)")
+schema[`maxquoteupdates]:("J";"maximum intermediate quote updates between two trades")
+schema[`initquotejitterms]:("J";"random jitter range (ms) added to the initial quote's offset before the first trade")
+schema[`quoteticksize]:("F";"noise on the mid of intermediate quotes, as a fraction of price")
 
 / derive type string from schema
 csvtypes:raze first each value schema
@@ -565,7 +567,16 @@ loadconfig:{[filepath]
   /   cfg:cfgs`default
   /   run[cfg]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  1!(.z.m.csvtypes;enlist csv) 0: filepath
+  / the type string is applied by column position, so the header is checked
+  / against the schema first: any column order loads, a missing, unknown or
+  / repeated column throws instead of parsing values into the wrong types
+  hdr:`$csv vs first read0 filepath;
+  expected:key .z.m.schema;
+  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
+  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
+  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns - ",", " sv string distinct hdr where 1<count each group[hdr] hdr];
+  types:raze first each .z.m.schema hdr;
+  1!expected xcols (types;enlist csv) 0: filepath
   };
 
 describe:{[]

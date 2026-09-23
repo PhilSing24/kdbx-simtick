@@ -341,12 +341,33 @@ buildorder:{[cfg;quotes]
     arrivalprice:enlist arrivalprice)
   };
 
+intervals:{[cfg;filltimes]
+  / the length of market the child was sized against, one timespan per fill,
+  / which impact reads as the interval centred on the child (execs column
+  / `interval, see childimpact)
+  / cfg: config dict with `starttime`endtime`numfills`pacing
+  / filltimes: scheduled fill timestamps from .z.m.schedule
+  / returns: timespan per fill
+  /
+  / pacing `even: the schedule's spacing, window/(numfills+1)
+  / pacing `arrival: the sizing interval, window/numfills
+  / pacing `frontloaded: each child's bucket, from the previous fill (or
+  /   starttime) to its own time
+  dur:cfg[`endtime]-cfg`starttime;
+  n:count filltimes;
+  $[cfg[`pacing]=`even; n#`timespan$`long$dur%n+1;
+    cfg[`pacing]=`arrival; n#`timespan$`long$dur%n;
+    cfg[`pacing]=`frontloaded; filltimes-(enlist cfg`starttime),-1_filltimes;
+    '"intervals: unknown pacing - ",string cfg`pacing]
+  };
+
 buildexecutions:{[cfg;trades;quotes]
   / build the child fills table
   / cfg: order config dict
   / trades: market trades table for the day
   / quotes: market quotes table for the day
-  / returns: fills table, one row per child fill
+  / returns: fills table, one row per child fill, with the interval each was
+  /   sized against (what impact needs, see intervals)
   filltimes:.z.m.schedule[cfg];
   sizes:.z.m.sizing[cfg;trades;filltimes];
   prices:.z.m.pricing[cfg;quotes;filltimes];
@@ -357,7 +378,8 @@ buildexecutions:{[cfg;trades;quotes]
     side:cfg[`side];
     time:filltimes;
     price:prices;
-    qty:sizes)
+    qty:sizes;
+    interval:.z.m.intervals[cfg;filltimes])
   };
 
 
@@ -453,7 +475,16 @@ loadconfig:{[filepath]
   /   cfg:cfgs`good
   /   run[cfg;trades;quotes]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
-  1!(.z.m.csvtypes;enlist csv) 0: filepath
+  / the type string is applied by column position, so the header is checked
+  / against the schema first: any column order loads, a missing, unknown or
+  / repeated column throws instead of parsing values into the wrong types
+  hdr:`$csv vs first read0 filepath;
+  expected:key .z.m.schema;
+  if[count missing:expected except hdr; '"loadconfig: missing columns - ",", " sv string missing];
+  if[count unknown:hdr except expected; '"loadconfig: unknown columns - ",", " sv string unknown];
+  if[count[hdr]<>count distinct hdr; '"loadconfig: repeated columns - ",", " sv string distinct hdr where 1<count each group[hdr] hdr];
+  types:raze first each .z.m.schema hdr;
+  1!expected xcols (types;enlist csv) 0: filepath
   };
 
 describe:{[]
@@ -464,4 +495,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;marketday;schedule;sizing;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
+export:([run;marketday;schedule;sizing;intervals;trajectory;capped;validateimpact;dailyvol;childimpact;shiftat;impact;pricing;buildorder;buildexecutions;loadconfig;describe])
