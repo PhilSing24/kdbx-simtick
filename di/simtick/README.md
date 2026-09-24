@@ -88,11 +88,11 @@ q)simtick:use`di.simtick
 
 ## Usage
 
-The simplest run takes the five values that describe a stock: its ticker, price, annual drift, annual volatility and trades per day. Everything else comes from the shipped market file:
+The simplest run takes the five values that describe a stock (ticker, price, annual drift, annual volatility, trades per day) and the date. Everything else comes from the shipped market file:
 
 ```q
 q)simtick:use`di.simtick
-q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000]
+q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]
 q)result`trade
 sym  time                          seq price   qty    aggressor cond venue
 --------------------------------------------------------------------------
@@ -103,7 +103,7 @@ NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
 q)result`quote
 ```
 
-`quick` is reproducible: the date and the seed are the run defaults of the market file. `quickwith` takes a sixth argument with any run override, for example `` (enlist `seed)!enlist 7 `` or `` `tradingdate`generatequotes!(2026.09.01;0b) ``.
+`quick` is reproducible: the seed is the run default of the market file. `quickwith` takes a seventh argument with any run override, for example `` (enlist `seed)!enlist 7 `` or `` `seed`generatequotes!(7;0b) ``.
 
 For anything beyond that, compose a configuration from the four layers and run it:
 
@@ -129,8 +129,8 @@ The first trade is the opening auction (`cond` `O`), which has no aggressor.
 
 | Function | Description |
 |----------|-------------|
-| `simtick.quick[sym;price;drift;vol;tradesperday]` | One day of one stock from its five essential values, on the shipped market and the normal scenario |
-| `simtick.quickwith[sym;price;drift;vol;tradesperday;run]` | The same with a run override (date, seed, quotes) |
+| `simtick.quick[sym;price;drift;vol;tradesperday;tradingdate]` | One day of one stock from its five essential values and the date, on the shipped market and the normal scenario |
+| `simtick.quickwith[sym;price;drift;vol;tradesperday;tradingdate;run]` | The same with a run override (seed, quotes) |
 | `simtick.compose[market;instrument;scenario;run]` | The flat configuration of a run from the four layers, with the scenario multipliers applied and `baseintensity` derived |
 | `simtick.run[cfg]` | Full simulation: a dictionary with `trade` and `quote` when `generatequotes` is 1, otherwise the trade table |
 | `simtick.arrivals[cfg]` | Trade arrival times only, in seconds from the open |
@@ -191,11 +191,11 @@ q)k4unit.moduletest`di.simtick
 | Quotes | 42 | Every trade within its quote, buys at the ask and sells at the bid, side persistence, quotes per trade, spreads in whole ticks and their pattern through the day, market impact, bursts after jumps, quote updates following trades, quote sizes and their lean toward the next move |
 | Config | 31 | The layers load and compose: types, instrument overrides, scenario multipliers applied once, run overrides, missing and unknown keys rejected, a spread below one tick rejected |
 | Derivation | 5 | `baseintensity` from `tradesperday`: the mean trade count over twenty seeds within 2%, with and without jumps; bursts beyond `tradesperday` rejected |
-| Quick and saved | 6 | `quick` equals compose and run; a saved configuration reloads unchanged and replays; `baseintensity` derived or checked on reload |
+| Quick and saved | 7 | `quick` equals compose and run, on the date it is given; a saved configuration reloads unchanged and replays; `baseintensity` derived or checked on reload |
 | Describe | 5 | The parameter list, the essential five first |
 | Constant quantity | 2 | All sizes equal `avgqty` |
 | Reproducibility | 1 | The same seed gives the same output |
-| **Total** | **144** | |
+| **Total** | **145** | |
 
 ## Documentation
 

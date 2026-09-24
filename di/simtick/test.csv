@@ -282,8 +282,9 @@ before,0,0,q,burstins[`tradesperday]:5000,1,,Fewer trades than the default burst
 fail,0,0,q,simtick.compose[market;burstins;scenarios`jumpy;norun],1,,Expected burst trades above tradesperday throw error
 true,0,0,q,1e-9>abs cfg[`baseintensity]-simtick.intensityfor cfg,1,,intensityfor recomputes the composed base intensity
 comment,0,0,q,,1,,=== Quick and Saved Config Tests ===
-true,0,0,q,result~simtick.quick[`NVDA;215.0;0.08;0.45;500000],1,,quick equals compose and run on the shipped files
-true,0,0,q,not result~simtick.quickwith[`NVDA;215.0;0.08;0.45;500000;(enlist `seed)!enlist 7],1,,quickwith takes a run override
+true,0,0,q,result~simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18],1,,quick equals compose and run on the shipped files
+true,0,0,q,2026.09.01=first `date$(simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.09.01])[`trade]`time,1,,quick runs the day it is given
+true,0,0,q,not result~simtick.quickwith[`NVDA;215.0;0.08;0.45;500000;2026.08.18;(enlist `seed)!enlist 7],1,,quickwith takes a run override
 before,0,0,q,simtick.saveconfig[`:/tmp/simtick_saved.json;cfg],1,,Save the composed config
 before,0,0,q,saved:simtick.loadconfig`:/tmp/simtick_saved.json,1,,Load it back
 true,0,0,q,saved~cfg,1,,A saved config reloads unchanged

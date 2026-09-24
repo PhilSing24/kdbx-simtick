@@ -857,19 +857,21 @@ loadconfig:{[filepath]
 
 saveconfig:{[filepath;cfg] simconfig.saveconfig[filepath;cfg]};
 
-quickwith:{[sym;price;drift;vol;tradesperday;overrides]
-  / one day of one stock from the five essential values, on the shipped
-  / market and the normal scenario, with the market file's run defaults
-  / (date, seed) unless overridden
+quickwith:{[sym;price;drift;vol;tradesperday;tradingdate;overrides]
+  / one day of one stock on a date from the five essential values, on the
+  / shipped market and the normal scenario, with the market file's run
+  / defaults (seed, quotes) unless overridden
+  / overrides: a run dictionary, e.g. (enlist `seed)!enlist 7
   f:.z.m.files[];
   ins:`sym`price`drift`vol`tradesperday!(sym;price;drift;vol;tradesperday);
-  cfg:.z.m.compose[.z.m.loadmarket f`market;ins;.z.m.loadscenarios[f`scenarios]`normal;overrides];
+  run:((enlist `tradingdate)!enlist tradingdate),overrides;
+  cfg:.z.m.compose[.z.m.loadmarket f`market;ins;.z.m.loadscenarios[f`scenarios]`normal;run];
   .z.m.run cfg
   };
 
-quick:{[sym;price;drift;vol;tradesperday]
-  / simtick.quick[`NVDA;215.0;0.08;0.45;500000]
-  .z.m.quickwith[sym;price;drift;vol;tradesperday;(`symbol$())!()]
+quick:{[sym;price;drift;vol;tradesperday;tradingdate]
+  / simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]
+  .z.m.quickwith[sym;price;drift;vol;tradesperday;tradingdate;(`symbol$())!()]
   };
 
 describe:{[]
