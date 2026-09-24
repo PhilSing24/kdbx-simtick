@@ -35,6 +35,10 @@ An order's configuration is composed from the market file's `orders` group (and 
 | `ordervenues` | symbol list | lit venues (MIC codes) the children are routed to | XNAS ARCX BATS EDGX |
 | `ordervenueshares` | float list | their routing shares (sum to 1) | 0.4 0.2 0.2 0.2 |
 | `sweepticks` | long | ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken | 1 |
+| `darkvenues` | symbol list | the dark pools (MPIDs) a passive child can be routed to | UBSA LEVL |
+| `darkvenueshares` | float list | their routing shares among dark children (sum to 1) | 0.6 0.4 |
+| `darkshare` | float | probability a passive child is sent to a dark pool instead of a lit venue, between 0 and 1 (0 = no dark routing); aggressive children never go dark | 0.25 |
+| `darkfillshare` | float | the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1 | 0.5 |
 
 ## Market file: algo menu, order-flow defaults and impact
 

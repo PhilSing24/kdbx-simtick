@@ -41,6 +41,7 @@ validate:{[cfg]
   reqkeys:`orderid`sym`side`orderqty`starttime`endtime;
   reqkeys,:`numchildren`pacing`spreadcapture`ticksize`jitter`seed;
   reqkeys,:`account`algo`capacity`latencyms`maxreplaces`ordervenues`ordervenueshares`sweepticks;
+  reqkeys,:`darkvenues`darkvenueshares`darkshare`darkfillshare;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
 
   if[cfg[`starttime]>=cfg`endtime; '"validate: starttime must be before endtime"];
@@ -58,6 +59,10 @@ validate:{[cfg]
   if[0>cfg`sweepticks; '"validate: sweepticks must be zero or positive"];
   if[count[cfg`ordervenues]<>count cfg`ordervenueshares; '"validate: ordervenues and ordervenueshares must have the same length"];
   if[1e-6<abs 1-sum cfg`ordervenueshares; '"validate: ordervenueshares must sum to 1"];
+  if[count[cfg`darkvenues]<>count cfg`darkvenueshares; '"validate: darkvenues and darkvenueshares must have the same length"];
+  if[1e-6<abs 1-sum cfg`darkvenueshares; '"validate: darkvenueshares must sum to 1"];
+  if[not cfg[`darkshare] within 0 1; '"validate: darkshare must be between 0 and 1"];
+  if[not (0<cfg`darkfillshare)&1>=cfg`darkfillshare; '"validate: darkfillshare must be above 0 and at most 1"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
     if[not 0<cfg`urgency; '"validate: urgency must be positive for arrival pacing"];
@@ -451,17 +456,63 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
   `fills`events`leaves`replaces`limit!(fls;events;leaves;replaces;L)
   };
 
+darkfills:{[cfg;trades;quotes;t;expiry;qty]
+  / a dark child: a midpoint peg resting in a dark pool from latencyms
+  / after its send, invisible, never crossing the spread and never
+  / re-pegged (its limit is always the midpoint of the quote in force). It
+  / fills only against opposite-side off-exchange prints at the midpoint
+  / (venue TRF, price the mid of the quote in force at the print), taking
+  / at most darkfillshare of each, so every dark fill is a print that is
+  / already on the tape. What is left at expiry is cancelled (it rolls
+  / into the next child)
+  / cfg: config dict with `side`latencyms`darkfillshare
+  / trades, quotes: the day's tables
+  / t: send time
+  / expiry: when the child is cancelled
+  / qty: quantity
+  / returns: dict `fills (table time price qty liquidity), `events (table
+  /   time event qty price leavesqty), `leaves, `replaces, `limit
+  lat:`timespan$`long$1000000*cfg`latencyms;
+  buy:cfg[`side]=`BUY;
+  s:t+lat;
+  tt:trades`time;
+  i0:1+tt bin s;
+  i1:tt bin expiry;
+  events:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#0n;leavesqty:2#qty);
+  fls:([]time:`timestamp$();price:`float$();qty:`long$();liquidity:`symbol$());
+  leaves:qty;
+  if[i1>=i0;
+    pr:trades i0+til 1+i1-i0;
+    pr:aj[`time;pr;`time`bid`ask#quotes];
+    opp:$[buy;`S;`B];
+    pr:select from pr where venue=`TRF,aggressor=opp,1e-9>abs price-0.5*bid+ask;
+    if[count pr;
+      take:floor cfg[`darkfillshare]*pr`qty;
+      cum:leaves&sums take;
+      f:deltas cum;
+      w:where f>0;
+      if[count w;
+        fls:([]time:pr[`time] w;price:pr[`price] w;qty:f w;liquidity:count[w]#`D);
+        events,:([]time:pr[`time] w;event:count[w]#`fill;qty:f w;price:pr[`price] w;leavesqty:leaves-cum w);
+        leaves:leaves-last cum]]];
+  if[0=leaves; events,:([]time:enlist last fls`time;event:enlist `done;qty:enlist 0;price:enlist 0n;leavesqty:enlist 0)];
+  if[leaves>0; events,:([]time:enlist expiry;event:enlist `cancel;qty:enlist leaves;price:enlist 0n;leavesqty:enlist leaves)];
+  `fills`events`leaves`replaces`limit!(fls;events;leaves;0;0n)
+  };
+
 child:{[cfg;trades;quotes;spec]
   / one child order and what became of it
   / cfg: order config dict
   / trades, quotes: the day's tables
-  / spec: dict `id`t`expiry`qty`aggressive`venue`interval: the child's id,
-  /   send time, expiry, quantity, whether it is aggressive, its venue and
-  /   the interval it was sized against
+  / spec: dict `id`t`expiry`qty`aggressive`dark`venue`interval: the child's
+  /   id, send time, expiry, quantity, whether it is aggressive, whether it
+  /   is dark (a midpoint peg in a dark pool), its venue and the interval it
+  /   was sized against
   / returns: dict `children (1-row table) `events (table with childid) `fills (table with childid)
   id:spec`id; t:spec`t; expiry:spec`expiry; qty:spec`qty;
-  aggressive:spec`aggressive; venue:spec`venue; interval:spec`interval;
-  r:$[aggressive;
+  aggressive:spec`aggressive; dark:spec`dark; venue:spec`venue; interval:spec`interval;
+  r:$[dark; .z.m.darkfills[cfg;trades;quotes;t;expiry;qty];
+    aggressive;
     [f:.z.m.aggressivefills[cfg;quotes;t;qty];
      lim:first f`price;
      ev:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#lim;leavesqty:2#qty);
@@ -472,7 +523,7 @@ child:{[cfg;trades;quotes;spec]
   f:r`fills;
   filled:sum f`qty;
   row:([]childid:enlist id;orderid:enlist cfg`orderid;sym:enlist cfg`sym;side:enlist cfg`side;
-    qty:enlist qty;ordtype:enlist $[aggressive;`MKT;`LMT];limitprice:enlist r`limit;venue:enlist venue;
+    qty:enlist qty;ordtype:enlist $[dark;`PEG;aggressive;`MKT;`LMT];pegtype:enlist $[dark;`MID;`];limitprice:enlist r`limit;venue:enlist venue;
     sendtime:enlist t;expiry:enlist expiry;filledqty:enlist filled;
     status:enlist $[filled=qty;`filled;`cancelled];replaces:enlist r`replaces;interval:enlist interval);
   `children`events`fills!(row;update childid:id from r`events;update childid:id,venue:venue,interval:interval from f)
@@ -482,8 +533,12 @@ execute:{[cfg;trades;quotes]
   / the order's children against the tape: one child per scheduled time
   / (jittered), sized by the pacing plus what the previous child left,
   / aggressive with probability spreadcapture and passive otherwise, each
-  / routed to one of ordervenues by share; then a final aggressive child before
-  / endtime for whatever is left, so the order completes
+  / routed to one of ordervenues by share; a passive child is instead sent
+  / dark with probability darkshare, to one of darkvenues by share (the
+  / dark draws come after the others and only when darkshare is above 0,
+  / so darkshare 0 leaves the seeded stream and the output as they were);
+  / then a final aggressive child before endtime for whatever is left, so
+  / the order completes
   / cfg: order config dict
   / trades, quotes: the day's tables
   / returns: dict `children`events`executions
@@ -494,18 +549,23 @@ execute:{[cfg;trades;quotes]
   ivals:.z.m.intervals[cfg;sched];
   aggressive:(n?1.0)<cfg`spreadcapture;
   vens:cfg[`ordervenues] (sums cfg`ordervenueshares) binr n?1.0;
+  dark:n#0b;
+  if[0<cfg`darkshare;
+    dark:(not aggressive)&(n?1.0)<cfg`darkshare;
+    pools:cfg[`darkvenues] (sums cfg`darkvenueshares) binr n?1.0;
+    vens:?[dark;pools;vens]];
   lat:`timespan$`long$1000000*cfg`latencyms;
   parts:();
   rolled:0;
   i:0;
   while[i<n;
-    spec:`id`t`expiry`qty`aggressive`venue`interval!(i+1;sched i;expiries i;rolled+targets i;aggressive i;vens i;ivals i);
+    spec:`id`t`expiry`qty`aggressive`dark`venue`interval!(i+1;sched i;expiries i;rolled+targets i;aggressive i;dark i;vens i;ivals i);
     r:.z.m.child[cfg;trades;quotes;spec];
     parts,:enlist r;
     rolled:(rolled+targets i)-sum r[`fills]`qty;
     i+:1];
   if[rolled>0;
-    spec:`id`t`expiry`qty`aggressive`venue`interval!(n+1;cfg[`endtime]-2*lat;cfg`endtime;rolled;1b;vens n-1;last ivals);
+    spec:`id`t`expiry`qty`aggressive`dark`venue`interval!(n+1;cfg[`endtime]-2*lat;cfg`endtime;rolled;1b;0b;cfg[`ordervenues] first idesc cfg`ordervenueshares;last ivals);
     r:.z.m.child[cfg;trades;quotes;spec];
     parts,:enlist r];
   children:raze parts[;`children];
@@ -632,6 +692,7 @@ run:{[cfg;trades;quotes]
 / the menu of algorithms generate draws from: the pacing and aggression
 / each stands for, and the arrival-pacing keys where they apply
 flowkeys:`norders`accounts`algos`sizepct`windowminutes`seed`childrenperminute`ticksize`jitter`latencyms`maxreplaces`capacity`ordervenues`ordervenueshares`sweepticks
+flowkeys,:`darkvenues`darkvenueshares`darkshare`darkfillshare
 
 menu:{[market]
   / the algo menu of the market: each algo's pacing, aggression, urgency and cap
@@ -680,6 +741,7 @@ generate:{[market;spec;trades;quotes]
     account:spec[`accounts] m?count spec`accounts;algo:algo;capacity:m#spec`capacity;
     latencyms:m#spec`latencyms;maxreplaces:m#spec`maxreplaces;seed:seeds;
     ordervenues:m#enlist spec`ordervenues;ordervenueshares:m#enlist spec`ordervenueshares;sweepticks:m#spec`sweepticks;
+    darkvenues:m#enlist spec`darkvenues;darkvenueshares:m#enlist spec`darkvenueshares;darkshare:m#spec`darkshare;darkfillshare:m#spec`darkfillshare;
     urgency:m0`urgency;maxpct:m0`maxpct)
   };
 
@@ -736,6 +798,10 @@ schema[`capacity]:("S";`market;`orders;"A (agency) or P (principal)")
 schema[`ordervenues]:("SL";`market;`orders;"lit venues (MIC codes) the children are routed to")
 schema[`ordervenueshares]:("FL";`market;`orders;"their routing shares (sum to 1)")
 schema[`sweepticks]:("J";`market;`orders;"ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken")
+schema[`darkvenues]:("SL";`market;`orders;"the dark pools (MPIDs) a passive child can be routed to")
+schema[`darkvenueshares]:("FL";`market;`orders;"their routing shares among dark children (sum to 1)")
+schema[`darkshare]:("F";`market;`orders;"probability a passive child is sent to a dark pool instead of a lit venue, between 0 and 1 (0 = no dark routing); aggressive children never go dark")
+schema[`darkfillshare]:("F";`market;`orders;"the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1")
 schema[`urgency]:("F";`optional;`order;"arrival pacing only (required there): Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:("F";`optional;`order;"arrival pacing only (required there): participation cap per interval, own/(own+market), between 0 and 1")
 

@@ -76,4 +76,20 @@ before,0,0,q,optsch:sch upsert (enlist `note)!enlist ("F";`optional;`extra;"an o
 true,0,0,q,not `note in key simconfig.compose[optsch;m;ins`NVDA;sce`normal;(`symbol$())!()],1,,An optional key is not required
 true,0,0,q,1.5=(simconfig.compose[optsch;m;ins`NVDA;sce`normal;(enlist `note)!enlist 1.5])`note,1,,But is kept and cast when present
 true,0,0,q,not `name in key simconfig.compose[sch;m;(ins`NVDA) upsert (enlist `name)!enlist `row;sce`normal;(`symbol$())!()],1,,A row's name is dropped from the composed config
+comment,0,0,q,,1,,=== Venue Reference Tests ===
+before,0,0,q,venues:simconfig.loadvenues simconfig.path "venues.csv",1,,The shipped venue reference
+true,0,0,q,99h=type venues,1,,loadvenues returns a keyed table
+true,0,0,q,`code~first cols venues,1,,Keyed by code
+true,0,0,q,`name`type`tcacode~cols value venues,1,,With the name and type and the TCA code
+true,0,0,q,all (value[venues]`type) in `lit`dark`trf,1,,Every type is lit or dark or trf
+true,0,0,q,`NASDAQ=venues[`XNAS;`tcacode],1,,XNAS maps to the TCA code NASDAQ
+true,0,0,q,`dark`dark~{[v;c] v[c;`type]}[venues] each `UBSA`LEVL,1,,The two ATSs are dark venues
+true,0,0,q,`trf=venues[`TRF;`type],1,,TRF is the reporting facility
+before,0,0,q,badvenues:0!venues,1,,A venue file with an unknown type
+before,0,0,q,badvenues[0;`type]:`foo,1,,Set the first row's type to foo
+before,0,0,q,`:/tmp/simconfig_badvenues.csv 0: csv 0: badvenues,1,,Written
+fail,0,0,q,simconfig.loadvenues`:/tmp/simconfig_badvenues.csv,1,,An unknown venue type throws error
+before,0,0,q,`:/tmp/simconfig_dupvenues.csv 0: csv 0: (0!venues) upsert 0!1#venues,1,,A venue file with a repeated code
+fail,0,0,q,simconfig.loadvenues`:/tmp/simconfig_dupvenues.csv,1,,A repeated code throws error
+after,0,0,q,system"rm -f /tmp/simconfig_badvenues.csv /tmp/simconfig_dupvenues.csv",1,,Clean up venue files
 after,0,0,q,system"rm -f /tmp/simconfig_market.json /tmp/simconfig_badmarket.json /tmp/simconfig_instruments.csv /tmp/simconfig_badins.csv /tmp/simconfig_scenarios.csv /tmp/simconfig_saved.json",1,,Clean up

@@ -132,6 +132,21 @@ loadscenarios:{[schema;filepath]
   .z.m.loadrows[schema;filepath;`name]
   };
 
+loadvenues:{[filepath]
+  / the venue reference (venues.csv): every venue code the market file can
+  / use, keyed by code, with its full name, its type (lit, dark or trf) and
+  / the code the TCA application uses for it (null when it has none yet).
+  / The engines never read it; exports map codes with it
+  if[not -11h=type filepath; '"loadvenues: filepath must be a file handle"];
+  hdr:`$csv vs first read0 filepath;
+  if[not `code`name`type`tcacode~hdr; '"loadvenues: the columns must be code, name, type, tcacode"];
+  t:("S*SS";enlist csv) 0: filepath;
+  if[count[t]<>count distinct t`code; '"loadvenues: repeated codes"];
+  if[any null t`code; '"loadvenues: every row needs a code"];
+  if[not all t[`type] in `lit`dark`trf; '"loadvenues: type must be lit, dark or trf"];
+  `code xkey t
+  };
+
 
 / ============================================================
 / COMPOSE, SAVE, RELOAD
@@ -185,4 +200,4 @@ describe:{[schema]
   };
 
 / export public interface
-export:([compose;loadmarket;loadinstruments;loadscenarios;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path])
+export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path])
