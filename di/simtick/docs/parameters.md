@@ -106,7 +106,7 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 
 ## Scenario (`di/simconfig/scenarios.csv`)
 
-One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The calendar group is read by `di.simmarket`.
+One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The days group is read by `di.simmarket`.
 
 ### scenario
 
@@ -120,7 +120,7 @@ One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied
 | `jumpmean` | float | jump model: mean of the log jump size | 0 |
 | `jumpvol` | float | jump model: standard deviation of the log jump size | 0 |
 
-### calendar (di.simmarket)
+### days (di.simmarket)
 
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
