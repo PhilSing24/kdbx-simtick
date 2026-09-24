@@ -211,27 +211,90 @@ true,0,0,q,3=count distinct many[`trade]`sym,1,With every instrument
 true,0,0,q,`sym`date~2#cols many`days,1,The days table has a sym column first
 true,0,0,q,9=count many`days,1,And one row per instrument and day
 true,0,0,q,(select from many[`trade] where sym=`PG)~(simmarket.run[manycfgs`PG;calendar;(::)])`trade,1,An instrument's tape is that of its own run
-before,0,0,q,system"rm -rf /tmp/simmarket_many",1,Clean up any existing multi-instrument database
-before,0,0,q,manydisk:simmarket.runmany[manycfgs;calendar;`:/tmp/simmarket_many],1,Run them to disk
-true,0,0,q,manydisk~`:/tmp/simmarket_many,1,Returns dbpath on success
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_many/2026.08.18/trade",1,The trade table is in the first date partition
-true,0,0,q,9=count get hsym`$"/tmp/simmarket_many/days",1,The days table on disk has one row per instrument and day
-after,0,0,q,system"rm -rf /tmp/simmarket_many",1,Clean up the multi-instrument database
-comment,0,0,q,,1,=== Disk Persistence Tests ===
-before,0,0,q,dbpath:`:/tmp/simmarket_test,1,Set test database path
-before,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up any existing test database
-before,0,0,q,diskresult:simmarket.run[cfg;calendar;dbpath],1,Run with disk persistence
-true,0,0,q,diskresult~dbpath,1,Returns dbpath on success
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test",1,Database root exists on disk
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18",1,First date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.20",1,Last date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18/trade",1,Trade table exists in partition
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/days",1,The days table is written at the root
-true,0,0,q,(count calendar)=count get hsym`$"/tmp/simmarket_test/days",1,The days table on disk has one row per day
-before,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up before quotes disk test
-before,0,0,q,qdiskresult:simmarket.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
-true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18/quote",1,Quote table exists in partition
-after,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up test database
+comment,0,0,q,,1,=== Database Tests ===
+before,0,0,q,hdbcfgs:simmarket.compose[market;update tradesperday:5000 from instruments;scenarios;`NVDA`PG!`normal`volatile;`seed`generatequotes!(42;1b)],1,Two stocks with their own scenarios
+before,0,0,q,hdbmem:simmarket.runmany[hdbcfgs;calendar;(::)],1,The same run in memory
+before,0,0,q,hdb:`:/tmp/simmarket_hdb,1,The database path
+before,0,0,q,system"rm -rf /tmp/simmarket_hdb",1,Clean up any existing database
+before,0,0,q,hdbres:simmarket.writehdb[hdbcfgs;calendar;hdb;(`symbol$())!()],1,Write it one day of all stocks at a time
+true,0,0,q,hdbres~hdb,1,writehdb returns dbpath
+true,0,0,q,all `sym`config in key hdb,1,The root holds the sym file and the run's config
+true,0,0,q,all (`$string calendar`date) in key hdb,1,One partition per calendar date
+before,0,0,q,readpart:{[db;d;name] s:get .Q.dd[db;`sym]; t:get .Q.par[db;d;name]; flip {[s;c] $[20h<=abs type c;s `long$c;c]}[s] each flip t},1,A partition's table read without loading the database (symbols resolved)
+before,0,0,q,memday:{[t;d] `sym`time xasc select from t where d=`date$time},1,A date of an in-memory table in the partition's order
+true,0,0,q,all {[db;d] (readpart[db;d;`trade])~memday[hdbmem`trade;d]}[hdb] each calendar`date,1,For each date the trades on disk equal the in-memory run
+true,0,0,q,all {[db;d] (readpart[db;d;`quote])~memday[hdbmem`quote;d]}[hdb] each calendar`date,1,So do the quotes
+true,0,0,q,all {[db;d] (readpart[db;d;`days])~`sym xasc delete date from select from hdbmem[`days] where date=d}[hdb] each calendar`date,1,And the days rows
+true,0,0,q,all {[db;d] t:readpart[db;d;`trade]; t~`sym`time xasc t}[hdb] each calendar`date,1,Each partition is sorted by sym then time
+true,0,0,q,all {[db;d] `p=attr (get .Q.par[db;d;`trade])`sym}[hdb] each calendar`date,1,With the parted attribute on sym
+true,0,0,q,all {[db;d] all `trade`quote`days in key .Q.par[db;d;`]}[hdb] each calendar`date,1,Every partition holds every requested table
+true,0,0,q,all {[db;d] `NVDA`PG~asc distinct (readpart[db;d;`trade])`sym}[hdb] each calendar`date,1,Two instruments in one run: both are in every partition (neither overwrites the other)
+true,0,0,q,(exec count i by sym from readpart[hdb;first calendar`date;`trade])~exec count i by sym from memday[hdbmem`trade;first calendar`date],1,With the same rows per stock
+before,0,0,q,zc:-21!.Q.dd[.Q.par[hdb;first calendar`date;`trade];`price],1,The compression of a column file
+true,0,0,q,5i=zc`algorithm,1,Compression is applied: zstd
+true,0,0,q,3i=zc`zipLevel,1,At level 3
+true,0,0,q,zc[`compressedLength]<zc`uncompressedLength,1,And the column is smaller than its data
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbraw",1,Clean up
+before,0,0,q,simmarket.writehdb[hdbcfgs;calendar;`:/tmp/simmarket_hdbraw;(enlist `compression)!enlist ()],1,The same database uncompressed
+true,0,0,q,0=count -21!.Q.dd[.Q.par[`:/tmp/simmarket_hdbraw;first calendar`date;`trade];`price],1,Its columns are not compressed
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbraw;d;`trade])~readpart[hdb;d;`trade]} each calendar`date,1,The compressed trades read back identical to the uncompressed write
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbraw;d;`quote])~readpart[hdb;d;`quote]} each calendar`date,1,So do the quotes
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbtrade",1,Clean up
+before,0,0,q,simmarket.writehdb[hdbcfgs;calendar;`:/tmp/simmarket_hdbtrade;(enlist `tables)!enlist `trade],1,The same run with trades only
+true,0,0,q,all {[d] not `quote in key .Q.par[`:/tmp/simmarket_hdbtrade;d;`]} each calendar`date,1,tables trade writes no quote table
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbtrade;d;`trade])~readpart[hdb;d;`trade]} each calendar`date,1,And the trades are identical to the run with quotes
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbtrade;d;`days])~readpart[hdb;d;`days]} each calendar`date,1,As are the days rows
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbone",1,Clean up
+before,0,0,q,simmarket.run[hdbcfgs`PG;calendar;`:/tmp/simmarket_hdbone],1,PG alone through run
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbone;d;`trade])~select from readpart[hdb;d;`trade] where sym=`PG} each calendar`date,1,A stock's data is identical whether it runs alone or with others
+true,0,0,q,all {[d] (readpart[`:/tmp/simmarket_hdbone;d;`days])~select from readpart[hdb;d;`days] where sym=`PG} each calendar`date,1,And so is its days row
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbresume",1,Clean up
+before,0,0,q,simmarket.writehdb[hdbcfgs;2#calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,An interrupted run: the first two dates written
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbresume/2026.08.19/days",1,The second date left without its days table (as a crash before it would)
+before,0,0,q,complete18:simmarket.complete[`:/tmp/simmarket_hdbresume;2026.08.18;`trade`quote;`NVDA`PG],1,Completeness of the first date before the resume
+before,0,0,q,complete19:simmarket.complete[`:/tmp/simmarket_hdbresume;2026.08.19;`trade`quote;`NVDA`PG],1,Of the second
+before,0,0,q,complete20:simmarket.complete[`:/tmp/simmarket_hdbresume;2026.08.20;`trade`quote;`NVDA`PG],1,Of the third
+true,0,0,q,98h=type complete18,1,A date with every table and its days rows is complete
+true,0,0,q,()~complete19,1,A date without its days table is not complete
+true,0,0,q,()~complete20,1,A date never written is not complete
+before,0,0,q,resumed:simmarket.writehdb[hdbcfgs;calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,Resumed on the full calendar
+true,0,0,q,all {[d] all {[d;n] (readpart[`:/tmp/simmarket_hdbresume;d;n])~readpart[hdb;d;n]}[d] each `trade`quote`days} each calendar`date,1,An interrupted run resumed equals a full run
+fail,0,0,q,simmarket.writehdb[hdbcfgs;calendar;`:/tmp/simmarket_hdbresume;(enlist `tables)!enlist `trade],1,Other tables into an existing database throw error
+before,0,0,q,othercfgs:hdbcfgs,1,A different configuration
+before,0,0,q,othercfgs[`PG;`vol]:0.3,1,PG at another vol
+fail,0,0,q,simmarket.writehdb[othercfgs;calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,A different configuration into an existing database throws error
+fail,0,0,q,simmarket.writehdb[hdbcfgs;1_calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,Another calendar (not an extension of the database's) throws error
+fail,0,0,q,simmarket.writehdb[(enlist `NVDA)#hdbcfgs;calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,Other instruments throw error
+before,0,0,q,hdbrun:simmarket.loadrun hdb,1,The run read back from the database's config
+true,0,0,q,`configs`calendar`opts`version~key hdbrun,1,loadrun returns the configs and the calendar and the options and the version
+true,0,0,q,hdbrun[`configs]~hdbcfgs,1,The configs reload unchanged
+true,0,0,q,hdbrun[`calendar]~calendar,1,So does the calendar
+true,0,0,q,hdbrun[`version]=simmarket.version[],1,The version is the code's
+true,0,0,q,-11h=type simmarket.version[],1,version is a symbol
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbreplay",1,Clean up
+before,0,0,q,simmarket.writehdb[hdbrun`configs;hdbrun`calendar;`:/tmp/simmarket_hdbreplay;hdbrun`opts],1,The run replayed from the config file
+true,0,0,q,all {[d] all {[d;n] (readpart[`:/tmp/simmarket_hdbreplay;d;n])~readpart[hdb;d;n]}[d] each `trade`quote`days} each calendar`date,1,The config reloads and reproduces the run
+true,0,0,q,`unset~@[value;`.z.zd;`unset],1,The writer leaves the session's compression setting as it found it (unset)
+before,0,0,q,system"rm -rf /tmp/simmarket_hdbempty",1,Clean up
+before,0,0,q,simmarket.writetable[`:/tmp/simmarket_hdbempty;2026.08.18;`quote;0#hdbmem`quote;17 5 3;`sym`time],1,An empty quote table written to a partition
+true,0,0,q,`.d in key .Q.par[`:/tmp/simmarket_hdbempty;2026.08.18;`quote],1,An empty table is written with its schema
+true,0,0,q,0=count get .Q.par[`:/tmp/simmarket_hdbempty;2026.08.18;`quote],1,And no rows
+before,0,0,q,keepdays:days,1,Keep the suite's days variable across the load
+before,0,0,q,cwd:system"cd",1,And the working directory
+before,0,0,q,system"l /tmp/simmarket_hdb",1,The database loads with \l
+before,0,0,q,hdbtrade:select from trade,1,Its trade table
+before,0,0,q,hdbquote:select from quote,1,Its quote table
+before,0,0,q,hdbdays:select from days,1,Its days table
+before,0,0,q,days:keepdays,1,The suite's days variable restored
+before,0,0,q,system raze ("cd ";cwd),1,And the working directory
+before,0,0,q,plain:{[t] flip {[c] $[20h<=abs type c;value c;c]} each flip 0!t},1,A loaded table's symbol columns de-enumerated
+true,0,0,q,`date`sym`time`seq`price`qty`aggressor`cond`venue~cols hdbtrade,1,The loaded trade table has the partition's date then the tape's columns
+true,0,0,q,`date`sym`time`seq`bid`ask`bidsize`asksize~cols hdbquote,1,The loaded quote table too
+true,0,0,q,`date`sym`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`trades`volume~cols hdbdays,1,And the days table: the partition's date then sym then the day's row
+true,0,0,q,20h=type hdbtrade`sym,1,sym is enumerated against the root sym file
+true,0,0,q,(plain (delete date from select from hdbtrade where date=2026.08.19))~memday[hdbmem`trade;2026.08.19],1,A loaded date equals the in-memory run
+true,0,0,q,(2*count calendar)=count hdbdays,1,days holds one row per stock and date
+after,0,0,q,system"rm -rf /tmp/simmarket_hdb /tmp/simmarket_hdbraw /tmp/simmarket_hdbtrade /tmp/simmarket_hdbone /tmp/simmarket_hdbresume /tmp/simmarket_hdbreplay /tmp/simmarket_hdbempty",1,Clean up the databases
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simmarket.run[cfg;calendar;(::)],1,First run
 before,0,0,q,run2:simmarket.run[cfg;calendar;(::)],1,Second run
