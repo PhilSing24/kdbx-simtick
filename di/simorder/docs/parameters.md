@@ -29,7 +29,7 @@ An order's configuration is composed from the market file's `orders` group (and 
 |---|---|---|---|
 | `ticksize` | float | minimum price increment; fill prices sit on the tick or exactly at the midpoint (half ticks) | 0.01 |
 | `latencyms` | float | milliseconds from a child's send to its arrival at the market (and half of it to its ack) | 2 |
-| `maxreplaces` | long | how many times a passive child re-pegs to the near touch when it moves away, before resting where it is | 20 |
+| `maxreplaces` | long | how many times a passive child re-pegs to the near touch when it moves, either way, before resting where it is | 20 |
 | `jitter` | float | random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule) | 0.3 |
 | `capacity` | symbol | A (agency) or P (principal) | A |
 | `ordervenues` | symbol list | lit venues (MIC codes) the children are routed to | XNAS ARCX BATS EDGX |

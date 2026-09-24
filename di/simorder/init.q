@@ -823,7 +823,7 @@ schema[`algo]:("S";`order;`order;"the algorithm working the order (a label: VWAP
 schema[`seed]:("J";`order;`order;"random seed of the jitter, the aggression and the venues (0N = no seed)")
 schema[`ticksize]:("F";`market;`session;"minimum price increment; fill prices sit on the tick or exactly at the midpoint (half ticks)")
 schema[`latencyms]:("F";`market;`orders;"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
-schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
+schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves, either way, before resting where it is")
 schema[`jitter]:("F";`market;`orders;"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
 schema[`capacity]:("S";`market;`orders;"A (agency) or P (principal)")
 schema[`ordervenues]:("SL";`market;`orders;"lit venues (MIC codes) the children are routed to")

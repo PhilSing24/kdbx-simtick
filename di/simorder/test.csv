@@ -280,6 +280,30 @@ true,0,0,q,`MKT=last pgres[`children]`ordtype,1,,The cleanup child is marketable
 true,0,0,q,(sum pgres[`executions]`qty)=pgcfg`orderqty,1,,The order still fills in full
 true,0,0,q,(exec qty-filledqty from pgres`children where status=`cancelled)~exec qty from pgres`events where event=`cancel,1,,A cancel carries the child's unfilled quantity
 true,0,0,q,(last pgres[`children]`qty)=pgcfg[`orderqty]-sum exec filledqty from pgres`children where childid<=pgcfg`numchildren,1,,The cleanup child carries what the scheduled children left
+comment,0,0,q,,1,,=== Resting Fill Tests ===
+before,0,0,q,restcfg:basecfg,1,,A purely passive order: every fill is one that rested
+before,0,0,q,restcfg[`spreadcapture]:0f,1,,Every child passive
+before,0,0,q,restcfg[`darkshare]:0f,1,,And none of them dark
+before,0,0,q,restbuy:aj[`time;(simorder.run[restcfg;trades;quotes])`executions;`time`bid`ask#quotes],1,,Run it as a BUY and attach the quote in force at each fill
+before,0,0,q,restbuya:select from restbuy where liquidity=`A,1,,Its added fills
+true,0,0,q,0<count restbuya,1,,It has added fills to check, so the assertions below are not vacuous
+true,0,0,q,all restbuya[`price]<=restbuya`bid,1,,A resting BUY fills at the bid in force and never above it: it cannot buy through a market that has already passed its limit
+true,0,0,q,all restbuya[`price]<=0.5*restbuya[`bid]+restbuya`ask,1,,And so it is never worse than the mid in force
+before,0,0,q,restsellcfg:restcfg,1,,The same order on the other side
+before,0,0,q,restsellcfg[`side]:`SELL,1,,Sold rather than bought
+before,0,0,q,restsell:aj[`time;(simorder.run[restsellcfg;trades;quotes])`executions;`time`bid`ask#quotes],1,,Run it and attach the quote in force
+before,0,0,q,restsella:select from restsell where liquidity=`A,1,,Its added fills
+true,0,0,q,0<count restsella,1,,It has added fills to check
+true,0,0,q,all restsella[`price]>=restsella`ask,1,,A resting SELL fills at the ask in force and never below it
+true,0,0,q,all restsella[`price]>=0.5*restsella[`bid]+restsella`ask,1,,And so it is never worse than the mid in force
+before,0,0,q,effbps:{[t] m:0.5*t[`bid]+t`ask; g:$[`BUY=first t`side;1f;-1f]; (sum t[`qty]*1e4*g*(t[`price]-m)%m)%sum t`qty},1,,Quantity-weighted effective half-spread in bps, positive being a cost
+true,0,0,q,0>effbps restbuya,1,,A resting BUY earns the spread rather than paying it: its effective half-spread is negative
+true,0,0,q,0>effbps restsella,1,,And so does a resting SELL, so the sign is not an artefact of one side
+before,0,0,q,pgbigcfg:pgcfg,1,,The illiquid passive order again, four times the size
+before,0,0,q,pgbigcfg[`orderqty]:4*pgcfg`orderqty,1,,Four times the quantity over the same window
+before,0,0,q,pgbigres:simorder.run[pgbigcfg;pgtrades;pgquotes],1,,Run it
+before,0,0,q,filledshare:{[r;c] (sum exec filledqty from r[`children] where childid<=c`numchildren)%c`orderqty},1,,The share of itself a passive order fills
+true,0,0,q,filledshare[pgbigres;pgbigcfg]<filledshare[pgres;pgcfg],1,,A larger passive order fills a smaller share of itself: a level that clears gives the size it had, not whatever is asked of it
 comment,0,0,q,,1,,=== Config Tests ===
 before,0,0,q,of:simorder.files[],1,,The shipped market file and order rows
 before,0,0,q,orders:simorder.loadorders of`orders,1,,Load the order rows
