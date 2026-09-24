@@ -4,7 +4,7 @@ Order execution simulator for TCA (Transaction Cost Analysis) and market surveil
 
 ## About
 
-A TCA demo needs more than realistic market data — it needs a realistic *order* trading against that market, so cost metrics (VWAP slippage, implementation shortfall, effective spread, markouts) have something to measure. A surveillance demo needs the order's life, not just its fills: the child orders, their acknowledgements, replaces and cancels, and which of them printed. `di.simorder` takes the `trades`/`quotes` output of `di.simtick` (or `di.simcalendar`) and simulates an algo working a parent order into child orders that execute against that tape.
+A TCA demo needs more than realistic market data — it needs a realistic *order* trading against that market, so cost metrics (VWAP slippage, implementation shortfall, effective spread, markouts) have something to measure. A surveillance demo needs the order's life, not just its fills: the child orders, their acknowledgements, replaces and cancels, and which of them printed. `di.simorder` takes the `trades`/`quotes` output of `di.simtick` (or `di.simmarket`) and simulates an algo working a parent order into child orders that execute against that tape.
 
 The module is designed around a single core idea: **execution quality is a config choice, not a random outcome**. The same order, run twice with different parameters against the *same* underlying market, produces two different, explainable cost outcomes — which is exactly the comparison a TCA demo needs to show.
 
@@ -27,7 +27,7 @@ The module is designed around a single core idea: **execution quality is a confi
 
 ### Market Focus
 
-Built to sit directly on top of `di.simtick`'s output. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simcalendar` in memory) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped order rows are on the market file's default date.
+Built to sit directly on top of `di.simtick`'s output. `run` keeps only the rows of `trades`/`quotes` for the order's `sym` on the day of `starttime`, so tables holding several instruments or days (`di.simmarket` in memory) can be passed whole. It throws when the tables have no rows for that instrument and day, when `starttime` and `endtime` fall on different days, or when `starttime` precedes the first quote of the day, rather than pricing the order off the first or last quote in silence. The shipped order rows are on the market file's default date.
 
 ### Use Cases
 
@@ -218,7 +218,7 @@ The sizes are the children's targets; each child then executes against the tape 
 `simorder.impact[icfg;execs;trades;quotes]` moves one instrument's day of market data by the transient impact of child executions. Pass every order's executions in that instrument, not one order's: impact acts across orders, so it runs after all their schedules and sizes and before any of their prices.
 
 - **Child impact** — each execution's impact, as a fraction of the price, is `eta × sigma × p^beta` under the `participation` model, where `sigma` is the day's volatility (`dailyvol`, from 5-minute mids) and `p` the child's participation, own / (own + market), in the market volume of an interval of the child's length centred on its time (`execs` column `interval`); or `eta × sigma × sqrt(own / daily volume)` under the `sqrtlaw` model, the square-root law on the child's size against the day's volume. In currency it is that fraction of the mid in force.
-- **Shift** — the price shift in force at any time is the sum of every earlier execution's signed impact (a buy pushes up): a share `permanent` of each stays through the day, the rest halves every `halflife`. The sum is tapered linearly to zero over `taper` before `closetime` and rounded to whole cents (`shiftat`), so bid and ask move by the same tick, a quote is never locked or crossed, and nothing is left at the close. The close, and the next day that `di.simcalendar` starts from it, are unmoved, so the permanent share is permanent within the day.
+- **Shift** — the price shift in force at any time is the sum of every earlier execution's signed impact (a buy pushes up): a share `permanent` of each stays through the day, the rest halves every `halflife`. The sum is tapered linearly to zero over `taper` before `closetime` and rounded to whole cents (`shiftat`), so bid and ask move by the same tick, a quote is never locked or crossed, and nothing is left at the close. The close, and the next day that `di.simmarket` starts from it, are unmoved, so the permanent share is permanent within the day.
 - **Market** — quotes and prints move by the shift in force at their time (a print by the shift of the quote in force, so it keeps its place inside that quote), and a quote is added at each execution time carrying the moved level. Volumes, sizes and the order of events are unchanged; with `eta` 0 or no executions the market is returned as it is.
 - **Prices** — run each order again against the moved market (`run[cfg;moved`trades;moved`quotes]`). Its aggressive fills then take the moved touch, its passive children rest on the moved touch, and its arrival price includes earlier orders' impact but not its own.
 
@@ -244,10 +244,10 @@ q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
 
 ### Many orders and multiple days
 
-`generate` draws an order flow over every instrument and day in the market it is given, and `runmany` runs a table of order configs; `runflow` does both. `di.simcalendar`'s in-memory result serves as the market as it is, and so do the `trade` and `quote` tables of its database.
+`generate` draws an order flow over every instrument and day in the market it is given, and `runmany` runs a table of order configs; `runflow` does both. `di.simmarket`'s in-memory result serves as the market as it is, and so do the `trade` and `quote` tables of its database.
 
 ```q
-q)cal:simcalendar.run[cfg;calendar;(::)]
+q)cal:simmarket.run[cfg;calendar;(::)]
 q)flow:simorder.runflow[market;`norders`seed!(3;7);cal`trade;cal`quote]
 q)select orderid,sym,side,orderqty,`date$starttime,algo,account,filledqty,avgpx,arrivalprice from flow`orders
 q)select orders:count i,cancels:sum event=`cancel,replaces:sum event=`replace by account from flow`events lj 1!select orderid,account from flow`orders

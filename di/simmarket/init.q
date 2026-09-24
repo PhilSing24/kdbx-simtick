@@ -1,4 +1,4 @@
-/ di.simcalendar - multi-day tick simulation over a trading calendar
+/ di.simmarket - multi-day tick simulation over a trading calendar
 / Runs di.simtick day after day: each day opens at the previous close moved
 / by an overnight return, has its own volatility and volume regime, closing
 / time and jump intensity, and its own seed, and the days are summarized
@@ -252,11 +252,11 @@ run:{[cfg;calendar;dbpath]
   /
   / Example (in-memory):
   /   cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
-  /   result:simcalendar.run[cfg;calendar;(::)]
+  /   result:simmarket.run[cfg;calendar;(::)]
   /   result`days
   /
   / Example (persist to disk):
-  /   simcalendar.run[cfg;calendar;`:/tmp/mydb]
+  /   simmarket.run[cfg;calendar;`:/tmp/mydb]
   cfg:.z.m.validatecfg cfg;
   reg:.z.m.regimes[cfg;calendar];
   topersist:not (::)~dbpath;

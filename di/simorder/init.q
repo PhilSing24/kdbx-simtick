@@ -1,6 +1,6 @@
 / di.simorder - order execution simulator for TCA demo
 / Generates a parent order + child fills against an existing trades/quotes
-/ market (from di.simtick / di.simcalendar), with configurable execution
+/ market (from di.simtick / di.simmarket), with configurable execution
 / quality (pacing, spread capture) to demonstrate good vs. bad execution.
 / An order's configuration is composed from the market file's orders group
 / and an order row (see compose); the market file also holds the algo menu
@@ -298,7 +298,7 @@ shiftat:{[icfg;times;moves]
   / the market's price shift in currency at each of times (ascending, one day): the sum of every earlier or
   / simultaneous child's signed impact, a share permanent of which stays through the day while the rest
   / halves every halflife and is ignored after 20 halflives (below a millionth of it); the sum is tapered
-  / linearly to zero over the taper before closetime (so the close, and the next day di.simcalendar starts
+  / linearly to zero over the taper before closetime (so the close, and the next day di.simmarket starts
   / from it, are unmoved: the permanent share is permanent within the day) and rounded to whole cents, so
   / bid and ask move by the same tick
   / icfg: impact configuration (see validateimpact); a missing permanent share means 0
@@ -648,8 +648,8 @@ marketday:{[cfg;t;name]
 run:{[cfg;trades;quotes]
   / main simulation entry point
   / cfg: order configuration dictionary (see compose)
-  / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simcalendar)
-  / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simcalendar, generatequotes:1b)
+  / trades: market trades table with `sym`time`price`qty (from di.simtick/di.simmarket)
+  / quotes: market quotes table with `sym`time`bid`ask (from di.simtick/di.simmarket, generatequotes:1b)
   /   both may hold other instruments and days; only the order's are used
   / returns: dict `orders (the parent, 1 row), `children (one row per
   /   child order), `events (the order's lifecycle: new, ack, replace,
@@ -671,7 +671,7 @@ run:{[cfg;trades;quotes]
   .z.m.val.hascols[quotes;`sym`time`bid`ask;"run"];
 
   / keep only the order's instrument and day, so tables holding several
-  / instruments or days (di.simcalendar in memory) can be
+  / instruments or days (di.simmarket in memory) can be
   / passed whole, and throw when the market does not cover the order
   trades:.z.m.marketday[cfg;trades;"trades"];
   quotes:.z.m.marketday[cfg;quotes;"quotes"];
@@ -761,7 +761,7 @@ runmany:{[cfgs;trades;quotes]
 runflow:{[market;spec;trades;quotes]
   / generate an order flow over the market and run it
   / market, spec: see generate
-  / trades, quotes: the market, any instruments and days (di.simcalendar's
+  / trades, quotes: the market, any instruments and days (di.simmarket's
   /   in-memory result, or its database's tables, serve as they are)
   / returns: dict `configs (the generated order configs) and the tables of runmany
   cfgs:.z.m.generate[market;spec;trades;quotes];

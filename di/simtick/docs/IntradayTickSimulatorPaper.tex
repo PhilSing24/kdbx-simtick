@@ -36,7 +36,7 @@
 
 \title{\textbf{Intraday Tick Simulator}\\[4pt]\large Mathematical Foundations}
 \author{Philippe Damay\\[2pt]
-\small \textbf{di.simtick}, \textbf{di.simcalendar} and \textbf{di.simorder} modules for KDB-X}
+\small \textbf{di.simtick}, \textbf{di.simmarket} and \textbf{di.simorder} modules for KDB-X}
 \date{September 2026}
 
 \begin{document}
@@ -75,7 +75,7 @@ A realistic market simulator should reproduce the main features of real intraday
 \item \textbf{Orders:} a trading algorithm splits a large order into smaller child orders, which either wait in the queue or cross the spread, get re-priced as the market moves, are cancelled or filled, and every step is recorded.
 \end{itemize}
 
-The simulator is made of three KDB-X modules, each building on the one before. \textbf{di.simtick} generates one trading day for one instrument; running it for several instruments gives several independent tapes. \textbf{di.simcalendar} runs it over a calendar of trading days, linking each day to the next. \textbf{di.simorder} generates orders and works them against the simulated market.
+The simulator is made of three KDB-X modules, each building on the one before. \textbf{di.simtick} generates one trading day for one instrument; running it for several instruments gives several independent tapes. \textbf{di.simmarket} runs it over a calendar of trading days, linking each day to the next. \textbf{di.simorder} generates orders and works them against the simulated market.
 
 Each model in the following sections is given with the configuration settings that control it, written like \key{vol} or \key{spreadticks}. All random numbers come from seeded generators, so the same configuration always produces the same data.
 
@@ -343,7 +343,7 @@ with $\sigma_d$ the day's volatility from five-minute mids and $V_i$ the market 
 % ===========================================================================
 \section{Validation}
 
-Each module carries a suite of checks run by a k4unit harness, 48 for the shared configuration, 145 for simtick, 127 for simcalendar and 229 for simorder, that hold the invariants (every trade inside its prevailing quote, spreads whole ticks, quantities conserved, events consistent with fills) and the statistics below.
+Each module carries a suite of checks run by a k4unit harness, 48 for the shared configuration, 145 for simtick, 127 for simmarket and 229 for simorder, that hold the invariants (every trade inside its prevailing quote, spreads whole ticks, quantities conserved, events consistent with fills) and the statistics below.
 
 \begin{center}
 \small
@@ -579,7 +579,7 @@ MEMX & 4.1\% & 4.8\% & 3.9\% & 4.0\%\\
 \key{jumpmean} & \multicolumn{4}{c}{0} \\
 \key{jumpvol} & \multicolumn{4}{c}{0} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Scenario: day-to-day keys (used by di.simcalendar only)}} \\*
+\multicolumn{5}{@{}l}{\textit{Scenario: day-to-day keys (used by di.simmarket only)}} \\*
 \key{overnightshare} & \multicolumn{4}{c}{0.3} \\
 \key{gapdayweight} & \multicolumn{4}{c}{0.25} \\
 \key{regimepersistence} & \multicolumn{4}{c}{0.7} \\

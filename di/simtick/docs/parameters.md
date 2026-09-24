@@ -106,7 +106,7 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 
 ## Scenario (`di/simconfig/scenarios.csv`)
 
-One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The calendar group is read by `di.simcalendar`.
+One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The calendar group is read by `di.simmarket`.
 
 ### scenario
 
@@ -120,16 +120,16 @@ One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied
 | `jumpmean` | float | jump model: mean of the log jump size | 0 |
 | `jumpvol` | float | jump model: standard deviation of the log jump size | 0 |
 
-### calendar (di.simcalendar)
+### calendar (di.simmarket)
 
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
-| `overnightshare` | float | di.simcalendar: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
-| `gapdayweight` | float | di.simcalendar: weight of each calendar day beyond the first in an overnight gap's variance | 0.25 |
-| `regimepersistence` | float | di.simcalendar: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded) | 0.7 |
-| `regimecorr` | float | di.simcalendar: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |
-| `volregimesd` | float | di.simcalendar: log spread of the volatility multiplier across days, normalized so the mean daily variance is the configured one | 0.3 |
-| `volumeregimesd` | float | di.simcalendar: log spread of the volume multiplier across days | 0.3 |
+| `overnightshare` | float | di.simmarket: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
+| `gapdayweight` | float | di.simmarket: weight of each calendar day beyond the first in an overnight gap's variance | 0.25 |
+| `regimepersistence` | float | di.simmarket: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded) | 0.7 |
+| `regimecorr` | float | di.simmarket: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |
+| `volregimesd` | float | di.simmarket: log spread of the volatility multiplier across days, normalized so the mean daily variance is the configured one | 0.3 |
+| `volumeregimesd` | float | di.simmarket: log spread of the volume multiplier across days | 0.3 |
 
 ## Run
 
