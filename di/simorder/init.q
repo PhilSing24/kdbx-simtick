@@ -481,7 +481,12 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
          Q0:Q;
          replaces+:1;
          events,:([]time:enlist s;event:enlist `replace;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
-        pegging:0b]]];
+        / it has used its replaces and cannot follow. After an away move that is fine: the touch left
+        / it behind and it rests where it is, still inside the market. After a thru move it is not:
+        / the market is past its limit, and a child left resting there is a better price than anything
+        / the market is showing, so it would fill again later at a price no longer on offer. maxreplaces
+        / limits chasing a touch, not resting through one. The child stops here and its leaves roll on.
+        [pegging:0b; if[`thru=ev; s:expiry]]]]];
   if[0=leaves; events,:([]time:enlist last fls`time;event:enlist `done;qty:enlist 0;price:enlist L;leavesqty:enlist 0)];
   if[leaves>0; events,:([]time:enlist expiry;event:enlist `cancel;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
   `fills`events`leaves`replaces`limit!(fls;events;leaves;replaces;L)

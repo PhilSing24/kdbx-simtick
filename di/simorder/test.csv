@@ -299,6 +299,17 @@ true,0,0,q,all restsella[`price]>=0.5*restsella[`bid]+restsella`ask,1,,And so it
 before,0,0,q,effbps:{[t] m:0.5*t[`bid]+t`ask; g:$[`BUY=first t`side;1f;-1f]; (sum t[`qty]*1e4*g*(t[`price]-m)%m)%sum t`qty},1,,Quantity-weighted effective half-spread in bps, positive being a cost
 true,0,0,q,0>effbps restbuya,1,,A resting BUY earns the spread rather than paying it: its effective half-spread is negative
 true,0,0,q,0>effbps restsella,1,,And so does a resting SELL, so the sign is not an artefact of one side
+before,0,0,q,fewcfg:restcfg,1,,The same passive order with few replaces, as a real deployment configures it
+before,0,0,q,fewcfg[`maxreplaces]:3,1,,Three replaces, so children stop following the touch early and then have to cope without it
+before,0,0,q,fewbuy:aj[`time;(simorder.run[fewcfg;trades;quotes])`executions;`time`bid`ask#quotes],1,,Run it as a BUY with the quote in force
+before,0,0,q,fewbuya:select from fewbuy where liquidity=`A,1,,Its added fills
+true,0,0,q,0<count fewbuya,1,,It has added fills to check
+true,0,0,q,all fewbuya[`price]<=fewbuya`bid,1,,A child that has used its replaces still never fills above the bid in force: once the market is past its limit it stops rather than resting on to fill at a price no longer offered
+before,0,0,q,fewsellcfg:fewcfg,1,,The same on the other side
+before,0,0,q,fewsellcfg[`side]:`SELL,1,,Sold rather than bought
+before,0,0,q,fewsella:select from aj[`time;(simorder.run[fewsellcfg;trades;quotes])`executions;`time`bid`ask#quotes] where liquidity=`A,1,,Its added fills
+true,0,0,q,0<count fewsella,1,,It has added fills to check
+true,0,0,q,all fewsella[`price]>=fewsella`ask,1,,And never fills below the ask in force
 before,0,0,q,pgbigcfg:pgcfg,1,,The illiquid passive order again, four times the size
 before,0,0,q,pgbigcfg[`orderqty]:4*pgcfg`orderqty,1,,Four times the quantity over the same window
 before,0,0,q,pgbigres:simorder.run[pgbigcfg;pgtrades;pgquotes],1,,Run it
