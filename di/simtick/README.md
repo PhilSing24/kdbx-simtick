@@ -65,11 +65,11 @@ The shipped market file and instruments are calibrated for **US large-cap stocks
 ```
 di/
 ├── simtick/       # one instrument, one day
-├── simcalendar/   # runs simtick over a calendar of trading days
+├── simmarket/   # runs simtick over a calendar of trading days
 └── simorder/      # generates orders and executes them against the simulated market
 ```
 
-- **`di.simcalendar`**: runs `di.simtick` day after day over a trading calendar (with a generator for NYSE holidays and half days), links consecutive days with overnight price gaps, varies volatility and volume from day to day, and can write the result to a date-partitioned kdb+ database. Any single day can be regenerated on its own.
+- **`di.simmarket`**: runs `di.simtick` day after day over a trading calendar (with a generator for NYSE holidays and half days), links consecutive days with overnight price gaps, varies volatility and volume from day to day, and can write the result to a date-partitioned kdb+ database. Any single day can be regenerated on its own.
 - **`di.simorder`**: splits parent orders into child orders that cross the spread or wait at the best price, records every order event (new, replace, cancel, fill), and can apply the market impact of the executions.
 
 **Note:** modules are loaded with absolute paths (`` use`di.simtick ``) rather than relative sibling references (`` use`..simtick ``), which did not work in our testing with KDB-X Community Edition.
@@ -152,7 +152,7 @@ A run is driven by a flat dictionary holding every parameter, which `compose` bu
 |-------|---------------|------------|
 | market | How a market works: session times, tick size, arrival clustering and intraday profile, sizes, spreads, venues and their shares, impact. Also the run defaults (date, seed, quotes) | `di/simconfig/markets/us_largecap.json`, grouped by topic |
 | instrument | What makes a stock itself: `sym`, `price`, `drift`, `vol`, `tradesperday`, and any market key it overrides (XOM and PG override `spreadticks` and `primaryvenue`) | `di/simconfig/instruments.csv`, one row per stock |
-| scenario | What makes a day type: multipliers of vol, trades per day and spread, the jump model, and the day-to-day regime keys read by `di.simcalendar` | `di/simconfig/scenarios.csv`: `normal`, `volatile`, `jumpy` |
+| scenario | What makes a day type: multipliers of vol, trades per day and spread, the jump model, and the day-to-day regime keys read by `di.simmarket` | `di/simconfig/scenarios.csv`: `normal`, `volatile`, `jumpy` |
 | run | What changes between two runs of the same stock: `tradingdate`, `seed`, `generatequotes` | a dictionary, empty for the market defaults |
 
 The layers are composed in that order, a later one overriding an earlier one. `compose` is strict: every value is cast to the type of the schema, an unknown key throws, and a missing key throws naming the layer that should supply it. There are no silent defaults. The scenario multipliers are applied once and then set to 1, so a saved configuration is not multiplied again.

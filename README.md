@@ -8,17 +8,17 @@ A collection of custom modules for [KDB-X](https://code.kx.com/kdb-x/).
 |--------|-------------|--------|
 | [di.simconfig](di/simconfig/) | Layered configuration shared by the simulators: a market file, instrument rows, scenario rows and a run dictionary composed into the flat dictionary the engines read, with the shipped US large-cap market, three instruments, three scenarios and three orders | ✅ Ready |
 | [di.simtick](di/simtick/) | Realistic intraday tick data simulator: Hawkes arrivals, quotes first and trades against the quote in force with an aggressor side, order-flow impact, spread in ticks, transaction-time volatility, auction prints and tape attributes | ✅ Ready |
-| [di.simcalendar](di/simcalendar/) | Multi-day tick simulation over a trading calendar: overnight gaps with a shared variance budget, day-level regimes, half days and event days, a seed per day, an NYSE calendar generator and a per-day summary table | ✅ Ready |
+| [di.simmarket](di/simmarket/) | Multi-day tick simulation over a trading calendar: overnight gaps with a shared variance budget, day-level regimes, half days and event days, a seed per day, an NYSE calendar generator and a per-day summary table | ✅ Ready |
 | [di.simorder](di/simorder/) | Order execution simulator: parent orders worked into child orders that execute against the `di.simtick` tape, with lifecycle events (new, ack, replace, cancel, fill, done), market impact, and an order-flow generator over instruments and days, for TCA and surveillance demos | ✅ Ready |
 
 ### Module hierarchy
 
 ```
-simtick ← simcalendar
+simtick ← simmarket
 simtick ← simorder                   (order execution against a single day's market)
 ```
 
-`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simcalendar`) or a parent order worked against that day's market (`simorder`).
+`simtick` is the atomic unit — one instrument, one day. Each layer above it adds a dimension: multiple days (`simmarket`) or a parent order worked against that day's market (`simorder`).
 
 Together, `simtick` + `simorder` generate the four datasets (`trades`, `quotes`, `orders`, `executions`) needed to build Transaction Cost Analysis (TCA) — realistic market data plus a realistic, internally consistent order trading against it, with configurable execution quality for good-vs-bad comparisons.
 
@@ -32,7 +32,7 @@ make repl
 
 ```q
 q)simtick:use`di.simtick
-q)simcalendar:use`di.simcalendar
+q)simmarket:use`di.simmarket
 q)simorder:use`di.simorder
 q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]     / one day of NVDA: trades and quotes
 ```
@@ -48,7 +48,7 @@ A simulator has many knobs, and most of them describe a market and hardly ever c
 | scenario | what makes a day type: multipliers of vol, trades and spread, the jump model, the day-to-day regime | `di/simconfig/scenarios.csv` (normal, volatile, jumpy) |
 | run | what changes between two runs: date, seed, whether to return quotes | a dictionary; the market file carries the defaults |
 
-`simtick.quick` takes the five instrument values and the date and runs that day on the shipped market; `simtick.compose` builds a configuration from the layers, applying the scenario multipliers once and deriving the Hawkes base intensity from the trades per day; `simcalendar.compose` does it for several instruments on one scenario or one each; `simorder.compose` joins the market's order keys with an order row (`di/simconfig/orders.csv`). Composition is strict: values are cast to the schema's types, unknown keys throw, missing keys throw naming the layer that should supply them, and a saved configuration replays. Every parameter is listed with its type, layer, group and description in the generated pages [simtick](di/simtick/docs/parameters.md), [simcalendar](di/simcalendar/docs/parameters.md) and [simorder](di/simorder/docs/parameters.md) (`make params`).
+`simtick.quick` takes the five instrument values and the date and runs that day on the shipped market; `simtick.compose` builds a configuration from the layers, applying the scenario multipliers once and deriving the Hawkes base intensity from the trades per day; `simmarket.compose` does it for several instruments on one scenario or one each; `simorder.compose` joins the market's order keys with an order row (`di/simconfig/orders.csv`). Composition is strict: values are cast to the schema's types, unknown keys throw, missing keys throw naming the layer that should supply them, and a saved configuration replays. Every parameter is listed with its type, layer, group and description in the generated pages [simtick](di/simtick/docs/parameters.md), [simmarket](di/simmarket/docs/parameters.md) and [simorder](di/simorder/docs/parameters.md) (`make params`).
 
 ## Installation
 
@@ -73,7 +73,7 @@ After connecting to q, add the module path:
 
 Then load modules:
 ```q
-simcalendar:use`di.simcalendar
+simmarket:use`di.simmarket
 ```
 
 ## Testing
@@ -84,7 +84,7 @@ Each module carries a `test.csv` in k4unit format, run by the `local.k4unit` mod
 make test                # all suites
 make test-simconfig      # one suite; exits non-zero when a check fails
 make test-simtick
-make test-simcalendar
+make test-simmarket
 make test-simorder
 ```
 
@@ -118,7 +118,7 @@ kdbx-modules/
     │   ├── testing.q
     │   ├── README.md
     │   └── docs/          # technical paper, parameters.md
-    ├── simcalendar/       # 1 instrument, N days (uses di.simtick)
+    ├── simmarket/       # 1 instrument, N days (uses di.simtick)
     │   ├── init.q
     │   ├── calendar.csv
     │   ├── test.csv

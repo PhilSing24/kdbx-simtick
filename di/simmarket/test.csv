@@ -1,50 +1,50 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,Initialize simtick module
-before,0,0,q,simcalendar:use`di.simcalendar,1,Initialize simcalendar module
+before,0,0,q,simmarket:use`di.simmarket,1,Initialize simmarket module
 before,0,0,q,f:simtick.files[],1,The shipped layer files
 before,0,0,q,market:simtick.loadmarket f`market,1,Load the market layer
 before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,Load the instruments
 before,0,0,q,scenarios:simtick.loadscenarios f`scenarios,1,Load the scenarios (the calendar keys are theirs)
 before,0,0,q,runcfg:`seed`generatequotes!(42;0b),1,Seeded and trades only for the run tests
 before,0,0,q,cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;runcfg],1,The NVDA normal configuration
-before,0,0,q,calendar:simcalendar.loadcalendar`:di/simcalendar/calendar.csv,1,Load calendar
+before,0,0,q,calendar:simmarket.loadcalendar`:di/simmarket/calendar.csv,1,Load calendar
 comment,0,0,q,,1,=== Validation Tests ===
-fail,0,0,q,simcalendar.validate[2026.01.20],1,Non-list date throws error
-fail,0,0,q,simcalendar.validate[`date$()],1,Empty date list throws error
-fail,0,0,q,simcalendar.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
-fail,0,0,q,simcalendar.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
-fail,0,0,q,simcalendar.validate[([]day:2026.01.20 2026.01.21)],1,A table without a date column throws error
-fail,0,0,q,simcalendar.validate[([]date:2026.01.20 2026.01.21;foo:1 2)],1,A table with an unknown column throws error
-before,0,0,q,listcal:simcalendar.validate[2026.01.20 2026.01.21],1,A date list validated
+fail,0,0,q,simmarket.validate[2026.01.20],1,Non-list date throws error
+fail,0,0,q,simmarket.validate[`date$()],1,Empty date list throws error
+fail,0,0,q,simmarket.validate[2026.01.20 2026.01.20 2026.01.21],1,Duplicate dates throws error
+fail,0,0,q,simmarket.validate[2026.01.22 2026.01.21 2026.01.20],1,Unsorted dates throws error
+fail,0,0,q,simmarket.validate[([]day:2026.01.20 2026.01.21)],1,A table without a date column throws error
+fail,0,0,q,simmarket.validate[([]date:2026.01.20 2026.01.21;foo:1 2)],1,A table with an unknown column throws error
+before,0,0,q,listcal:simmarket.validate[2026.01.20 2026.01.21],1,A date list validated
 true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols listcal,1,A date list becomes a calendar table with the optional columns
 true,0,0,q,all null listcal`closingtime,1,Its optional columns are null (the config's values)
 before,0,0,q,badcfg4:cfg,1,Setup bad config for a regime correlation above 1
 before,0,0,q,badcfg4[`regimecorr]:1.5,1,Set regimecorr above 1
-fail,0,0,q,simcalendar.run[badcfg4;calendar;(::)],1,regimecorr above 1 throws error
+fail,0,0,q,simmarket.run[badcfg4;calendar;(::)],1,regimecorr above 1 throws error
 before,0,0,q,badcfg3:cfg,1,Setup bad config for a regime persistence of 1
 before,0,0,q,badcfg3[`regimepersistence]:1f,1,Set regimepersistence to 1
-fail,0,0,q,simcalendar.run[badcfg3;calendar;(::)],1,regimepersistence of 1 throws error
-fail,0,0,q,simcalendar.run[(key[cfg] except `overnightshare)#cfg;calendar;(::)],1,A config without a calendar key throws error
+fail,0,0,q,simmarket.run[badcfg3;calendar;(::)],1,regimepersistence of 1 throws error
+fail,0,0,q,simmarket.run[(key[cfg] except `overnightshare)#cfg;calendar;(::)],1,A config without a calendar key throws error
 before,0,0,q,badcfg1:cfg,1,Setup bad config for overnightshare of 1
 before,0,0,q,badcfg1[`overnightshare]:1f,1,Set overnightshare to 1 (no intraday variance left)
-fail,0,0,q,simcalendar.run[badcfg1;calendar;(::)],1,overnightshare of 1 throws error
+fail,0,0,q,simmarket.run[badcfg1;calendar;(::)],1,overnightshare of 1 throws error
 before,0,0,q,badcfg2:cfg,1,Setup bad config for a negative gapdayweight
 before,0,0,q,badcfg2[`gapdayweight]:-1f,1,Set a negative gapdayweight
-fail,0,0,q,simcalendar.run[badcfg2;calendar;(::)],1,Negative gapdayweight throws error
+fail,0,0,q,simmarket.run[badcfg2;calendar;(::)],1,Negative gapdayweight throws error
 comment,0,0,q,,1,=== loadcalendar Tests ===
-fail,0,0,q,simcalendar.loadcalendar["/not/a/handle"],1,String filepath throws error
+fail,0,0,q,simmarket.loadcalendar["/not/a/handle"],1,String filepath throws error
 true,0,0,q,98h=type calendar,1,loadcalendar returns a calendar table
 true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols calendar,1,With the date and the optional columns
 true,0,0,q,0<count calendar,1,Calendar is non-empty
 true,0,0,q,(asc calendar`date)~calendar`date,1,Calendar is sorted ascending
 true,0,0,q,13:00=last calendar`closingtime,1,The shipped calendar's last day is a half day
-before,0,0,q,`:/tmp/simcalendar_dates.csv 0: csv 0: select date from calendar,1,A calendar file with the date column only
-true,0,0,q,(calendar`date)~(simcalendar.loadcalendar`:/tmp/simcalendar_dates.csv)`date,1,A date-only calendar file loads
-before,0,0,q,`:/tmp/simcalendar_badcal.csv 0: csv 0: update foo:1 from calendar,1,A calendar file with an unknown column
-fail,0,0,q,simcalendar.loadcalendar`:/tmp/simcalendar_badcal.csv,1,An unknown calendar column throws error
-after,0,0,q,system"rm -f /tmp/simcalendar_dates.csv /tmp/simcalendar_badcal.csv",1,Clean up calendar files
+before,0,0,q,`:/tmp/simmarket_dates.csv 0: csv 0: select date from calendar,1,A calendar file with the date column only
+true,0,0,q,(calendar`date)~(simmarket.loadcalendar`:/tmp/simmarket_dates.csv)`date,1,A date-only calendar file loads
+before,0,0,q,`:/tmp/simmarket_badcal.csv 0: csv 0: update foo:1 from calendar,1,A calendar file with an unknown column
+fail,0,0,q,simmarket.loadcalendar`:/tmp/simmarket_badcal.csv,1,An unknown calendar column throws error
+after,0,0,q,system"rm -f /tmp/simmarket_dates.csv /tmp/simmarket_badcal.csv",1,Clean up calendar files
 comment,0,0,q,,1,=== NYSE Calendar Tests ===
-before,0,0,q,cal26:simcalendar.nysecalendar[2026.01.01;2026.12.31],1,The 2026 NYSE calendar
+before,0,0,q,cal26:simmarket.nysecalendar[2026.01.01;2026.12.31],1,The 2026 NYSE calendar
 true,0,0,q,251=count cal26,1,2026 has 251 trading days
 true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity~cols cal26,1,The generated calendar has the calendar columns
 true,0,0,q,not any (cal26[`date] mod 7) in 0 1,1,No weekends
@@ -52,39 +52,39 @@ true,0,0,q,not any (2026.01.01 2026.01.19 2026.02.16 2026.04.03 2026.05.25 2026.
 true,0,0,q,2026.11.27 2026.12.24~exec date from cal26 where closingtime=13:00,1,2026 closes early on the day after Thanksgiving and Christmas Eve
 true,0,0,q,all 16:00=exec closingtime from cal26 where not date in 2026.11.27 2026.12.24,1,Every other day closes at 16:00
 true,0,0,q,all null cal26`volmult,1,The multipliers are left to the config
-before,0,0,q,cal25:simcalendar.nysecalendar[2025.01.01;2025.12.31],1,The 2025 NYSE calendar
+before,0,0,q,cal25:simmarket.nysecalendar[2025.01.01;2025.12.31],1,The 2025 NYSE calendar
 true,0,0,q,2025.07.03 2025.11.28 2025.12.24~exec date from cal25 where closingtime=13:00,1,2025 closes early on July 3 too (July 4 on a Friday)
 true,0,0,q,not 2025.04.18 in cal25`date,1,Good Friday 2025 (Easter April 20) is closed
-true,0,0,q,not 2024.03.29 in (simcalendar.nysecalendar[2024.03.01;2024.04.30])`date,1,Good Friday 2024 (Easter March 31) is closed
-true,0,0,q,not 2021.12.24 in (simcalendar.nysecalendar[2021.12.01;2021.12.31])`date,1,Christmas 2021 on a Saturday is observed on the Friday
-true,0,0,q,2022.01.03=first (simcalendar.nysecalendar[2022.01.01;2022.01.31])`date,1,New Year 2022 on a Saturday is not observed: the year opens on Monday the 3rd
-true,0,0,q,2026.08.18 2026.08.19 2026.08.20~(simcalendar.nysecalendar[2026.08.18;2026.08.20])`date,1,A short range gives its trading days
-fail,0,0,q,simcalendar.nysecalendar[2026.08.20;2026.08.18],1,from after to throws error
-before,0,0,q,simcalendar.savecalendar[`:/tmp/simcalendar_saved.csv;cal26],1,Save the 2026 calendar
-true,0,0,q,cal26~simcalendar.loadcalendar`:/tmp/simcalendar_saved.csv,1,A saved calendar loads back identical
+true,0,0,q,not 2024.03.29 in (simmarket.nysecalendar[2024.03.01;2024.04.30])`date,1,Good Friday 2024 (Easter March 31) is closed
+true,0,0,q,not 2021.12.24 in (simmarket.nysecalendar[2021.12.01;2021.12.31])`date,1,Christmas 2021 on a Saturday is observed on the Friday
+true,0,0,q,2022.01.03=first (simmarket.nysecalendar[2022.01.01;2022.01.31])`date,1,New Year 2022 on a Saturday is not observed: the year opens on Monday the 3rd
+true,0,0,q,2026.08.18 2026.08.19 2026.08.20~(simmarket.nysecalendar[2026.08.18;2026.08.20])`date,1,A short range gives its trading days
+fail,0,0,q,simmarket.nysecalendar[2026.08.20;2026.08.18],1,from after to throws error
+before,0,0,q,simmarket.savecalendar[`:/tmp/simmarket_saved.csv;cal26],1,Save the 2026 calendar
+true,0,0,q,cal26~simmarket.loadcalendar`:/tmp/simmarket_saved.csv,1,A saved calendar loads back identical
 before,0,0,q,gencfg:cfg,1,Setup config for a run on a generated calendar
-before,0,0,q,genresult:simcalendar.run[gencfg;simcalendar.nysecalendar[2026.11.25;2026.11.27];(::)],1,Run over Thanksgiving week
+before,0,0,q,genresult:simmarket.run[gencfg;simmarket.nysecalendar[2026.11.25;2026.11.27];(::)],1,Run over Thanksgiving week
 true,0,0,q,2026.11.25 2026.11.27~genresult[`days]`date,1,The run skips Thanksgiving
 true,0,0,q,2026.11.27D13:00=last exec time from genresult`trade,1,And closes early on the Friday
-after,0,0,q,system"rm -f /tmp/simcalendar_saved.csv",1,Clean up the saved calendar
+after,0,0,q,system"rm -f /tmp/simmarket_saved.csv",1,Clean up the saved calendar
 comment,0,0,q,,1,=== Compose Tests ===
-before,0,0,q,cfgs:simcalendar.compose[market;instruments;scenarios;`normal;runcfg],1,Every instrument on the normal scenario
+before,0,0,q,cfgs:simmarket.compose[market;instruments;scenarios;`normal;runcfg],1,Every instrument on the normal scenario
 true,0,0,q,`NVDA`XOM`PG~key cfgs,1,One configuration per instrument of the table
 true,0,0,q,cfg~cfgs`NVDA,1,Each is the instrument composed on the scenario
-before,0,0,q,mixed:simcalendar.compose[market;instruments;scenarios;`NVDA`PG!`normal`volatile;runcfg],1,A scenario per instrument
+before,0,0,q,mixed:simmarket.compose[market;instruments;scenarios;`NVDA`PG!`normal`volatile;runcfg],1,A scenario per instrument
 true,0,0,q,`NVDA`PG~key mixed,1,Only the named instruments
 true,0,0,q,1e-9>abs mixed[`PG;`vol]-0.17*1.45,1,PG volatile: its own vol times the scenario multiplier
 true,0,0,q,0.45=mixed[`NVDA;`vol],1,NVDA normal keeps its own vol
-true,0,0,q,((simcalendar.seeds[mixed`NVDA;calendar`date])`regimeseed)~(simcalendar.seeds[mixed`PG;calendar`date])`regimeseed,1,The two live the same market days
-true,0,0,q,((simcalendar.regimes[cfgs`NVDA;calendar])`volmult)~(simcalendar.regimes[cfgs`XOM;calendar])`volmult,1,Under the same scenario two instruments get the same day multipliers
-fail,0,0,q,simcalendar.compose[market;instruments;scenarios;(enlist `AAPL)!enlist `normal;runcfg],1,An instrument not in the table throws error naming it
-fail,0,0,q,simcalendar.compose[market;instruments;scenarios;`wild;runcfg],1,An unknown scenario throws error
-fail,0,0,q,simcalendar.compose[market;instruments;scenarios;42;runcfg],1,A scenario that is neither a name nor a dictionary throws error
-true,0,0,q,`param`typ`layer`group`description~cols simcalendar.describe[],1,describe returns the schema table
-true,0,0,q,6=count simcalendar.describe[],1,With the six calendar keys
-true,0,0,q,all `calendar=(simcalendar.describe[])`group,1,All of the calendar group
+true,0,0,q,((simmarket.seeds[mixed`NVDA;calendar`date])`regimeseed)~(simmarket.seeds[mixed`PG;calendar`date])`regimeseed,1,The two live the same market days
+true,0,0,q,((simmarket.regimes[cfgs`NVDA;calendar])`volmult)~(simmarket.regimes[cfgs`XOM;calendar])`volmult,1,Under the same scenario two instruments get the same day multipliers
+fail,0,0,q,simmarket.compose[market;instruments;scenarios;(enlist `AAPL)!enlist `normal;runcfg],1,An instrument not in the table throws error naming it
+fail,0,0,q,simmarket.compose[market;instruments;scenarios;`wild;runcfg],1,An unknown scenario throws error
+fail,0,0,q,simmarket.compose[market;instruments;scenarios;42;runcfg],1,A scenario that is neither a name nor a dictionary throws error
+true,0,0,q,`param`typ`layer`group`description~cols simmarket.describe[],1,describe returns the schema table
+true,0,0,q,6=count simmarket.describe[],1,With the six calendar keys
+true,0,0,q,all `days=(simmarket.describe[])`group,1,All of the days group
 comment,0,0,q,,1,=== Run In-Memory Tests ===
-before,0,0,q,result:simcalendar.run[cfg;calendar;(::)],1,Run in-memory simulation
+before,0,0,q,result:simmarket.run[cfg;calendar;(::)],1,Run in-memory simulation
 before,0,0,q,trades:result`trade,1,The trades of all days
 before,0,0,q,days:result`days,1,The days table
 true,0,0,q,99h=type result,1,Result is a dict
@@ -115,28 +115,28 @@ true,0,0,q,all 0.1>abs days`overnightret,1,Overnight returns are of a plausible 
 true,0,0,q,0<count distinct 1_days`overnightret,1,Overnight returns vary
 before,0,0,q,nogapcfg:cfg,1,Config without overnight gaps
 before,0,0,q,nogapcfg[`overnightshare`gapdayweight]:0 0f,1,No variance overnight
-before,0,0,q,nogapdays:(simcalendar.run[nogapcfg;calendar;(::)])`days,1,Days without overnight gaps
+before,0,0,q,nogapdays:(simmarket.run[nogapcfg;calendar;(::)])`days,1,Days without overnight gaps
 true,0,0,q,all 0f=nogapdays`overnightret,1,With overnightshare 0 there is no gap
 true,0,0,q,(1_nogapdays`open)~-1_nogapdays`close,1,With overnightshare 0 each day opens exactly at the previous close
 before,0,0,q,gapcfg:cfg,1,Setup config for a large overnight share
 before,0,0,q,gapcfg[`overnightshare]:0.9,1,Most of the variance overnight
-before,0,0,q,gapdays:(simcalendar.run[gapcfg;calendar;(::)])`days,1,Days with a large overnight share
+before,0,0,q,gapdays:(simmarket.run[gapcfg;calendar;(::)])`days,1,Days with a large overnight share
 true,0,0,q,(avg abs 1_gapdays`overnightret)>avg abs 1_days`overnightret,1,A larger overnightshare gives larger gaps
-true,0,0,q,(abs simcalendar.overnight[cfg;1])<0.2,1,overnight returns a log return of plausible size
+true,0,0,q,(abs simmarket.overnight[cfg;1])<0.2,1,overnight returns a log return of plausible size
 comment,0,0,q,,1,=== Seeds and Regimes Tests ===
-before,0,0,q,sd:simcalendar.seeds[cfg;calendar`date],1,The per-day seeds
+before,0,0,q,sd:simmarket.seeds[cfg;calendar`date],1,The per-day seeds
 true,0,0,q,`date`regimeseed`dayseed`gapseed~cols sd,1,Seeds table has correct columns
 true,0,0,q,(count calendar)=count distinct sd`dayseed,1,Every day has its own seed
 true,0,0,q,all 0<sd`dayseed,1,Seeds are positive
 before,0,0,q,xomcfg:cfg,1,Setup config for another instrument
 before,0,0,q,xomcfg[`sym]:`XOM,1,Set the sym
-true,0,0,q,(sd`regimeseed)~(simcalendar.seeds[xomcfg;calendar`date])`regimeseed,1,The regime seed of a date is shared across instruments (the market's day)
-true,0,0,q,not (sd`dayseed)~(simcalendar.seeds[xomcfg;calendar`date])`dayseed,1,The day seed differs by instrument
+true,0,0,q,(sd`regimeseed)~(simmarket.seeds[xomcfg;calendar`date])`regimeseed,1,The regime seed of a date is shared across instruments (the market's day)
+true,0,0,q,not (sd`dayseed)~(simmarket.seeds[xomcfg;calendar`date])`dayseed,1,The day seed differs by instrument
 before,0,0,q,noseedcfg:cfg,1,Setup config without a seed
 before,0,0,q,noseedcfg[`seed]:0N,1,No seed
-true,0,0,q,all null (simcalendar.seeds[noseedcfg;calendar`date])`dayseed,1,Without a seed there are no day seeds
+true,0,0,q,all null (simmarket.seeds[noseedcfg;calendar`date])`dayseed,1,Without a seed there are no day seeds
 before,0,0,q,longcal:2026.01.01+asc where not ((2026.01.01+til 730) mod 7) in 0 1,1,Two years of weekdays
-before,0,0,q,reg:simcalendar.regimes[cfg;longcal],1,Regimes over two years
+before,0,0,q,reg:simmarket.regimes[cfg;longcal],1,Regimes over two years
 true,0,0,q,(count longcal)=count reg,1,One regime row per day
 true,0,0,q,(avg reg`volmult) within 0.85 1.15,1,The volatility multiplier averages about 1
 true,0,0,q,(dev log reg`volmult) within 0.6 1.4*cfg`volregimesd,1,The log volatility multiplier's spread is about volregimesd
@@ -145,94 +145,94 @@ true,0,0,q,((1_reg`volumestate) cor -1_reg`volumestate) within 0.5 0.85,1,So doe
 true,0,0,q,(abs ((log reg`volmult) cor log reg`volumemult)-cfg`regimecorr)<0.15,1,Volume and volatility regimes move together at about regimecorr
 before,0,0,q,uncorcfg:cfg,1,Config with independent regimes
 before,0,0,q,uncorcfg[`regimecorr]:0f,1,No correlation
-before,0,0,q,uncorreg:simcalendar.regimes[uncorcfg;longcal],1,Two years of independent regimes
+before,0,0,q,uncorreg:simmarket.regimes[uncorcfg;longcal],1,Two years of independent regimes
 true,0,0,q,0.15>abs (log uncorreg`volmult) cor log uncorreg`volumemult,1,With regimecorr 0 the two regimes are independent
 before,0,0,q,onecfg:cfg,1,Config with one regime for both
 before,0,0,q,onecfg[`regimecorr]:1f,1,Full correlation
-before,0,0,q,onereg:simcalendar.regimes[onecfg;longcal],1,Two years of a shared regime
+before,0,0,q,onereg:simmarket.regimes[onecfg;longcal],1,Two years of a shared regime
 true,0,0,q,0.99<(log onereg`volmult) cor log onereg`volumemult,1,With regimecorr 1 the two regimes are one
 true,0,0,q,(uncorreg`volstate)~onereg`volstate,1,The volatility regime does not depend on regimecorr
-true,0,0,q,reg~simcalendar.regimes[cfg;longcal],1,Same seed gives the same regimes
+true,0,0,q,reg~simmarket.regimes[cfg;longcal],1,Same seed gives the same regimes
 before,0,0,q,shortcal:20#longcal,1,The first twenty days of the long calendar
-true,0,0,q,(20#reg`regimeseed)~(simcalendar.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in
+true,0,0,q,(20#reg`regimeseed)~(simmarket.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in
 before,0,0,q,cc2ins:instruments`PG,1,PG for a two-year close-to-close vol check
 before,0,0,q,cc2ins[`tradesperday]:6000,1,Made quiet so two years run fast (the transaction clock keeps the daily variance)
 before,0,0,q,cc2ins[`quotespertrade]:2f,1,And with few quotes
 before,0,0,q,cc2cfg:simtick.compose[market;cc2ins;scenarios`normal;runcfg],1,Composed on the normal scenario
 before,0,0,q,cc2cfg[`generatequotes]:0b,1,Trades only
-before,0,0,q,cc2days:(simcalendar.run[cc2cfg;longcal;(::)])`days,1,Two years of days under the default regime
+before,0,0,q,cc2days:(simmarket.run[cc2cfg;longcal;(::)])`days,1,Two years of days under the default regime
 before,0,0,q,cc2ret:1_log cc2days[`close]%prev cc2days`close,1,Close-to-close log returns
 true,0,0,q,(abs ((dev cc2ret)*sqrt 252)-cc2cfg`vol)<0.05*cc2cfg`vol,1,Over two years the close-to-close vol is within 5% of the configured vol under the default regime
 before,0,0,q,turbcfg:cc2cfg upsert `regimepersistence`regimecorr`volregimesd`volumeregimesd!0.8 0.8 0.6 0.6,1,The same under a turbulent regime
-before,0,0,q,turbdays:(simcalendar.run[turbcfg;longcal;(::)])`days,1,Two years of turbulent days
+before,0,0,q,turbdays:(simmarket.run[turbcfg;longcal;(::)])`days,1,Two years of turbulent days
 before,0,0,q,turbret:1_log turbdays[`close]%prev turbdays`close,1,Their close-to-close log returns
 true,0,0,q,(abs ((dev turbret)*sqrt 252)-turbcfg`vol)<0.15*turbcfg`vol,1,Under the turbulent regime (persistence 0.8 and log-spread 0.6) two years hold about 60 independent days so the estimate's standard error is near 10%: within 15%
 before,0,0,q,centurycal:2000.01.03+asc where not ((2000.01.03+til 36525) mod 7) in 0 1,1,A century of weekdays for the normalization on the regimes alone
 before,0,0,q,normcfg:cc2cfg,1,Config for the normalization check
 before,0,0,q,normcfg[`regimepersistence]:0f,1,Independent days so the century is a full sample
-before,0,0,q,normreg:simcalendar.regimes[normcfg;centurycal],1,A century of default regimes
+before,0,0,q,normreg:simmarket.regimes[normcfg;centurycal],1,A century of default regimes
 true,0,0,q,(abs 1-avg normreg[`volmult]*normreg`volmult)<0.05,1,The squared volatility multiplier averages 1 (the mean daily variance is the configured one) at log-spread 0.3
 true,0,0,q,(abs 1-avg normreg`volumemult)<0.05,1,The volume multiplier averages 1
-before,0,0,q,normturb:simcalendar.regimes[@[normcfg;`volregimesd;:;0.6];centurycal],1,A century of regimes at the turbulent log-spread
+before,0,0,q,normturb:simmarket.regimes[@[normcfg;`volregimesd;:;0.6];centurycal],1,A century of regimes at the turbulent log-spread
 true,0,0,q,(abs 1-avg normturb[`volmult]*normturb`volmult)<0.05,1,The squared volatility multiplier averages 1 at log-spread 0.6 too
 before,0,0,q,steadycfg:cfg upsert `regimepersistence`regimecorr`volregimesd`volumeregimesd!0 0 0 0f,1,Config with no regime variation
-true,0,0,q,all 1f=(simcalendar.regimes[steadycfg;calendar])`volmult,1,With zero regime sds every day is at the configured vol
+true,0,0,q,all 1f=(simmarket.regimes[steadycfg;calendar])`volmult,1,With zero regime sds every day is at the configured vol
 before,0,0,q,evcal:update volumemult:3f from calendar where date=2026.08.19,1,Calendar with a triple-volume day
 before,0,0,q,evcfg:steadycfg,1,Setup config for the event calendar
 before,0,0,q,evcfg[`seed]:42,1,Set seed
 before,0,0,q,evcfg[`generatequotes]:0b,1,Trades only
-before,0,0,q,evdays:(simcalendar.run[evcfg;evcal;(::)])`days,1,Run the event calendar
+before,0,0,q,evdays:(simmarket.run[evcfg;evcal;(::)])`days,1,Run the event calendar
 true,0,0,q,((evdays[`trades] 1)%evdays[`trades] 0) within 2.5 3.5,1,A volumemult of 3 in the calendar triples the day's trades
 before,0,0,q,jcal:update jumpintensity:20f from calendar where date=2026.08.19,1,Calendar with a jump day
 before,0,0,q,jcfg:evcfg,1,Setup config for the jump calendar
 before,0,0,q,jcfg[`jumpvol]:0.05,1,Large jumps
-before,0,0,q,jtrades:(simcalendar.run[jcfg;jcal;(::)])`trade,1,Run the jump calendar
+before,0,0,q,jtrades:(simmarket.run[jcfg;jcal;(::)])`trade,1,Run the jump calendar
 before,0,0,q,jmins:exec abs log last[price]%first price by 0D00:01 xbar time from jtrades,1,Absolute return per minute
 true,0,0,q,0<count where (jmins>0.02)&(`date$key jmins)=2026.08.19,1,The jump day has jumps
 true,0,0,q,0=count where (jmins>0.02)&(`date$key jmins)<>2026.08.19,1,The other days have none
 comment,0,0,q,,1,=== Regenerate One Day Tests ===
 before,0,0,q,day2:days 1,1,The second day's row
-before,0,0,q,alone:simtick.run simcalendar.daycfg[cfg;day2;day2`open],1,The second day regenerated alone from its row
+before,0,0,q,alone:simtick.run simmarket.daycfg[cfg;day2;day2`open],1,The second day regenerated alone from its row
 true,0,0,q,(exec price from trades where ("d"$time)=day2`date)~alone`price,1,It reproduces the second day's prices exactly
 true,0,0,q,(exec time from trades where ("d"$time)=day2`date)~alone`time,1,And its times
 comment,0,0,q,,1,=== Quotes Tests ===
 before,0,0,q,qcfg:cfg,1,Setup config with quotes
 before,0,0,q,qcfg[`generatequotes]:1b,1,Enable quote generation
-before,0,0,q,qresult:simcalendar.run[qcfg;calendar;(::)],1,Run with quotes
+before,0,0,q,qresult:simmarket.run[qcfg;calendar;(::)],1,Run with quotes
 true,0,0,q,99h=type qresult,1,Result with quotes is dict
 true,0,0,q,`trade`quote`days~key qresult,1,Dict has trade quote and days keys
 true,0,0,q,`sym`time`seq`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
 comment,0,0,q,,1,=== Several Instruments Tests ===
-before,0,0,q,manycfgs:simcalendar.compose[market;update tradesperday:5000 from instruments;scenarios;`normal;runcfg],1,The three instruments made quiet
-before,0,0,q,many:simcalendar.runmany[manycfgs;calendar;(::)],1,Run them over the calendar
+before,0,0,q,manycfgs:simmarket.compose[market;update tradesperday:5000 from instruments;scenarios;`normal;runcfg],1,The three instruments made quiet
+before,0,0,q,many:simmarket.runmany[manycfgs;calendar;(::)],1,Run them over the calendar
 true,0,0,q,`trade`days~key many,1,The merged result has the trades and the days (no quotes requested)
 true,0,0,q,(asc many[`trade]`time)~many[`trade]`time,1,The merged trades are sorted by time
 true,0,0,q,3=count distinct many[`trade]`sym,1,With every instrument
 true,0,0,q,`sym`date~2#cols many`days,1,The days table has a sym column first
 true,0,0,q,9=count many`days,1,And one row per instrument and day
-true,0,0,q,(select from many[`trade] where sym=`PG)~(simcalendar.run[manycfgs`PG;calendar;(::)])`trade,1,An instrument's tape is that of its own run
-before,0,0,q,system"rm -rf /tmp/simcalendar_many",1,Clean up any existing multi-instrument database
-before,0,0,q,manydisk:simcalendar.runmany[manycfgs;calendar;`:/tmp/simcalendar_many],1,Run them to disk
-true,0,0,q,manydisk~`:/tmp/simcalendar_many,1,Returns dbpath on success
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_many/2026.08.18/trade",1,The trade table is in the first date partition
-true,0,0,q,9=count get hsym`$"/tmp/simcalendar_many/days",1,The days table on disk has one row per instrument and day
-after,0,0,q,system"rm -rf /tmp/simcalendar_many",1,Clean up the multi-instrument database
+true,0,0,q,(select from many[`trade] where sym=`PG)~(simmarket.run[manycfgs`PG;calendar;(::)])`trade,1,An instrument's tape is that of its own run
+before,0,0,q,system"rm -rf /tmp/simmarket_many",1,Clean up any existing multi-instrument database
+before,0,0,q,manydisk:simmarket.runmany[manycfgs;calendar;`:/tmp/simmarket_many],1,Run them to disk
+true,0,0,q,manydisk~`:/tmp/simmarket_many,1,Returns dbpath on success
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_many/2026.08.18/trade",1,The trade table is in the first date partition
+true,0,0,q,9=count get hsym`$"/tmp/simmarket_many/days",1,The days table on disk has one row per instrument and day
+after,0,0,q,system"rm -rf /tmp/simmarket_many",1,Clean up the multi-instrument database
 comment,0,0,q,,1,=== Disk Persistence Tests ===
-before,0,0,q,dbpath:`:/tmp/simcalendar_test,1,Set test database path
-before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up any existing test database
-before,0,0,q,diskresult:simcalendar.run[cfg;calendar;dbpath],1,Run with disk persistence
+before,0,0,q,dbpath:`:/tmp/simmarket_test,1,Set test database path
+before,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up any existing test database
+before,0,0,q,diskresult:simmarket.run[cfg;calendar;dbpath],1,Run with disk persistence
 true,0,0,q,diskresult~dbpath,1,Returns dbpath on success
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test",1,Database root exists on disk
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18",1,First date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.20",1,Last date partition exists
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/trade",1,Trade table exists in partition
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/days",1,The days table is written at the root
-true,0,0,q,(count calendar)=count get hsym`$"/tmp/simcalendar_test/days",1,The days table on disk has one row per day
-before,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up before quotes disk test
-before,0,0,q,qdiskresult:simcalendar.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
-true,0,0,q,not()~key hsym`$"/tmp/simcalendar_test/2026.08.18/quote",1,Quote table exists in partition
-after,0,0,q,system"rm -rf /tmp/simcalendar_test",1,Clean up test database
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test",1,Database root exists on disk
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18",1,First date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.20",1,Last date partition exists
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18/trade",1,Trade table exists in partition
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/days",1,The days table is written at the root
+true,0,0,q,(count calendar)=count get hsym`$"/tmp/simmarket_test/days",1,The days table on disk has one row per day
+before,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up before quotes disk test
+before,0,0,q,qdiskresult:simmarket.run[qcfg;calendar;dbpath],1,Run with quotes and disk persistence
+true,0,0,q,not()~key hsym`$"/tmp/simmarket_test/2026.08.18/quote",1,Quote table exists in partition
+after,0,0,q,system"rm -rf /tmp/simmarket_test",1,Clean up test database
 comment,0,0,q,,1,=== Reproducibility Tests ===
-before,0,0,q,run1:simcalendar.run[cfg;calendar;(::)],1,First run
-before,0,0,q,run2:simcalendar.run[cfg;calendar;(::)],1,Second run
+before,0,0,q,run1:simmarket.run[cfg;calendar;(::)],1,First run
+before,0,0,q,run2:simmarket.run[cfg;calendar;(::)],1,Second run
 true,0,0,q,run1~run2,1,Same seed produces same output

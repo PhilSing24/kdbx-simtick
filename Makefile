@@ -4,7 +4,7 @@
 PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export QPATH := $(PROJECT_ROOT):$(QPATH)
 
-.PHONY: repl test test-simconfig test-simtick test-simcalendar test-simorder params help
+.PHONY: repl test test-simconfig test-simtick test-simmarket test-simorder params help
 
 # Default target
 help:
@@ -14,21 +14,21 @@ help:
 	@echo "  make test            - Run all module tests"
 	@echo "  make test-simconfig  - Run simconfig tests only"
 	@echo "  make test-simtick    - Run simtick tests only"
-	@echo "  make test-simcalendar - Run simcalendar tests only"
+	@echo "  make test-simmarket - Run simmarket tests only"
 	@echo "  make test-simorder   - Run simorder tests only"
 	@echo "  make params          - Regenerate the parameter reference pages (di/*/docs/parameters.md)"
 	@echo ""
 	@echo "Usage example:"
 	@echo "  make repl"
 	@echo "  q) simtick:use\`di.simtick"
-	@echo "  q) simcalendar:use\`di.simcalendar"
+	@echo "  q) simmarket:use\`di.simmarket"
 
 # Interactive REPL
 repl:
 	q
 
 # Run all tests
-test: test-simconfig test-simtick test-simcalendar test-simorder
+test: test-simconfig test-simtick test-simmarket test-simorder
 
 # Individual module tests
 # The runner is the local.k4unit module; each target exits non-zero when a check fails or the suite aborts (the runner's error is trapped, since an untrapped error would end the piped q with status 0)
@@ -38,8 +38,8 @@ test-simconfig:
 test-simtick:
 	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simtick;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
 
-test-simcalendar:
-	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simcalendar;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+test-simmarket:
+	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simmarket;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
 
 test-simorder:
 	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simorder;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
