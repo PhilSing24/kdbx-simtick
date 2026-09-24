@@ -20,6 +20,7 @@ The module is designed around a single core idea: **execution quality is a confi
 - **Volume-aware sizing** — under `even` pacing, child sizes are weighted by real market volume in each time bucket (pulled from `trades`), not a naive flat split
 - **Seeded jitter and aggression** — children leave the exact schedule by a random share `jitter` of the gap to their neighbours, and each is aggressive with probability `spreadcapture`, so fills differ from run to run of the seed while the mean execution style is the configured one
 - **Exact quantity conservation** — the fills always sum exactly to the parent order's `orderqty`
+- **Dark pools** — a passive child is sent to UBS ATS or Level ATS with probability `darkshare`, rests at the midpoint and fills only against off-exchange midpoint prints already on the tape; the fill report names the pool, the tape still says `TRF`.
 - **Tape-consistent fills** — fill prices sit on the tick or exactly at the midpoint; aggressive fills are at the far touch in force or one tick beyond, passive fills at the child's limit; each fill carries its venue, whether it added or removed liquidity, and the order's capacity
 - **Arrival price benchmark** — the parent order carries the mid at `starttime`, its filled quantity and its average price, ready for implementation-shortfall calculations
 - **Interval per execution** — each execution carries the length of market its child was sized against (`interval`), which is what `impact` reads
@@ -117,7 +118,7 @@ orderid account algo sym  side orderqty ordtype limitprice capacity starttime   
 ORD001  ACC1    VWAP NVDA BUY  10000    ALGO               A        2026.08.18D09:35:00.000000000 2026.08.18D09:45:00.000000000 215.655      10000     216.3942 filled
 
 q)4#res`children
-childid orderid sym  side qty ordtype limitprice venue sendtime                      expiry                        filledqty status replaces interval
+childid orderid sym  side qty ordtype pegtype limitprice venue sendtime                      expiry                        filledqty status replaces interval
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 1       ORD001  NVDA BUY  452 LMT     215.76     ARCX  2026.08.18D09:35:30.362180781 2026.08.18D09:35:58.715263114 452       filled 0        0D00:00:28.571428571
 2       ORD001  NVDA BUY  510 LMT     215.92     ARCX  2026.08.18D09:35:58.715263114 2026.08.18D09:36:26.024712362 510       filled 5        0D00:00:28.571428571
@@ -148,11 +149,32 @@ execid orderid childid sym  side time                          price  qty venue 
 
 ### Execution
 
-Each scheduled time (jittered) sends one child, sized by the pacing plus whatever the previous child left, aggressive with probability `spreadcapture` and passive otherwise, routed to a lit venue by share.
+Each scheduled time (jittered) sends one child, sized by the pacing plus whatever the previous child left, aggressive with probability `spreadcapture` and passive otherwise, routed to a lit venue by share; a passive child is instead sent to a dark pool with probability `darkshare`.
 
 - **Aggressive child** (`ordtype` `MKT`): after `latencyms`, it takes what the far touch displays at the far touch and the rest one tick beyond, at the same instant, both fills removing liquidity (`liquidity` `R`). It is `done` at once.
 - **Passive child** (`ordtype` `LMT`): after `latencyms`, a limit at the near touch in force, behind the size displayed there. Every print by the opposite aggressor at or through the limit takes from that queue first, then from the child, at the child's limit (`liquidity` `A`, on the child's venue). When the near touch moves away from the limit the algo re-pegs: a `replace` to the new touch, behind its displayed size, up to `maxreplaces` times, after which the child rests where it is. At expiry (the next child's send time, or `endtime`) what is left is a `cancel`, and rolls into the next child.
+- **Dark child** (`ordtype` `PEG`, `pegtype` `MID`): a midpoint peg resting in a dark pool, see below. Its fills carry `liquidity` `D`.
 - **Cleanup**: if the last child leaves quantity, a final aggressive child is sent `2 * latencyms` before `endtime` for all of it, so the order always completes.
+
+### Dark pools
+
+Real fill reports name dark pools; the public tape cannot. The model keeps that asymmetry on purpose: the market tape does not change (off-exchange prints on `trade` stay `TRF`), while an execution in a dark pool names it. We know where we traded; the market only knows it happened off-exchange.
+
+- **Routing**: a passive child goes dark with probability `darkshare`, the same for every algo, and picks its pool by `darkvenueshares` (`UBSA` UBS ATS, `LEVL` Level ATS in the shipped market). Aggressive children never go dark. The dark draws come after the other draws and only when `darkshare` is above 0, so `darkshare` 0 reproduces the output without the feature exactly.
+- **Resting**: after `latencyms` the child rests at the midpoint of the quote in force, invisible, never crossing the spread. There is no re-peg: its limit is always the current midpoint, so the children table shows `ordtype` `PEG`, `pegtype` `MID` and a null `limitprice`.
+- **Fills**: it fills only against opposite-side off-exchange midpoint prints on the tape (venue `TRF`, price the mid of the quote in force at the print), a dark buy against seller-initiated prints and a dark sell against buyer-initiated ones, taking at most `darkfillshare` of each print. Every dark fill therefore corresponds to a print that already exists on the tape, at exactly the midpoint, with venue `UBSA` or `LEVL` and `liquidity` `D` (neither adding nor removing displayed liquidity).
+- **Expiry**: as for a passive child, the leaves are cancelled at the next child's send time and roll into it; the final aggressive child still completes the order.
+
+Dark liquidity is limited by construction: midpoint off-exchange prints are about 11% of trades, half of them on the right side, and a child takes at most half of each. On the NVDA fixture order about a tenth of the quantity executes dark; on a thin stock a dark child resting for a minute or two often gets nothing and its leaves roll on, which is what real dark fill rates look like.
+
+| Key | Layer | Meaning | Shipped |
+|---|---|---|---|
+| `darkvenues` | market | The dark pools (MPIDs) a passive child can be routed to | `` `UBSA`LEVL `` |
+| `darkvenueshares` | market | Their routing shares among dark children, summing to 1 | `0.6 0.4` |
+| `darkshare` | market | Probability a passive child is sent dark, between 0 and 1; 0 turns the feature off | 0.25 |
+| `darkfillshare` | market | The most a dark child takes of a qualifying print, as a share of it | 0.5 |
+
+Venue codes stay MIC codes (and the pools' MPIDs) in the simulator; `di/simconfig/venues.csv` maps them to the TCA application's codes for exports. That mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both to `CBOE`, so the TCA application sees exchange groups, not individual exchanges.
 
 On the good preset above, 66 of 69 fills added liquidity; on the bad preset 29 of 31 removed it. Whether the passive order ends up cheaper depends on the day: a passive child chasing a rising market re-pegs and pays later, an aggressive one pays the spread now.
 
@@ -242,7 +264,7 @@ The spec is a dictionary of overrides; any key left out takes the market file's 
 | `windowminutes` | `10 60` | Window length, uniform in the range; the window sits inside the session with five minutes clear of the open and the close |
 | `childrenperminute` | 2 | Children per minute of window, at least 5 |
 | `seed` | 42 (the market's run seed) | Seeds the draws and gives every order its own seed; `0N` leaves everything unseeded |
-| `ticksize`, `jitter`, `latencyms`, `maxreplaces`, `capacity`, `ordervenues`, `ordervenueshares`, `sweepticks` | 0.01, 0.3, 2.0, 20, `A`, four lit venues, 0.4 0.2 0.2 0.2, 1 | Passed to every order |
+| `ticksize`, `jitter`, `latencyms`, `maxreplaces`, `capacity`, `ordervenues`, `ordervenueshares`, `sweepticks`, `darkvenues`, `darkvenueshares`, `darkshare`, `darkfillshare` | 0.01, 0.3, 2.0, 20, `A`, four lit venues, 0.4 0.2 0.2 0.2, 1, `` `UBSA`LEVL ``, 0.6 0.4, 0.25, 0.5 | Passed to every order |
 
 Orders on the same instrument and day do not interact: each runs against the market as given. For impact across them, run the flow, move the market with `impact` from all its executions on that instrument and day, and run the same configs again with `runmany` against the moved market.
 
@@ -316,6 +338,10 @@ Orders on the same instrument and day do not interact: each runs against the mar
 | `ordervenues` | market | Lit venues (MIC codes) the children are routed to | `` `XNAS`ARCX`BATS`EDGX `` |
 | `ordervenueshares` | market | Their routing shares, summing to 1 | `0.4 0.2 0.2 0.2` |
 | `sweepticks` | market | Ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken | 1 |
+| `darkvenues` | market | The dark pools (MPIDs) a passive child can be routed to | `` `UBSA`LEVL `` |
+| `darkvenueshares` | market | Their routing shares among dark children, summing to 1 | `0.6 0.4` |
+| `darkshare` | market | Probability a passive child is sent to a dark pool instead of a lit venue; aggressive children never go dark | 0.25 |
+| `darkfillshare` | market | The most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it | 0.5 |
 
 The market file's `orders` group also holds the algo menu, the order-flow defaults and the impact parameters; every key is listed with its description in [docs/parameters.md](docs/parameters.md), generated from `simorder.describe[]`.
 
@@ -345,11 +371,12 @@ q)k4unit.moduletest`di.simorder
 | Events | 12 | Columns, event kinds, order; one new and one ack per child, replaces matching the children, fill events matching the executions, a done per filled child and a cancel per cancelled one, nothing left at a done, ack before the first fill |
 | Aggression | 11 | spreadcapture 1: all children marketable, all fills removing liquidity, no replace or cancel; spreadcapture 0: scheduled children all limit orders adding liquidity; about spreadcapture of 400 children aggressive; SELL aggressive fills at the bid or one tick below and filled in full; frontloaded and arrival orders filled in full, frontloaded intervals tiling the window |
 | Rollover | 6 | A large passive order on PG made less liquid still: cancels at expiry, a marketable cleanup child, the order still filled in full, cancels carrying the unfilled quantity, the cleanup carrying what the scheduled children left |
+| Dark pools | 34 | The four keys from the market file and their validation; `darkshare` 0 reproduces the executions and events recorded before the feature and leaves the tape untouched; dark fills only on the pools with flag `D`, exactly at the midpoint of the quote in force, each matching an opposite-side `TRF` print (a buy against seller-initiated prints, a sell against buyer-initiated ones) for at most `darkfillshare` of it; dark children are midpoint pegs with no limit that never re-peg; the order fills in full with one fill event per execution; aggressive children never route dark; a generated flow carries the keys; every venue code of the market file is in the venue reference |
 | Config | 23 | The order rows load and compose with the market's keys (ticksize, latency, capacity, venues), a row overrides a market key, an even order carries no urgency, missing essential and unknown keys throw; describe lists the order schema and the market's orders keys; the impact configuration from the market file; sweeps walk `sweepticks` beyond the touch |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Order flow | 29 | generate: norders per instrument and day, the schema's keys, windows inside the sessions and within a day, round-lot sizes, sides, accounts and algos from the menu with IS the arrival algo, a seed per order, the same flow from the same seed, none with a null seed and the market's run seed by default, an algo off the menu or an unknown spec key throws; runmany: the four tables, every order filled for its quantity, unique execution ids, fills on their order's instrument and day; runflow returns the configs and the same orders |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **195** | |
+| **Total** | **229** | |
 
 The fixture is one simulated day of NVDA on the shipped market file and the normal scenario (and PG, made less liquid, for the rollover tests); order windows are set on that day's date.
 

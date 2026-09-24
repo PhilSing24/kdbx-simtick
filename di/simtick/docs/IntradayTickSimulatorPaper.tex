@@ -325,6 +325,8 @@ F=\min\bigl(l,\;\max(0,\;c-q)\bigr)
 \end{equation}
 with $l$ its leaves. When the near touch moves away from the limit the algorithm re-pegs: a replace to the new touch, behind its displayed size, up to \key{maxreplaces} times, after which the child rests where it is. At expiry, the next child's send time, what is left is cancelled and rolls into the next child; a final aggressive child before the end of the window completes the order. Fill prices sit on the tick or exactly at the midpoint.
 
+A passive child is instead sent to a \textbf{dark pool} with probability \key{darkshare}, the same for every algorithm, and picks its pool by \key{darkvenueshares}; aggressive children never go dark. A \textbf{dark child} is a midpoint peg: after the latency it rests at the midpoint of the quote in force, invisible, never crossing the spread and never re-pegged, since its limit is always the current midpoint. It fills only against opposite-side off-exchange prints at the midpoint, the prints the tape reports as \key{TRF} at the mid of the quote in force, a buy against seller-initiated prints and a sell against buyer-initiated ones, taking at most a share \key{darkfillshare} of each: with $P_k$ the quantities of the qualifying prints in its window, its cumulative fill is $\min(l,\sum_k\lfloor\key{darkfillshare}\,P_k\rfloor)$. Every dark fill is therefore a print already on the tape, at exactly the midpoint. The tape does not change: the public tape prints off-exchange trades as \key{TRF} and cannot identify the pool, while the fill report names it (\key{UBSA}, \key{LEVL}) and flags the fill \key{D}, neither adding nor removing displayed liquidity. Dark liquidity is limited by construction, midpoint off-exchange prints being about 11\% of trades, half of them on the right side: on the NVDA fixture order about a tenth of the quantity executes dark, and on a thin stock a dark child often gets nothing and its leaves roll into the next child. With \key{darkshare} 0 the output is unchanged.
+
 \subsection{Lifecycle and Tables}
 
 The result is four tables: the parent order with its arrival price (the mid at $t_s$), filled quantity, average price and status; the children with their type, limit, venue, times, fills, status and replace count; the events, one row per \key{new}, \key{ack}, \key{replace}, \key{cancel}, \key{fill} and \key{done} with quantity, price and leaves; and the executions with venue, liquidity flag and capacity. On the NVDA day of the presets, a patient order (one child in ten aggressive) fills 66 of 69 times adding liquidity with 88 re-pegs; a rushed one (nine in ten) removes liquidity in 29 of 31 fills. An order flow generator draws many orders per instrument and day from a menu of algorithms, so a multi-day tape carries a population of orders.
@@ -340,7 +342,7 @@ with $\sigma_d$ the day's volatility from five-minute mids and $V_i$ the market 
 % ===========================================================================
 \section{Validation}
 
-Each module carries a suite of checks run by a k4unit harness, 110 for simtick, 109 for simcalendar and 173 for simorder, that hold the invariants (every trade inside its prevailing quote, spreads whole ticks, quantities conserved, events consistent with fills) and the statistics below.
+Each module carries a suite of checks run by a k4unit harness, 48 for the shared configuration, 145 for simtick, 127 for simcalendar and 229 for simorder, that hold the invariants (every trade inside its prevailing quote, spreads whole ticks, quantities conserved, events consistent with fills) and the statistics below.
 
 \begin{center}
 \small
@@ -393,5 +395,48 @@ Statistics reproduced by the implementation on the shipped presets.
 \item KDB-X Documentation, Modules. \url{https://code.kx.com/kdb-x/modules/module-index.html}
 \item Data Intellect, kdbx-modules. \url{https://github.com/DataIntellectTech/kdbx-modules}
 \end{itemize}
+
+% ===========================================================================
+\appendix
+\section{Configuration Keys of the Orders Group}\label{app:orders}
+
+The market file's \key{orders} group, read by \key{di.simorder}: the venues and their routing shares, the latency, the sweep, the re-peg limit, the jitter, the capacity, the dark pools, the algorithm menu, the defaults of a generated order flow and the impact parameters. The values are those of the shipped US large-cap market. Every key of every module is listed with its layer and group in the generated pages \key{docs/parameters.md}.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}llX@{}}
+\toprule
+\textbf{Key} & \textbf{Shipped} & \textbf{Meaning}\\
+\midrule
+\key{ordervenues} & XNAS ARCX BATS EDGX & lit venues (MIC codes) the child orders are routed to\\
+\key{ordervenueshares} & 0.4 0.2 0.2 0.2 & their routing shares (sum to 1)\\
+\key{latencyms} & 2 & milliseconds from a child's send to its arrival at the market (and half of it to its ack)\\
+\key{sweepticks} & 1 & ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken\\
+\key{darkvenues} & UBSA LEVL & the dark pools (MPIDs) a passive child can be routed to\\
+\key{darkvenueshares} & 0.6 0.4 & their routing shares among dark children (sum to 1)\\
+\key{darkshare} & 0.25 & probability a passive child is sent to a dark pool instead of a lit venue, between 0 and 1 (0 = no dark routing)\\
+\key{darkfillshare} & 0.5 & the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1\\
+\key{maxreplaces} & 20 & how many times a passive child re-pegs to the near touch when it moves away, before resting where it is\\
+\key{jitter} & 0.3 & random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)\\
+\key{capacity} & A & A (agency) or P (principal), the default of the order rows\\
+\key{algos} & VWAP IS AGGRESSIVE PASSIVE & the algo menu an order flow draws from (labels)\\
+\key{algopacings} & even arrival frontloaded even & each algo's pacing (even, frontloaded or arrival)\\
+\key{algospreadcaptures} & 0.1 0.35 0.9 0 & each algo's share of aggressive children, between 0 and 1\\
+\key{algourgencies} &  2   & each algo's urgency (arrival pacing only, null otherwise)\\
+\key{algomaxpcts} &  0.2   & each algo's participation cap (arrival pacing only, null otherwise)\\
+\key{norders} & 5 & orders per instrument and day of a generated flow\\
+\key{accounts} & ACC1 ACC2 ACC3 & the accounts a generated flow draws from\\
+\key{sizepct} & 0.005 0.05 & lowest and highest order size of a generated flow, as a share of the day's volume\\
+\key{windowminutes} & 10 60 & shortest and longest order window of a generated flow, in minutes\\
+\key{childrenperminute} & 2 & children per minute of window of a generated order (at least 5 children)\\
+\key{orderimpactmodel} & participation & impact model of the child executions, participation (p^beta) or sqrtlaw\\
+\key{orderimpacteta} & 0.01 & impact coefficient, zero or positive (0 = no impact)\\
+\key{orderimpactbeta} & 0.5 & participation exponent, positive (0.5 is the square-root law)\\
+\key{orderimpacthalflifeseconds} & 300 & seconds over which the transient part of an execution's impact halves\\
+\key{orderimpacttaperminutes} & 5 & minutes before the close over which the impact shift falls linearly to zero\\
+\key{orderimpactpermanent} & 0.3 & share of each execution's impact that stays through the day, between 0 and 1\\
+\bottomrule
+\end{tabularx}
+\end{center}
 
 \end{document}
