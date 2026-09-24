@@ -388,10 +388,16 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
   / behind the size displayed there (its queue). It fills at its limit when
   / prints by the opposite aggressor at or through the limit reach it: each
   / such print takes from the queue first, then from the child. When the
-  / near touch moves away from the limit the algo re-pegs, a replace to the
-  / new touch behind its displayed size, up to maxreplaces times; after that
-  / the child rests where it is. What is left at expiry is cancelled (it
-  / rolls into the next child)
+  / near touch moves off the limit the algo re-pegs, a replace to the new touch
+  / behind its displayed size, up to maxreplaces times; after that the child
+  / rests where it is. It re-pegs whichever way the touch went, because a child
+  / left resting at a price the market has passed fills on later prints at a
+  / price the market no longer offers.
+  / When the touch moves THROUGH the limit the level the child was queued behind
+  / has cleared, so the child is filled at its limit at that moment - it cannot
+  / be traded through - for at most that level's displayed size: it is one level
+  / of liquidity that went, not the whole child. What is left at expiry is
+  / cancelled (it rolls into the next child)
   / cfg: config dict with `side`latencyms`maxreplaces
   / trades, quotes: the day's tables
   / t: send time
@@ -407,24 +413,35 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
   q0:.z.m.quoteat[quotes;s];
   L:$[buy;q0`bid;q0`ask];
   Q:`float$$[buy;q0`bidsize;q0`asksize];
+  Q0:Q;                                   / the level's displayed size when the child joined it
   leaves:qty;
   replaces:0;
   pegging:1b;
   fls:([]time:`timestamp$();price:`float$();qty:`long$();liquidity:`symbol$());
   events:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#L;leavesqty:2#qty);
   while[(leaves>0)&s<expiry;
-    / the segment ends at the next re-peg (the first later quote whose near
-    / touch has moved away from the limit) or at expiry
+    / the segment ends at the first later quote where the near touch is no longer
+    / the limit, or at expiry. Which way it went decides what that means:
+    /   away  the touch left the limit behind; the child re-pegs to it
+    /   thru  the touch passed the limit, so the level the child sat in cleared;
+    /         the child is filled for that level's size, then re-pegs like any
+    /         other move
+    / A child that has used its replaces stops following, but still watches for
+    / thru: that is the one event it cannot rest through.
+    / eps guards the comparison: L is a price off the same tick grid as the quotes,
+    / so equality is exact in practice, but a touch a float tick away from L must
+    / not read as a move.
     segend:expiry;
-    repeg:0b;
-    if[pegging;
-      j:1+qt bin s;
-      jend:1+qt bin expiry;
-      if[j<jend;
-        later:j+til jend-j;
-        moved:$[buy;(quotes[`bid] later)>L;(quotes[`ask] later)<L];
-        k:first where moved;
-        if[not null k; if[qt[later k]<expiry; segend:qt later k; repeg:1b]]]];
+    ev:`none;
+    j:1+qt bin s;
+    jend:1+qt bin expiry;
+    if[j<jend;
+      later:j+til jend-j;
+      nt:$[buy;quotes[`bid] later;quotes[`ask] later];
+      thru:$[buy;nt<L-1e-9;nt>L+1e-9];
+      moved:$[pegging;1e-9<abs nt-L;thru];
+      k:first where moved;
+      if[not null k; if[qt[later k]<expiry; segend:qt later k; ev:$[thru k;`thru;`away]]]];
     / prints in (s;segend] by the opposite aggressor at or through the limit
     i0:1+tt bin s;
     i1:tt bin segend;
@@ -443,14 +460,33 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
           leaves:leaves-last cum];
         Q:0f|Q-last c]];
     s:segend;
-    if[(leaves>0)&repeg;
+    / the level cleared: the child takes what one level of it could give, at its limit.
+    / Stamped a nanosecond BEFORE the quote that reveals the move, because that is the
+    / order of events - the level trades out, then the touch updates to show it gone.
+    / Stamped on the quote itself, the fill would be measured against a market that has
+    / already passed it, and would read as half a tick through the mid under an
+    / at-or-before convention while reading correctly under a strictly-before one.
+    if[(leaves>0)&`thru=ev;
+      g:leaves&`long$Q0;
+      if[g>0;
+        ft:s-1;
+        fls,:([]time:enlist ft;price:enlist L;qty:enlist g;liquidity:enlist `A);
+        events,:([]time:enlist ft;event:enlist `fill;qty:enlist g;price:enlist L;leavesqty:enlist leaves-g);
+        leaves:leaves-g]];
+    if[(leaves>0)&ev in `away`thru;
       $[replaces<cfg`maxreplaces;
         [qn:.z.m.quoteat[quotes;s];
          L:$[buy;qn`bid;qn`ask];
          Q:`float$$[buy;qn`bidsize;qn`asksize];
+         Q0:Q;
          replaces+:1;
          events,:([]time:enlist s;event:enlist `replace;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
-        pegging:0b]]];
+        / it has used its replaces and cannot follow. After an away move that is fine: the touch left
+        / it behind and it rests where it is, still inside the market. After a thru move it is not:
+        / the market is past its limit, and a child left resting there is a better price than anything
+        / the market is showing, so it would fill again later at a price no longer on offer. maxreplaces
+        / limits chasing a touch, not resting through one. The child stops here and its leaves roll on.
+        [pegging:0b; if[`thru=ev; s:expiry]]]]];
   if[0=leaves; events,:([]time:enlist last fls`time;event:enlist `done;qty:enlist 0;price:enlist L;leavesqty:enlist 0)];
   if[leaves>0; events,:([]time:enlist expiry;event:enlist `cancel;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
   `fills`events`leaves`replaces`limit!(fls;events;leaves;replaces;L)
@@ -792,7 +828,7 @@ schema[`algo]:("S";`order;`order;"the algorithm working the order (a label: VWAP
 schema[`seed]:("J";`order;`order;"random seed of the jitter, the aggression and the venues (0N = no seed)")
 schema[`ticksize]:("F";`market;`session;"minimum price increment; fill prices sit on the tick or exactly at the midpoint (half ticks)")
 schema[`latencyms]:("F";`market;`orders;"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
-schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves away, before resting where it is")
+schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves, either way, before resting where it is")
 schema[`jitter]:("F";`market;`orders;"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
 schema[`capacity]:("S";`market;`orders;"A (agency) or P (principal)")
 schema[`ordervenues]:("SL";`market;`orders;"lit venues (MIC codes) the children are routed to")
