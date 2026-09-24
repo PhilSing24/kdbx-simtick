@@ -6,6 +6,7 @@
 
 / load simtick module
 simtick:use`di.simtick
+simconfig:use`di.simconfig
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -199,24 +200,28 @@ daycfg:{[cfg;day;price]
   dc
   };
 
-persist:{[dst;date;result]
-  / write one day's tables to the date partition of dst
-  daypath:hsym`$string[dst],"/",string date;
-  $[99h=type result;
-    [
-      .Q.dd[daypath;`$"trade/"] set .Q.en[dst] result`trade;
-      .Q.dd[daypath;`$"quote/"] set .Q.en[dst] result`quote
-    ];
-    .Q.dd[daypath;`$"trade/"] set .Q.en[dst] result
-  ]
+simday:{[cfg;day;price]
+  / one stock's day: the day simulated from its row of the regimes table
+  / opening at price, and the row of the days table it makes
+  / cfg: configuration dictionary
+  / day: a row of the regimes table
+  / price: the day's open
+  / returns: dict `trade`quote`day (quote empty when the config does not
+  /   return quotes), `close
+  result:simtick.run .z.m.daycfg[cfg;day;price];
+  trades:$[99h=type result; result`trade; result];
+  quotes:$[99h=type result; result`quote; ()];
+  close:$[count trades; last trades`price; price];
+  row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;
+    trades:enlist count trades;volume:enlist sum trades`qty);
+  `trade`quote`day`close!(trades;quotes;row;close)
   };
 
-runstep:{[cfg;dst;state;day]
-  / one day of the run: the overnight gap from the previous close (drawn
-  / from the day's gap seed), the day's simulation, its row of the days
-  / table, and the tables kept or written
+runstep:{[cfg;state;day]
+  / one day of an in-memory run: the overnight gap from the previous close
+  / (drawn from the day's gap seed), the day's simulation, its row of the
+  / days table, and the tables kept
   / cfg: configuration dictionary
-  / dst: destination handle, or (::) to keep the tables in memory
   / state: dict `prevdate`price`trade`quote`days
   / day: a row of the regimes table
   / returns: the updated state
@@ -224,31 +229,26 @@ runstep:{[cfg;dst;state;day]
   if[not null day`gapseed; system "S ",string day`gapseed];
   gap:$[null state`prevdate; 0f; .z.m.overnight[cfg;date-state`prevdate]];
   open:state[`price]*exp gap;
-  result:simtick.run .z.m.daycfg[cfg;day;open];
-  trades:$[99h=type result; result`trade; result];
-  close:$[count trades; last trades`price; open];
-  day:(enlist day),'([]open:enlist open;close:enlist close;overnightret:enlist gap;
-    trades:enlist count trades;volume:enlist sum trades`qty);
-  $[(::)~dst;
-    [state[`trade],:enlist trades; if[99h=type result; state[`quote],:enlist result`quote]];
-    .z.m.persist[dst;date;result]];
-  state[`days],:enlist day;
+  r:.z.m.simday[cfg;day;open];
+  state[`trade],:enlist r`trade;
+  if[cfg`generatequotes; state[`quote],:enlist r`quote];
+  state[`days],:enlist update overnightret:gap from r`day;
   state[`prevdate]:date;
-  state[`price]:close;
+  state[`price]:r`close;
   state
   };
 
 run:{[cfg;calendar;dbpath]
-  / main simulation entry point
+  / main simulation entry point for one stock
   / cfg: a composed simtick configuration (its scenario layer carries the
-  /   calendar keys, see compose)
+  /   days keys, see compose)
   / calendar: list of trading dates, or a calendar table (see validate)
   / dbpath: file handle for disk persistence (e.g. `:/tmp/mydb), or (::) for in-memory
   / returns: in memory, a dict `trade`days (and `quote when generatequotes
   /   is set): the tables of all days and one row per day (the regimes
   /   table's columns, then open, close, overnightret, trades, volume);
-  /   on disk, dbpath, with trade and quote written per date partition and
-  /   days as a splayed table at the root
+  /   on disk, dbpath: the standard date-partitioned database of writehdb,
+  /   with this one stock
   /
   / Example (in-memory):
   /   cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
@@ -258,19 +258,15 @@ run:{[cfg;calendar;dbpath]
   / Example (persist to disk):
   /   simmarket.run[cfg;calendar;`:/tmp/mydb]
   cfg:.z.m.validatecfg cfg;
+  if[not (::)~dbpath; :.z.m.writehdb[(enlist cfg`sym)!enlist cfg;calendar;dbpath;(`symbol$())!()]];
   reg:.z.m.regimes[cfg;calendar];
-  topersist:not (::)~dbpath;
-  dst:$[topersist; hsym`$string dbpath; (::)];
-
   / every day draws from its own seeds (see seeds); none when the config has no seed
   init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
-  state:.z.m.runstep[cfg;dst]/[init;reg];
+  state:.z.m.runstep[cfg]/[init;reg];
   days:raze state`days;
-  $[topersist;
-    [.Q.dd[dst;`$"days/"] set .Q.en[dst] days; dbpath];
-    $[cfg`generatequotes;
-      `trade`quote`days!(raze state`trade;raze state`quote;days);
-      `trade`days!(raze state`trade;days)]]
+  $[cfg`generatequotes;
+    `trade`quote`days!(raze state`trade;raze state`quote;days);
+    `trade`days!(raze state`trade;days)]
   };
 
 
@@ -414,21 +410,6 @@ compose:{[market;instruments;scenarios;scenario;run]
   syms!{[m;i;s;r;sym;sce] simtick.compose[m;i sym;s sce;r]}[market;instruments;scenarios;run]'[syms;value scenario]
   };
 
-persistmany:{[dst;merged]
-  / write a merged multi-instrument result: trade and quote per date
-  / partition (sorted by sym then time, sym parted), days at the root
-  dates:distinct `date$merged[`trade]`time;
-  {[dst;merged;d]
-    daypath:hsym`$string[dst],"/",string d;
-    {[dst;daypath;merged;d;name]
-      if[not name in key merged; :(::)];
-      t:select from merged name where d=`date$time;
-      .Q.dd[daypath;`$string[name],"/"] set .Q.en[dst] update `p#sym from `sym`time xasc t}[dst;daypath;merged;d] each `trade`quote;
-    }[dst;merged] each dates;
-  .Q.dd[dst;`$"days/"] set .Q.en[dst] merged`days;
-  dst
-  };
-
 runmany:{[cfgs;calendar;dbpath]
   / run several instruments over the same calendar (see compose): the
   / regime seed of a date is shared, so the instruments live the same
@@ -438,14 +419,196 @@ runmany:{[cfgs;calendar;dbpath]
   / dbpath: file handle for disk persistence, or (::) for in-memory
   / returns: in memory, a dict `trade`days (and `quote when the configs
   /   return quotes), the tables of every instrument and day, sorted by
-  /   time, and the days table with a sym column; on disk, dbpath
+  /   time, and the days table with a sym column; on disk, dbpath: the
+  /   standard date-partitioned database of writehdb with its defaults
   if[not 99h=type cfgs; '"runmany: cfgs must be a dictionary sym!configuration"];
+  if[not (::)~dbpath; :.z.m.writehdb[cfgs;calendar;dbpath;(`symbol$())!()]];
   rs:.z.m.run[;calendar;(::)] each cfgs;
   merged:(`symbol$())!();
   merged[`trade]:`time`sym xasc raze rs[;`trade];
   if[all `quote in/: key each rs; merged[`quote]:`time`sym xasc raze rs[;`quote]];
   merged[`days]:`sym`date xasc raze {[sym;r] `sym xcols update sym:sym from r`days}'[key rs;value rs];
-  $[(::)~dbpath; merged; .z.m.persistmany[hsym`$string dbpath;merged]]
+  merged
+  };
+
+
+/ ============================================================
+/ THE OUTPUT DATABASE: ONE DAY OF ALL STOCKS AT A TIME
+/ ============================================================
+/ writehdb writes a standard compressed date-partitioned kdb+ database:
+/   dbpath/sym            the symbol enumeration shared by all partitions
+/   dbpath/config         the run, a q dictionary: every stock's composed
+/                         configuration, the calendar, the tables written,
+/                         the compression and the version of the code (a
+/                         kdb+ root holds q objects only: \l loads it as
+/                         the variable config; .j.j gives the JSON)
+/   dbpath/<date>/trade   all stocks that day, sorted by sym then time, `p#sym
+/   dbpath/<date>/quote   the same, when requested
+/   dbpath/<date>/days    one row per stock: regime, open, close, gap, trades, volume
+/ Every partition holds every requested table; days is written last, so a
+/ crash cannot leave a date looking complete. A complete date is skipped on
+/ a rerun (its closes carried forward), an incomplete one is rewritten from
+/ scratch, and a database built with another configuration is refused
+
+hdbdefaults:`tables`compression!(`trade`quote;17 5 3)
+
+version:{[]
+  / the git commit of the code (with -dirty when the modules have
+  / uncommitted changes), or `unknown outside a checkout; the same
+  / configuration and seeds reproduce a database only with the same code
+  roots:.Q.m.SP where not ()~/:key each hsym each `$.Q.m.SP,\:"/di/simmarket/init.q";
+  if[0=count roots; :`unknown];
+  root:first roots;
+  h:@[system;"git -C ",root," rev-parse --short HEAD 2>/dev/null";()];
+  if[not count h; :`unknown];
+  dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simconfig 2>/dev/null";()];
+  `$first[h],$[dirty;"-dirty";""]
+  };
+
+hdbopts:{[opts]
+  / the writer's options filled with their defaults and checked
+  / tables: `trade`quote (default) or `trade; compression: the (logical
+  / block size;algorithm;level) triple for every column, 17 5 3 by default
+  / (128 KB blocks, zstd level 3), () for uncompressed
+  if[not 99h=type opts; '"writehdb: opts must be a dictionary"];
+  if[count unknown:(key opts) except key .z.m.hdbdefaults; '"writehdb: unknown options - ",", " sv string unknown];
+  o:.z.m.hdbdefaults,opts;
+  o[`tables]:(),o`tables;
+  if[not (`trade in o`tables)&all o[`tables] in `trade`quote; '"writehdb: tables must be `trade`quote or `trade"];
+  if[not ()~o`compression; o[`compression]:`long$(),o`compression];
+  if[not (()~o`compression)|3=count o`compression;
+    '"writehdb: compression must be (logical block size;algorithm;level) or ()"];
+  o
+  };
+
+saverun:{[dst;runcfg]
+  / config: the run as one q object file at the root
+  .Q.dd[dst;`config] set runcfg;
+  };
+
+loadrun:{[dbpath]
+  / the run that wrote a database, from its config file: `configs (sym!
+  / configuration), `calendar, `opts (tables and compression) and
+  / `version; writehdb[r`configs;r`calendar;path;r`opts] reproduces the
+  / database with the same code. A warning is printed when the code that
+  / wrote it differs from the code running
+  if[not -11h=type dbpath; '"loadrun: dbpath must be a file handle"];
+  f:.Q.dd[hsym`$string dbpath;`config];
+  if[()~key f; '"loadrun: no config at ",string dbpath];
+  d:get f;
+  opts:`tables`compression!(d`tables;d`compression);
+  ver:d`version;
+  now:.z.m.version[];
+  if[not ver=now; -1 "loadrun: the database was written by version ",string[ver],", the code running is ",string[now],": the same configuration and seeds reproduce it only with the same code"];
+  `configs`calendar`opts`version!(d`configs;.z.m.validate d`calendar;opts;ver)
+  };
+
+symfile:{[dst]
+  / the enumeration domain of a database as a symbol list (empty when new)
+  f:.Q.dd[dst;`sym];
+  $[()~key f; `symbol$(); get f]
+  };
+
+complete:{[dst;date;names;syms]
+  / whether a date's partition is complete: every requested table and days
+  / are there with their .d file, and days holds one row per stock
+  / returns: the days rows (with syms resolved) when complete, () otherwise
+  dir:.Q.par[dst;date;`];
+  if[()~key dir; :()];
+  ok:all {[dst;date;name] `.d in key .Q.par[dst;date;name]}[dst;date] each names,`days;
+  if[not ok; :()];
+  days:@[get;.Q.par[dst;date;`days];()];
+  if[not 98h=type days; :()];
+  if[not `sym in cols days; :()];
+  s:.z.m.symfile dst;
+  days:update sym:s `long$sym from days;
+  if[not (asc syms)~asc distinct days`sym; :()];
+  days
+  };
+
+writetable:{[dst;date;name;t;compression;sortcols]
+  / one table into a date partition: sorted, `p#sym, enumerated against
+  / the database's sym file, every column compressed by the triple. The
+  / session's compression setting is restored afterwards, on error too
+  t:update `p#sym from sortcols xasc t;
+  t:.Q.en[dst] t;
+  path:.Q.par[dst;date;name];
+  zdbefore:@[value;`.z.zd;`unset];
+  if[count compression; `.z.zd set compression];
+  r:@[{[p;t] .Q.dd[p;`] set t; ::}[path];t;{[e] e}];
+  $[`unset~zdbefore; if[count compression; system "x .z.zd"]; `.z.zd set zdbefore];
+  if[10h=type r; 'r];
+  };
+
+writeday:{[cfgs;regs;dst;o;state;i]
+  / one date of the database: skipped when complete (the closes carried
+  / forward from its days rows), otherwise every stock simulated for the
+  / date, the tables joined and written, days last, and the day's tables
+  / dropped before the next date
+  / state: dict `prevdate`price (price a dict sym!close)
+  date:first (regs first key regs)[i]`date;
+  syms:key cfgs;
+  done:.z.m.complete[dst;date;o`tables;syms];
+  if[count done;
+    state[`price]:syms!(exec sym!close from done) syms;
+    state[`prevdate]:date;
+    :state];
+  system "rm -rf ",1_string .Q.par[dst;date;`];
+  one:{[cfgs;regs;o;state;date;i;sym]
+    cfg:cfgs sym; day:regs[sym] i;
+    if[not null day`gapseed; system "S ",string day`gapseed];
+    gap:$[null state`prevdate; 0f; .z.m.overnight[cfg;date-state`prevdate]];
+    open:state[`price;sym]*exp gap;
+    cfg[`generatequotes]:`quote in o`tables;
+    r:.z.m.simday[cfg;day;open];
+    r[`day]:`sym xcols update sym:sym,overnightret:gap from r`day;
+    r}[cfgs;regs;o;state;date;i];
+  rs:syms!one each syms;
+  trade:raze rs[;`trade];
+  .z.m.writetable[dst;date;`trade;trade;o`compression;`sym`time];
+  if[`quote in o`tables; .z.m.writetable[dst;date;`quote;raze rs[;`quote];o`compression;`sym`time]];
+  .z.m.writetable[dst;date;`days;delete date from raze rs[;`day];o`compression;enlist `sym];
+  state[`price]:syms!rs[;`close] syms;
+  state[`prevdate]:date;
+  state
+  };
+
+writehdb:{[cfgs;calendar;dbpath;opts]
+  / several stocks over a calendar written as a standard compressed
+  / date-partitioned kdb+ database, one day of all stocks at a time (see
+  / the layout above); loadable with \l
+  / cfgs: dictionary sym!configuration (compose)
+  / calendar: a list of trading dates, or a calendar table (see validate)
+  / dbpath: file handle of the database root
+  / opts: dictionary with any of `tables (`trade`quote by default, or
+  /   `trade; days is always written) and `compression (17 5 3 by default:
+  /   128 KB blocks, zstd level 3; () for uncompressed; 17 2 6 for gzip,
+  /   readable by kdb+ before 4.1)
+  / returns: dbpath. A complete date is skipped, so an interrupted run
+  /   continues where it stopped and equals a full run; the config file
+  /   at the root replays the run (see loadrun); a database built with
+  /   another configuration, other than a shorter calendar, is refused
+  if[not 99h=type cfgs; '"writehdb: cfgs must be a dictionary sym!configuration"];
+  if[not -11h=type dbpath; '"writehdb: dbpath must be a file handle"];
+  cfgs:.z.m.validatecfg each cfgs;
+  if[not (key cfgs)~value[cfgs][;`sym]; '"writehdb: the keys of cfgs must be their configurations' sym"];
+  o:.z.m.hdbopts opts;
+  calendar:.z.m.validate calendar;
+  dst:hsym`$string dbpath;
+  runcfg:`configs`calendar`tables`compression`version!(cfgs;0!calendar;o`tables;o`compression;.z.m.version[]);
+  if[not ()~key .Q.dd[dst;`config];
+    old:.z.m.loadrun dst;
+    same:{[a;b] (asc[key a]#a)~asc[key b]#b};
+    if[not all same'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
+    if[not (asc key old`configs)~asc key cfgs; '"writehdb: ",string[dbpath]," holds a database built for other instruments"];
+    if[not old[`opts]~o; '"writehdb: ",string[dbpath]," holds a database written with other tables or compression"];
+    if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on another calendar (a calendar can only be extended)"]];
+  system "mkdir -p ",1_string dst;
+  .z.m.saverun[dst;runcfg];
+  regs:.z.m.regimes[;calendar] each cfgs;
+  init:`prevdate`price!(0Nd;key[cfgs]!`float$value[cfgs][;`price]);
+  .z.m.writeday[cfgs;regs;dst;o]/[init;til count calendar];
+  dbpath
   };
 
 describe:{[]
@@ -455,4 +618,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;compose;runstep;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
+export:([run;runmany;writehdb;loadrun;version;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
