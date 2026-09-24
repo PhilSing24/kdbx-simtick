@@ -34,6 +34,20 @@ q)cfg:simconfig.loadconfig[schema;`:run.json]
 
 `simconfig.path` finds a shipped file in the module search path from any working directory.
 
+## Venue reference
+
+`venues.csv` lists every venue code a market file can use, with its full name, its type (`lit`, `dark` or `trf`) and the code the TCA application (`kdbx-tca`) uses for it. The simulators keep MIC codes (and the MPIDs of the two dark pools) and never read the file; an export maps codes through it:
+
+```q
+q)venues:simconfig.loadvenues simconfig.path "venues.csv"
+q)venues`XNAS
+name   | "Nasdaq"
+type   | `lit
+tcacode| `NASDAQ
+```
+
+The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both map to `CBOE`, so the TCA application sees exchange groups, not individual exchanges, and its venue analysis cannot separate Arca from NYSE. `IEXG` and `MEMX` have no TCA code yet (an empty cell); the simorder suite reports such rows as a warning. `TRF` is the tape's code for every off-exchange print, never a venue a broker reports.
+
 ## Rules
 
 - **Types come from the schema.** JSON gives floats for every number and strings for everything else; `compose` casts each value by the schema's type, so longs, symbols, dates and minutes come out typed. A list-valued key (`profile`, `venues`) is a JSON array in the market file and a space-separated string in a CSV cell.
@@ -49,6 +63,7 @@ q)cfg:simconfig.loadconfig[schema;`:run.json]
 | `simconfig.loadmarket[schema;filepath]` | A market file, its groups flattened |
 | `simconfig.loadinstruments[schema;filepath]` | Instrument rows keyed by `sym`; the five required columns must be filled |
 | `simconfig.loadscenarios[schema;filepath]` | Scenario rows keyed by `name` |
+| `simconfig.loadvenues[filepath]` | The venue reference keyed by `code`: name, type (`lit`, `dark`, `trf`) and the TCA application's code |
 | `simconfig.loadrows[schema;filepath;keycol]` | Any typed CSV of rows keyed by a column |
 | `simconfig.saveconfig[filepath;cfg]` | Write a composed configuration as JSON |
 | `simconfig.loadconfig[schema;filepath]` | Read one back |

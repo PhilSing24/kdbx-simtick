@@ -1,0 +1,11 @@
+code,name,type,tcacode
+XNAS,Nasdaq,lit,NASDAQ
+XNYS,New York Stock Exchange,lit,NYSE
+ARCX,NYSE Arca,lit,NYSE
+BATS,Cboe BZX,lit,CBOE
+EDGX,Cboe EDGX,lit,CBOE
+IEXG,IEX,lit,
+MEMX,Members Exchange,lit,
+TRF,Trade Reporting Facility,trf,TRF
+UBSA,UBS ATS,dark,UBSA
+LEVL,Level ATS,dark,LEVL
