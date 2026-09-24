@@ -1,0 +1,397 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Intraday Tick Simulator: Mathematical Foundations
+% Source of IntradayTickSimulatorPaper.pdf. Build with:
+%   pdflatex IntradayTickSimulatorPaper.tex   (run twice for the contents)
+% or upload this file to Overleaf.
+% ---------------------------------------------------------------------------
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs,tabularx}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% configuration keys, written like \key{vol}
+\newcommand{\key}[1]{\texttt{#1}}
+
+\newtheoremstyle{paper}{6pt}{6pt}{\itshape}{}{\bfseries}{.}{0.5em}{}
+\theoremstyle{paper}
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+
+\setlist[itemize]{label=--,leftmargin=1.5em,itemsep=2pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Intraday Tick Simulator}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}}
+
+\title{\textbf{Intraday Tick Simulator}\\[4pt]\large Mathematical Foundations}
+\author{Philippe Damay\\[2pt]
+\small \textbf{di.simtick}, \textbf{di.simcalendar} and \textbf{di.simorder} modules for KDB-X}
+\date{September 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent This document gives the mathematical framework of a simulator that generates synthetic but realistic intraday market data (trades and quotes) over a calendar of trading days, and works orders against that market.
+
+\medskip
+\noindent Trade and quote arrivals are self-exciting Hawkes processes, simulated without approximation. The mid price follows a geometric Brownian motion with optional jumps; its variance accrues with trading activity, and signed order flow moves it through market impact. Quotes are generated first, with spreads in whole ticks, and each trade executes against the quote in force, with buyer- and seller-initiated trades arriving in runs.
+
+\medskip
+\noindent Consecutive days are linked by overnight price gaps. Volatility and volume vary from day to day, in quiet and busy periods that last several days, and busy days tend to be volatile ones; any single day can be regenerated on its own.
+
+\medskip
+\noindent Orders are split into child orders that execute against the simulated market, either crossing the spread or resting in the queue at the best price, and every order records its full lifecycle of events. An optional step lets the executions move the market, with an impact that partly fades and partly persists.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ===========================================================================
+\section{Introduction}
+
+A realistic market simulator should reproduce the main features of real intraday data:
+
+\begin{itemize}
+\item \textbf{Trade clustering:} trades arrive in bursts, and quote updates follow them.
+\item \textbf{Intraday pattern:} trading is busy in the first half hour, quiet at midday and busiest before the close; volatility follows the same shape; spreads are widest just after the open and narrow within the first half hour.
+\item \textbf{Price moves:} prices move continuously, with occasional sudden jumps, and a jump is followed by a burst of trading.
+\item \textbf{Order-flow impact:} a buy pushes the price up and a sell pushes it down, and part of the move fades afterwards. Because buys tend to follow buys and sells follow sells, these small moves add up.
+\item \textbf{Quotes and trades:} quotes come first and trades happen against them; the spread is a whole number of ticks, usually one; most trades happen at the bid or the ask, some at the midpoint or slightly inside; trade sizes mix round lots of 100 shares with smaller odd lots; and every trade records its venue, a condition code and a sequence number.
+\item \textbf{Days:} part of each day's price movement happens overnight, between the close and the next open; volatility and volume go through quiet and busy periods lasting several days; and the calendar has holidays and half days.
+\item \textbf{Orders:} a trading algorithm splits a large order into smaller child orders, which either wait in the queue or cross the spread, get re-priced as the market moves, are cancelled or filled, and every step is recorded.
+\end{itemize}
+
+The simulator is made of three KDB-X modules, each building on the one before. \textbf{di.simtick} generates one trading day for one instrument; running it for several instruments gives several independent tapes. \textbf{di.simcalendar} runs it over a calendar of trading days, linking each day to the next. \textbf{di.simorder} generates orders and works them against the simulated market.
+
+Each model in the following sections is given with the configuration settings that control it, written like \key{vol} or \key{spreadticks}. All random numbers come from seeded generators, so the same configuration always produces the same data.
+
+% ===========================================================================
+\section{Random Numbers and Seeds}
+
+Standard normal variates come from the Box-Muller transform. Let $U_1$, $U_2$ be independent uniforms on $(0,1)$; then
+\begin{equation}
+R=\sqrt{-2\ln U_1},\qquad \Theta=2\pi U_2,\qquad Z_1=R\cos\Theta,\quad Z_2=R\sin\Theta
+\end{equation}
+are independent standard normals. The implementation draws $1-U$ so that the argument of the logarithm is never 0. Poisson variates with element-wise means $\lambda_i$ are drawn by inversion: with $U_i$ uniform, $X_i$ is the number of $k\ge 0$ with $F(k;\lambda_i)<U_i$, the cumulative distribution accumulated term by term and truncated at a value beyond which the tail is negligible for the means in use.
+
+A day's stream is seeded once, from the configuration's \key{seed}. In a multi-day run every date $d$ receives a \emph{regime seed} from the seed and the date alone,
+\begin{equation}
+s_{\text{regime}}(d)=1+\bigl(\text{days}(d)+7919\,s\bigr)\bmod\bigl(2^{31}-1\bigr)
+\end{equation}
+shared by every instrument run on that date (the market's day), and from it the instrument's \emph{day seed} and \emph{gap seed},
+\begin{equation}
+s_{\text{day}}=1+\bigl(h(\text{sym})+31\,s_{\text{regime}}\bigr)\bmod\bigl(2^{31}-1\bigr),\qquad
+s_{\text{gap}}=1+\bigl(3+17\,s_{\text{day}}\bigr)\bmod\bigl(2^{31}-1\bigr)
+\end{equation}
+with $h$ a hash of the ticker's characters. A date's regime innovation is therefore the same in any calendar that contains it, and any day's tape can be regenerated alone from its row of the summary table. The first normal drawn from consecutive seeds was checked to be standard normal, with the squared regime multiplier of Section~\ref{sec:days} averaging 1.00 over 26,000 consecutive seeds.
+
+% ===========================================================================
+\section{Arrivals: Hawkes Processes on Two Clocks}
+
+\subsection{Model}
+
+Trade arrivals exhibit self-excitation: each trade raises the probability of the next.
+
+\begin{definition}[Hawkes process]
+A univariate Hawkes process $N(t)$ is a counting process with conditional intensity
+\begin{equation}
+\lambda(t)=\lambda_0(t)+\sum_{t_i<t}\alpha\,e^{-\beta(t-t_i)}
+\end{equation}
+\end{definition}
+\noindent where $\lambda_0(t)$ is the baseline intensity, $\alpha>0$ the excitation per event (\key{alpha}), $\beta>0$ the decay (\key{beta}) and $\{t_i\}$ the event times before $t$.
+
+\begin{proposition}[Stationarity]
+The process is stationary if and only if the branching ratio $n=\alpha/\beta$ is below 1. $n$ is the expected number of events each event triggers; the mean intensity is $\lambda_0/(1-n)$.
+\end{proposition}
+
+\subsection{Intraday Profile}
+
+The baseline follows the session's profile:
+\begin{equation}
+\lambda_0(t)=\mu\,s\!\left(\frac{t}{T}\right)
+\end{equation}
+where $\mu$ is \key{baseintensity}, $T$ the session length in seconds and $s$ a shape function. The shape is a list of positive weights $w_0,\dots,w_{n-1}$, one per equal bin of the session (\key{profile}, thirteen half hours in the presets), interpolated linearly between bin midpoints and flat beyond the first and last:
+\begin{equation}
+s(p)=w_i+(x-i)\,(w_{i+1}-w_i),\qquad x=\min\!\Bigl(n-1,\max\bigl(0,\,np-\tfrac12\bigr)\Bigr),\qquad i=\min\bigl(n-2,\lfloor x\rfloor\bigr)
+\end{equation}
+A binned profile expresses a flat midday and a spike in the last minutes, which the earlier three-multiplier cosine could not. The shape never exceeds $\max_i w_i$, which the simulation relies on.
+
+\subsection{Exact Simulation by the Cluster Representation}
+
+Ogata's thinning simulates a Hawkes process by accepting candidates of a Poisson process at a rate that must bound the intensity. With a fixed bound the acceptance probability is capped at 1 in bursts, which under-produces arrivals: 5\% at branching ratio 0.4 and threefold at 0.9 in the earlier implementation. The simulator now uses the cluster representation of Hawkes and Oakes (1974), which is exact and needs no bound: immigrants arrive as an inhomogeneous Poisson process of intensity $\lambda_0(t)$, and every event spawns Poisson($n$) children at Exp($\beta$) delays, generation after generation until a generation is empty. The union of all generations is the process.
+
+\medskip
+\noindent\rule{\linewidth}{0.8pt}\\
+\textbf{Algorithm 1: Hawkes process by clusters}\\[-6pt]
+\rule{\linewidth}{0.4pt}
+\begin{small}
+\begin{verbatim}
+Input: mu, alpha, beta, session length T, shape s, extra immigrant times E
+Output: event times
+ 1: cand <- homogeneous Poisson process on [0,T) at rate mu*max(s)
+        (exponential waits drawn in blocks until past T)
+ 2: immigrants <- {c in cand : U_c < s(c/T)/max(s)} union E   # exact thinning
+ 3: parents <- immigrants; events <- immigrants
+ 4: while parents is not empty do
+ 5:     k <- Poisson(|parents| * alpha/beta)                   # children in total
+ 6:     children <- parents[uniform indices of size k] + Exp(beta) delays
+ 7:     children <- {t in children : t < T}
+ 8:     events <- events union children; parents <- children
+ 9: end while
+10: return sorted events
+\end{verbatim}
+\end{small}
+\vspace{-8pt}
+\noindent\rule{\linewidth}{0.8pt}
+
+Line 5 draws the total number of children of a generation and line 6 assigns each child a parent uniformly, which has the same law as Poisson($n$) children per parent and is one vector operation. Counts match the analytic mean $T\mu/(1-n)$ within 1\% at every branching ratio tried, up to 0.95, and a day of 500,000 trades takes tens of milliseconds.
+
+\subsection{Jumps Seed Bursts}
+
+A price jump (Section~\ref{sec:jumps}) brings a burst of activity that fades over minutes. Each jump at time $t_j$ adds \key{jumpburst} extra immigrants at exponential delays of mean \key{jumpburstminutes}, each with its usual cascade, so the burst carries $\key{jumpburst}/(1-n)$ trades in all. The quote clock receives the same shock scaled by \key{quotespertrade}.
+
+\subsection{The Quote Clock}
+
+Quote updates form a second Hawkes process with the same $\alpha$, $\beta$ and profile. Its immigrants come from two sources: a background clock at intensity $(1-\rho_q)\,q\,\mu\,s(t/T)$, and, after each trade, Poisson($\rho_q\,q\,(1-n)$) immigrants at Exp($\beta$) delays, where $q$ is \key{quotespertrade} and $\rho_q$ is \key{quotetradelink}. The expected number of quote updates per trade is $q$, and a share $\rho_q$ of them follows the trades, so a burst of trades brings a burst of quotes: with flat profiles the per-second counts of the two clocks correlate at 0.38 against 0 without the link. A quote is placed at the open before all others, so a quote is in force for every trade.
+
+% ===========================================================================
+\section{The Mid: Price Path, Clock and Order-Flow Impact}
+
+\subsection{Geometric Brownian Motion}
+
+\begin{definition}[GBM]
+The price $S_t$ satisfies $dS_t=\mu S_t\,dt+\sigma S_t\,dW_t$, with drift $\mu$ (\key{drift}), volatility $\sigma$ (\key{vol}), both annualized, and $W$ a standard Brownian motion.
+\end{definition}
+
+\noindent By It\^o's lemma, over a sequence of points $t_0=0<t_1<\dots<t_m$ with steps $\Delta_j$ in years,
+\begin{equation}
+S_{t_i}=S_0\prod_{j=1}^{i}\exp\!\left[\left(\mu-\frac{\sigma^2}{2}\right)\Delta_j+\sigma\sqrt{\Delta_j}\,\varepsilon_j\right],\qquad \varepsilon_j\sim\mathcal N(0,1)
+\end{equation}
+The path is sampled on the quote clock, whose first point is the open itself, so $S_0$ is the price at the open (\key{startprice}). The mid at a quote is the path there.
+
+\subsection{Jumps as Events}\label{sec:jumps}
+
+Under \key{pricemodel} = \key{jump}, the day's jumps are events: their number is Poisson(\key{jumpintensity}), their times uniform in the session, their sizes lognormal,
+\begin{equation}
+J_k=\exp\left(\mu_J+\sigma_J\,\varepsilon_k\right),\qquad S_t=S_t^{\text{gbm}}\prod_{t_k\le t}J_k
+\end{equation}
+with $\mu_J$ and $\sigma_J$ the keys \key{jumpmean} and \key{jumpvol}. A jump is applied to the path from the first quote at or after it, and it seeds the bursts of Section~3.4.
+
+\subsection{Calendar and Transaction Clocks}
+
+The steps $\Delta_j$ depend on the \key{clock}. Under the calendar clock,
+\begin{equation}
+\Delta_j=\frac{t_j-t_{j-1}}{N_{\text{days}}\,T}
+\end{equation}
+with $N_{\text{days}}$ the trading days per year (\key{tradingdays}) and $T$ the session in seconds: variance grows with time and realized volatility is flat through the day. Under the transaction clock, the default, every quote update carries the same variance, one trading day's over the day's $m$ updates,
+\begin{equation}
+\Delta_j=\frac{1}{N_{\text{days}}\,m}
+\end{equation}
+so variance grows with activity: realized volatility follows the intraday profile and rises in bursts. Because the day's variance is normalized by its own number of updates, a busier day does not carry more variance; activity only redistributes it within the day. On the NVDA preset, hourly realized volatility runs from 0.36 at 11:00 to 0.60 in the last hour while the day-level figure stays at the configured 0.45.
+
+\subsection{Order-Flow Impact}
+
+Signed trades move the mid. The order flow of the day, aggressor signs $\varepsilon_i=\pm1$ and quantities $Q_i$ (Section~\ref{sec:trades}), is drawn before the quotes, and each trade contributes an impulse in ticks,
+\begin{equation}
+a_i=\kappa\,\delta\,\varepsilon_i\sqrt{\frac{Q_i}{\bar Q}}
+\end{equation}
+where $\kappa$ is \key{impactticks}, $\delta$ the tick size and $\bar Q$ the mean trade size of the quantity model. A share $\pi$ (\key{impactpermanent}) of each impulse stays; the rest halves every $h$ seconds (\key{impacthalflife}). The shift in force at a quote time $t$ is
+\begin{equation}
+D(t)=\sum_{t_i<t}a_i\left[\pi+(1-\pi)\,2^{-(t-t_i)/h}\right]
+\end{equation}
+computed as a cumulative sum for the permanent part and a scan of the transient part over the trades, and the mid becomes $S_t+D(t)$. With persistent signs the tape shows price impact and partial reversion: on the NVDA preset the signed markout is 0.34 cents one second after a trade and 0.17 cents after a minute, against 0.007 cents with $\kappa=0$. Impact adds about 3\% to day-level volatility.
+
+% ===========================================================================
+\section{Quotes}
+
+\subsection{Spread in Ticks}
+
+The spread is a whole number of ticks: one tick plus a Poisson excess whose mean is the mean spread less one tick,
+\begin{equation}
+\text{spread}_t=\delta\,(1+X_t),\qquad X_t\sim\text{Poisson}\bigl(\max(0,\;\bar s\,g(t)\,a(t)-1)\bigr)
+\end{equation}
+with $\bar s$ the mean spread in ticks through the day (\key{spreadticks}, 1.15 for the NVDA preset), $g$ the time-of-day multiplier and $a$ the activity multiplier below. The bid is placed so that the spread sits around the mid, on the tick grid:
+\begin{equation}
+B_t=\delta\left\lfloor\frac{M_t-\text{spread}_t/2}{\delta}+\frac12\right\rfloor,\qquad A_t=B_t+\text{spread}_t
+\end{equation}
+A large cap's spread is widest in the first minutes and tightens within the half hour; it is tightest at the close. The multiplier is the midday level moved toward the open and close levels by exponential decays of e-folding time $\tau$ minutes (\key{spreaddecayminutes}):
+\begin{equation}
+g(t)=g_{\text{mid}}+(g_{\text{open}}-g_{\text{mid}})\,e^{-t/\tau}+(g_{\text{close}}-g_{\text{mid}})\,e^{-(T-t)/\tau}
+\end{equation}
+with the three levels \key{spreadopenmult}, \key{spreadmidmult} and \key{spreadclosemult}, 2.5, 1 and 0.9 in the presets. On the NVDA preset the spread is one tick 81\% of the time, with a midday mean of 1.15 ticks, 1.9 in the first half hour and 1.10 in the last.
+
+\subsection{Activity Widens the Spread}
+
+Bursts widen spreads. At each quote the number of quote updates in the trailing minute, $c_t$, is compared with the number the intensity profile expects there, $e_t$, and the mean spread is multiplied by
+\begin{equation}
+a(t)=\left(\text{clip}\left[\frac{1+c_t}{1+e_t},\;\frac14,\;4\right]\right)^{\gamma}
+\end{equation}
+with $\gamma$ the key \key{spreadactivity} (0.5 in the presets; 0 turns the coupling off). In the minutes after a jump the spread is 1.3 to 2 times its median, and with flat profiles the per-minute spread tracks the per-minute quote count at a correlation of 0.58 against 0.05 without the coupling. Under the transaction clock this also couples spread to volatility, since both follow activity.
+
+\subsection{Sizes and Imbalance}
+
+Quote sizes are lognormal around \key{avgquotesize} with log-spread \key{quotesizevol}, in round lots of 100, and tilted toward the side of the next mid move: with $\Delta M$ the sign of the next change of the mid and $\theta$ the key \key{imbalancesignal},
+\begin{equation}
+\text{bidsize}\propto\exp\!\left(\ell z_b+\theta\,\text{sgn}\,\Delta M-\tfrac12\ell^2\right),\qquad
+\text{asksize}\propto\exp\!\left(\ell z_a-\theta\,\text{sgn}\,\Delta M-\tfrac12\ell^2\right)
+\end{equation}
+so the book leans, weakly, toward what comes next: at $\theta=0.15$ the size imbalance correlates with the next move at 0.21, a regularity the order book shows, and 0 without the signal. About half of consecutive quotes change only in size, the cancels and replaces of a real feed.
+
+% ===========================================================================
+\section{Trades Against the Quote in Force}\label{sec:trades}
+
+\subsection{Aggressor Side}
+
+Each trade arrival takes the quote in force at its time. Its aggressor side follows a Markov chain: the first sign is uniform, and each later sign repeats the previous one with probability $\pi_s$ (\key{sidepersistence}), so that
+\begin{equation}
+\text{corr}(\varepsilon_i,\varepsilon_{i-1})=2\pi_s-1
+\end{equation}
+0.4 in the presets, in the range measured on equities. Trades carry the side in an \key{aggressor} column (B or S), which makes effective spread, realized spread, Lee-Ready classification and markouts well defined.
+
+\subsection{Where a Trade Prints}
+
+A buyer-initiated trade prints at the ask and a seller-initiated one at the bid, except for a share \key{midpointshare} that prints at the midpoint and a share \key{improvementshare} that prints a tenth of a tick inside the touch (price improvement). Prices sit on the tenth-of-a-tick grid. On the presets 80\% of trades print at the touch, 12\% at the midpoint and 8\% inside, the effective spread is 0.5 basis points on NVDA and no trade prints outside its prevailing quote.
+
+\subsection{Quantities}
+
+Under \key{qtymodel} = mixture, a trade's size is a round lot with probability \key{roundlotshare} (100, 200, 300, 500 or 1000 shares with weights 0.5, 0.2, 0.1, 0.12, 0.08), a block with probability \key{blockshare} (lognormal, median \key{blockqty}, log-spread 0.5), and otherwise an irregular lot,
+\begin{equation}
+Q=\max\bigl(1,\lfloor e^{X}\rfloor\bigr),\qquad X\sim\mathcal N\!\left(\ln\bar Q-\tfrac12\sigma_Q^2,\;\sigma_Q^2\right)
+\end{equation}
+with mean $\bar Q$ (\key{avgqty}) and log-spread $\sigma_Q$ (\key{qtyvol}). The lognormal and constant models remain. On the NVDA preset 35\% of trades are round lots and 55\% odd lots, the mean size 153 shares. The mean size of the mixture, which scales the impact of Section~4.4, is $(1-r-b)\,\bar Q+260\,r+b\,e^{1/8}\,\key{blockqty}$.
+
+\subsection{Tape Attributes and Auctions}
+
+Each trade carries a condition (\key{cond}: R regular, I odd lot, O and C the auction prints), a venue and a sequence number. Midpoint and improved prints are off-exchange with probability 0.95 (venue TRF); prints at the touch are split so that the day's off-exchange share is \key{offexchangeshare}; lit prints are spread over the MIC codes XNAS, XNYS, ARCX, BATS, EDGX and IEXG by share. One sequence runs across quotes and trades in time order, the opening quote first. The opening and closing auction prints frame the session: at the first and last mid, for \key{openauctionpct} and \key{closeauctionpct} of the continuous volume, on the primary listing venue, with no aggressor.
+
+% ===========================================================================
+\section{Days: Overnight Gaps, Regimes and Calendars}\label{sec:days}
+
+\subsection{Overnight Gap and the Variance Budget}
+
+Each day after the first opens at the previous close moved by an overnight log return, normal with no drift (the open is a martingale of the close) and variance a share $\omega$ (\key{overnightshare}) of one trading day's, weighted for the calendar days of the gap by $\kappa_g$ (\key{gapdayweight}):
+\begin{equation}
+r_{\text{on}}\sim\mathcal N\!\left(-\tfrac12 v,\;v\right),\qquad v=\omega\,\frac{\sigma^2}{N_{\text{days}}}\bigl(1+\kappa_g(\Delta d-1)\bigr)
+\end{equation}
+The intraday simulation runs at $\sigma(1-\omega)^{1/2}$, so over a one-night gap the close-to-close variance is exactly $\sigma^2/N_{\text{days}}$: the configured volatility is the close-to-close one, as quoted. A weekend carries more than a night and less than three. Over six months of NYSE days the measured overnight share of close-to-close variance is 29\% for $\omega=0.3$.
+
+\subsection{Day-Level Regimes}
+
+Days differ, in spells. Two standardized AR(1) states with persistence $\phi$ (\key{regimepersistence}), $x$ for volatility and $y$ for volume, are driven by daily shocks with correlation $\rho$ (\key{regimecorr}):
+\begin{equation}
+x_d=\phi\,x_{d-1}+\sqrt{1-\phi^2}\,\eta_d,\qquad y_d=\phi\,y_{d-1}+\sqrt{1-\phi^2}\,\xi_d,\qquad \xi_d=\rho\,\eta_d+\sqrt{1-\rho^2}\,\zeta_d
+\end{equation}
+with $\eta_d$, $\zeta_d$ the two normals drawn from the date's regime seed. The day's multipliers are
+\begin{equation}
+m_d^{\text{vol}}=\exp\left(s_v\,x_d-s_v^2\right),\qquad m_d^{\text{volume}}=\exp\left(s_q\,y_d-\tfrac12 s_q^2\right)
+\end{equation}
+with $s_v$ and $s_q$ the keys \key{volregimesd} and \key{volumeregimesd}. The volume multiplier scales the base intensity and averages 1. The volatility multiplier scales the intraday $\sigma$, and since volatility enters a day as variance it is normalized on its square, $\mathbb E[(m^{\text{vol}})^2]=1$, so that the mean daily variance is the configured one: the earlier normalization on the mean inflated close-to-close volatility by $\exp(s_v^2)$. Under the transaction clock a volume regime does not raise volatility (the spread of daily realized volatility is unchanged with the volume regime alone), so the two channels are separate and their correlation is $\rho$, 0.7 in the default preset. The calendar's own per-day multipliers, closing time and jump intensity multiply on top, for event days and half days.
+
+\subsection{Calendar}
+
+The calendar is a table of dates with optional closing time, multipliers and jump intensity. A generator produces the NYSE trading days of a range under its rules: weekdays less New Year's Day (not observed on the Friday when it falls on a Saturday), Martin Luther King Jr.\ Day, Presidents' Day, Good Friday from the Gregorian Easter, Memorial Day, Juneteenth from 2022, Independence Day, Labor Day, Thanksgiving and Christmas, Saturday holidays observed on the Friday and Sunday ones on the Monday, with early closes at 13:00 on the day after Thanksgiving, July 3 and Christmas Eve when they are trading days. 2026 has 251 trading days.
+
+% ===========================================================================
+\section{Orders Against the Tape}
+
+\subsection{Schedule and Sizes}
+
+A parent order of quantity $Q$ over a window $[t_s,t_e)$ is sliced into $n$ children (\key{numfills}) at scheduled times set by the \key{pacing}: even fractions of the window, the cube of those fractions for a front-loaded order, or the midpoints of $n$ equal intervals for an arrival algorithm. Each time is moved by a uniform jitter of up to \key{jitter} times half the gap to its neighbours. Sizes are proportional to the market volume in each child's bucket under even pacing, decreasing squares under front-loaded pacing, and, under arrival pacing, the drops of the Almgren-Chriss trajectory
+\begin{equation}
+X(u)=\frac{\sinh\bigl(k(1-u)\bigr)}{\sinh k},\qquad u\in[0,1]
+\end{equation}
+the share still to trade at time share $u$ of the window, with $k$ the \key{urgency}, under a participation cap: an interval takes what it wants up to \key{maxpct} of its volume, own/(own + market), carrying shortfalls forward and backfilling unused capacity at the end. Sizes are rounded to integers and the residual placed on the largest child, so they sum to $Q$ exactly.
+
+\subsection{Aggressive and Passive Children}
+
+Each child is aggressive with probability \key{spreadcapture} and passive otherwise, and routed to a lit venue by share. An \textbf{aggressive child} is a marketable order: after a latency (\key{latencyms}) it takes what the far touch displays at the far touch and the rest one tick beyond, at the same instant, both fills removing liquidity; the book beyond the touch is not modelled and is taken to hold the rest.
+
+A \textbf{passive child} is a limit at the near touch in force after the latency, queued behind the size displayed there. Every print by the opposite aggressor at or through the limit takes from the queue first, then from the child, at the child's limit: with $c$ the cumulative quantity of such prints and $q$ the queue at placement, the child's cumulative fill is
+\begin{equation}
+F=\min\bigl(l,\;\max(0,\;c-q)\bigr)
+\end{equation}
+with $l$ its leaves. When the near touch moves away from the limit the algorithm re-pegs: a replace to the new touch, behind its displayed size, up to \key{maxreplaces} times, after which the child rests where it is. At expiry, the next child's send time, what is left is cancelled and rolls into the next child; a final aggressive child before the end of the window completes the order. Fill prices sit on the tick or exactly at the midpoint.
+
+\subsection{Lifecycle and Tables}
+
+The result is four tables: the parent order with its arrival price (the mid at $t_s$), filled quantity, average price and status; the children with their type, limit, venue, times, fills, status and replace count; the events, one row per \key{new}, \key{ack}, \key{replace}, \key{cancel}, \key{fill} and \key{done} with quantity, price and leaves; and the executions with venue, liquidity flag and capacity. On the NVDA day of the presets, a patient order (one child in ten aggressive) fills 66 of 69 times adding liquidity with 88 re-pegs; a rushed one (nine in ten) removes liquidity in 29 of 31 fills. An order flow generator draws many orders per instrument and day from a menu of algorithms, so a multi-day tape carries a population of orders.
+
+\subsection{Market Impact Across Orders}
+
+The engine prices an order against the market it is given. Impact is a separate step over all the executions of an instrument's day. Under the participation model each execution's impact as a fraction of the price is
+\begin{equation}
+I_i=\eta\,\sigma_d\,p_i^{\,b},\qquad p_i=\frac{Q_i}{Q_i+V_i}
+\end{equation}
+with $\sigma_d$ the day's volatility from five-minute mids and $V_i$ the market volume in an interval of the child's length centred on its time; under the square-root law it is $\eta\,\sigma_d\,(Q_i/V_{\text{day}})^{1/2}$. The shift in force is the sum of the signed impacts, a share \key{permanent} of each kept through the day and the rest halving every \key{halflife}, tapered to zero over \key{taper} before the close so the next day is unmoved, and rounded to whole cents so that bid and ask move by the same tick. Quotes and prints move by the shift in force at their time, a quote is added at each execution time, and the orders are run again against the moved market.
+
+% ===========================================================================
+\section{Validation}
+
+Each module carries a suite of checks run by a k4unit harness, 110 for simtick, 109 for simcalendar and 173 for simorder, that hold the invariants (every trade inside its prevailing quote, spreads whole ticks, quantities conserved, events consistent with fills) and the statistics below.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}Xll@{}}
+\toprule
+\textbf{Property} & \textbf{NVDA preset} & \textbf{Reference for a US large cap}\\
+\midrule
+Arrivals vs analytic Hawkes mean, branching 0.3 and 0.9 & within 1\% & exact\\
+Quote updates per trade & 4.0 & 10 to 30 (set by \key{quotespertrade})\\
+Trades at the touch / midpoint / inside & 80\% / 12\% / 8\% & about 80 / 12 / 8\\
+Trades outside the prevailing quote & 0 & 0\\
+Lag-1 autocorrelation of aggressor signs & 0.40 & 0.3 to 0.5\\
+Effective spread & 0.49 bp & about 0.5 to 1 bp\\
+Spread of one tick & 81\% & most of the day\\
+Signed markout at 1 s / 1 min & 0.34 / 0.17 cents & a fraction of a cent, reverting\\
+Realized vol, 11:00 hour vs last hour & 0.36 vs 0.60 & U-shaped\\
+Round lots / odd lots & 35\% / 55\% & large mode at 100, odd lots over half\\
+Off-exchange share & 42\% & about 40\%\\
+Close-to-close vol over two years, configured 0.45 & 0.449 & 0.45\\
+Overnight share of daily variance, configured 0.3 & 0.29 & 0.3\\
+Correlation of day regimes, configured 0.7 & within 0.15 & 0.6 to 0.8\\
+\bottomrule
+\end{tabularx}
+
+\smallskip
+Statistics reproduced by the implementation on the shipped presets.
+\end{center}
+
+% ===========================================================================
+\section{Limitations}
+
+\begin{itemize}
+\item \textbf{Top of the book only:} there is no depth, no queue position beyond the displayed size and no cancels by others ahead of a resting child, so passive fills are on the slow side and an aggressive child larger than the displayed size walks exactly one tick.
+\item \textbf{The tape does not react to a resting child:} when the market falls through a resting buy, the child fills at its limit on the seller-initiated prints, as it would, but the tape's ask may already sit below that limit. Aggressive fills are always consistent with the quote in force.
+\item \textbf{One-way link between the clocks:} trades seed quote updates; quotes do not excite trades.
+\item \textbf{Orders on the same instrument do not interact} except through the separate impact step.
+\item \textbf{No co-movement between instruments:} three names are simulated independently. The shared per-date regime seed is the hook for a common market day, and a common factor would enter the mid additively on the quote clock, as the order-flow impact does.
+\item \textbf{Special closures} (days of mourning, disasters) are not in the calendar generator.
+\end{itemize}
+
+% ===========================================================================
+\section{References}
+
+\begin{itemize}
+\item Hawkes, A.G. and Oakes, D. (1974). A cluster process representation of a self-exciting process. \emph{Journal of Applied Probability}, 11(3), 493--503.
+\item Bacry, E., Mastromatteo, I. and Muzy, J.F. (2015). Hawkes processes in finance. \emph{Market Microstructure and Liquidity}, 1(1), 1550005.
+\item Almgren, R. and Chriss, N. (2001). Optimal execution of portfolio transactions. \emph{Journal of Risk}, 3(2), 5--39.
+\item Bouchaud, J.-P., Farmer, J.D. and Lillo, F. (2009). How markets slowly digest changes in supply and demand. In \emph{Handbook of Financial Markets: Dynamics and Evolution}, North-Holland.
+\item Merton, R.C. (1976). Option pricing when underlying stock returns are discontinuous. \emph{Journal of Financial Economics}, 3, 125--144.
+\item KDB-X Documentation, Modules. \url{https://code.kx.com/kdb-x/modules/module-index.html}
+\item Data Intellect, kdbx-modules. \url{https://github.com/DataIntellectTech/kdbx-modules}
+\end{itemize}
+
+\end{document}
