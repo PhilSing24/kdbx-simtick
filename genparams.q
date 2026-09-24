@@ -50,7 +50,7 @@ lines,:enlist "A run reads a flat dictionary composed from four layers: the **ma
 lines,:enlist ""
 lines,:enlist "## Instrument: the essential five"
 lines,:enlist ""
-lines,:enlist "Set on the instrument row (`di/simconfig/instruments.csv`) or given to `simtick.quick`."
+lines,:enlist "Set on the instrument row (`di/simconfig/instruments.csv`) or given to `simtick.quick` with the date."
 lines,:enlist ""
 lines,:table[nvda;select from tick where layer=`essential]
 lines,:enlist ""

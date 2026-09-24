@@ -6,7 +6,7 @@ A run reads a flat dictionary composed from four layers: the **market** file (ho
 
 ## Instrument: the essential five
 
-Set on the instrument row (`di/simconfig/instruments.csv`) or given to `simtick.quick`.
+Set on the instrument row (`di/simconfig/instruments.csv`) or given to `simtick.quick` with the date.
 
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|

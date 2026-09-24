@@ -104,7 +104,7 @@ q)simorder:use`di.simorder
 ```q
 q)simtick:use`di.simtick
 q)simorder:use`di.simorder
-q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000]
+q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]
 q)trades:result`trade
 q)quotes:result`quote
 
