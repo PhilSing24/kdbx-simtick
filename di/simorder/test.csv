@@ -1,6 +1,7 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize simtick module
 before,0,0,q,simorder:use`di.simorder,1,,Initialize simorder module
+before,0,0,q,simconfig:use`di.simconfig,1,,Initialize simconfig module (the venue reference)
 before,0,0,q,f:simtick.files[],1,,The shipped layer files
 before,0,0,q,market:simtick.loadmarket f`market,1,,Load the market layer (its orders group holds this module's defaults)
 before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,,Load the instruments
@@ -184,14 +185,14 @@ true,0,0,q,1e-9>abs (first ordertbl`arrivalprice)-0.5*arrq[`bid]+arrq`ask,1,,The
 true,0,0,q,(first ordertbl`filledqty)=basecfg`orderqty,1,,The order is filled in full
 true,0,0,q,`filled=first ordertbl`status,1,,And its status says so
 true,0,0,q,1e-9>abs (first ordertbl`avgpx)-(sum executions[`price]*executions`qty)%sum executions`qty,1,,avgpx is the volume-weighted fill price
-true,0,0,q,`childid`orderid`sym`side`qty`ordtype`limitprice`venue`sendtime`expiry`filledqty`status`replaces`interval~cols children,1,,Children table has correct columns
+true,0,0,q,`childid`orderid`sym`side`qty`ordtype`pegtype`limitprice`venue`sendtime`expiry`filledqty`status`replaces`interval~cols children,1,,Children table has correct columns
 true,0,0,q,(count children) within basecfg[`numchildren]+0 1,1,,One child per scheduled time plus at most a cleanup child
 true,0,0,q,(1+til count children)~children`childid,1,,Children are numbered in order
 true,0,0,q,(sum children`filledqty)=basecfg`orderqty,1,,The children's fills sum to orderqty
-true,0,0,q,all children[`ordtype] in `MKT`LMT,1,,Children are marketable or limit orders
+true,0,0,q,all children[`ordtype] in `MKT`LMT`PEG,1,,Children are marketable or limit orders or midpoint pegs
 true,0,0,q,all null exec limitprice from children where ordtype=`MKT,1,,Marketable children carry no limit
 true,0,0,q,all not null exec limitprice from children where ordtype=`LMT,1,,Limit children carry their limit
-true,0,0,q,all children[`venue] in `XNAS`ARCX`BATS`EDGX,1,,Children are routed to lit venues
+true,0,0,q,all children[`venue] in `XNAS`ARCX`BATS`EDGX`UBSA`LEVL,1,,Children are routed to lit venues or the dark pools
 true,0,0,q,(asc children`sendtime)~children`sendtime,1,,Children are sent in order
 true,0,0,q,all (children[`status]=`filled)=children[`filledqty]=children`qty,1,,A child is filled when its fills equal its quantity and cancelled otherwise
 true,0,0,q,`execid`orderid`childid`sym`side`time`price`qty`venue`liquidity`capacity`interval~cols executions,1,,Executions table has correct columns
@@ -203,7 +204,7 @@ true,0,0,q,all executions[`time]<basecfg`endtime,1,,All executions before endtim
 true,0,0,q,all executions[`price]>0,1,,All execution prices positive
 true,0,0,q,all executions[`qty]>=1,1,,All execution quantities at least 1
 true,0,0,q,all 1e-6>abs (executions[`price]%0.005)-floor 0.5+executions[`price]%0.005,1,,Every fill price is a multiple of half a tick (on the tick or at the midpoint)
-true,0,0,q,all executions[`liquidity] in `A`R,1,,Each fill added or removed liquidity
+true,0,0,q,all executions[`liquidity] in `A`R`D,1,,Each fill added or removed liquidity or was dark
 true,0,0,q,all `A=executions`capacity,1,,Fills carry the order's capacity
 true,0,0,q,all children[`filledqty]=0^(exec sum qty by childid from executions) children`childid,1,,Fills per child match the children's filledqty
 before,0,0,q,exq:aj[`time;executions;`time`bid`ask#quotes],1,,Executions with the quote in force at their time
@@ -240,8 +241,8 @@ true,0,0,q,0=count select from aggres`events where event in `replace`cancel,1,,M
 before,0,0,q,pascfg:basecfg,1,,Setup all-passive config
 before,0,0,q,pascfg[`spreadcapture]:0f,1,,Every child passive
 before,0,0,q,pasres:simorder.run[pascfg;trades;quotes],1,,Run it
-true,0,0,q,all `LMT=exec ordtype from pasres`children where childid<=pascfg`numchildren,1,,With spreadcapture 0 every scheduled child is a limit order
-true,0,0,q,all `A=exec liquidity from pasres`executions where childid<=pascfg`numchildren,1,,And their fills add liquidity
+true,0,0,q,all (exec ordtype from pasres`children where childid<=pascfg`numchildren) in `LMT`PEG,1,,With spreadcapture 0 every scheduled child is a limit order or a midpoint peg
+true,0,0,q,all (exec liquidity from pasres`executions where childid<=pascfg`numchildren) in `A`D,1,,And their fills add liquidity or are dark
 before,0,0,q,mixcfg:basecfg,1,,Setup config for the aggression mixture
 before,0,0,q,mixcfg[`numchildren]:400,1,,Many children to see the share
 before,0,0,q,mixcfg[`spreadcapture]:0.3,1,,Three children in ten aggressive
@@ -312,6 +313,60 @@ before,0,0,q,sweepfills:simorder.aggressivefills[sweepcfg;quotes;d+0D10:00;10000
 true,0,0,q,2=count sweepfills,1,,Fills at the touch and beyond
 true,0,0,q,1e-9>abs 0.03-(last sweepfills`price)-first sweepfills`price,1,,The rest fills sweepticks beyond the touch
 after,0,0,q,system"rm -f /tmp/simorder_noside.csv /tmp/simorder_unknown.csv",1,,Clean up order files
+comment,0,0,q,,1,,=== Dark Pool Tests ===
+true,0,0,q,`UBSA`LEVL~basecfg`darkvenues,1,,The dark pools come from the market file
+true,0,0,q,0.25=basecfg`darkshare,1,,So does darkshare
+true,0,0,q,0.5=basecfg`darkfillshare,1,,And darkfillshare
+fail,0,0,q,simorder.run[basecfg upsert (enlist `darkvenueshares)!enlist 0.5 0.4;trades;quotes],1,,darkvenueshares not summing to 1 throws error
+fail,0,0,q,simorder.run[basecfg upsert (enlist `darkvenues)!enlist enlist `UBSA;trades;quotes],1,,darkvenues and darkvenueshares of different lengths throw error
+fail,0,0,q,simorder.run[basecfg upsert (enlist `darkshare)!enlist 1.5;trades;quotes],1,,darkshare above 1 throws error
+fail,0,0,q,simorder.run[basecfg upsert (enlist `darkfillshare)!enlist 0f;trades;quotes],1,,darkfillshare of 0 throws error
+before,0,0,q,nodarkcfg:basecfg upsert (enlist `darkshare)!enlist 0f,1,,The base order with no dark routing
+before,0,0,q,tradescopy:trades,1,,The tape before the runs
+before,0,0,q,quotescopy:quotes,1,,And its quotes
+before,0,0,q,nodarkres:simorder.run[nodarkcfg;trades;quotes],1,,Run it
+before,0,0,q,nde:nodarkres`executions,1,,Its executions
+true,0,0,q,(count nde;sum nde`qty;`long$1000*sum nde[`price]*nde`qty;last nde`time;count nodarkres`children;count nodarkres`events)~(78;10000;2148172650;2026.08.18D09:44:30.842558923;20;186),1,,darkshare 0 reproduces the executions and events of the fixture order before the feature (recorded on 2026.09.24)
+true,0,0,q,not any nde[`venue] in `UBSA`LEVL,1,,With darkshare 0 no fill is dark
+true,0,0,q,not any `D=nde`liquidity,1,,And no fill carries the dark flag
+true,0,0,q,(trades~tradescopy)&quotes~quotescopy,1,,The tape is untouched by a run without dark routing
+true,0,0,q,0<count select from executions where liquidity=`D,1,,With darkshare 0.25 the base order has dark fills
+true,0,0,q,(trades~tradescopy)&quotes~quotescopy,1,,The tape is identical with darkshare 0 and 0.25 (the feature does not touch it)
+true,0,0,q,all (exec venue from executions where liquidity=`D) in `UBSA`LEVL,1,,Dark fills are on the dark pools
+true,0,0,q,not any (exec venue from executions where liquidity<>`D) in `UBSA`LEVL,1,,And nothing else is
+before,0,0,q,darkcfg:basecfg upsert `spreadcapture`darkshare!0 1f,1,,An order whose every child is dark
+before,0,0,q,darkres:simorder.run[darkcfg;trades;quotes],1,,Run it
+before,0,0,q,darkchildren:darkres`children,1,,Its children
+before,0,0,q,darkexecs:darkres`executions,1,,Its executions
+true,0,0,q,all `PEG=exec ordtype from darkchildren where childid<=darkcfg`numchildren,1,,Every scheduled child is a midpoint peg
+true,0,0,q,all `MID=exec pegtype from darkchildren where childid<=darkcfg`numchildren,1,,With peg type MID
+true,0,0,q,all null exec limitprice from darkchildren where ordtype=`PEG,1,,A midpoint peg carries no limit
+true,0,0,q,all (exec venue from darkchildren where ordtype=`PEG) in `UBSA`LEVL,1,,Dark children rest in the dark pools
+true,0,0,q,all 0=exec replaces from darkchildren where ordtype=`PEG,1,,Dark children never re-peg
+true,0,0,q,0=count select from darkres`events where event=`replace,1,,And send no replace
+true,0,0,q,all `D=exec liquidity from darkexecs where venue in `UBSA`LEVL,1,,Dark fills carry the dark flag
+before,0,0,q,darkq:aj[`time;select from darkexecs where liquidity=`D;`time`bid`ask#quotes],1,,Dark fills with the quote in force at their time
+true,0,0,q,all 1e-9>abs darkq[`price]-0.5*darkq[`bid]+darkq`ask,1,,Every dark fill is exactly at the midpoint of its quote in force
+before,0,0,q,trfprints:`time xkey ?[trades;enlist (=;`venue;enlist `TRF);0b;`time`printqty`printside!`time`qty`aggressor],1,,The off-exchange prints by time
+before,0,0,q,darkm:(select from darkexecs where liquidity=`D) lj trfprints,1,,Dark fills matched to the TRF print at their time
+true,0,0,q,not any null darkm`printqty,1,,Every dark fill matches an off-exchange print
+true,0,0,q,all `S=darkm`printside,1,,A dark buy fills only against seller-initiated prints
+true,0,0,q,all darkm[`qty]<=floor darkcfg[`darkfillshare]*darkm`printqty,1,,Taking at most darkfillshare of the print
+true,0,0,q,(sum darkexecs`qty)=darkcfg`orderqty,1,,The dark order fills for its quantity
+true,0,0,q,(count darkexecs)=count select from darkres`events where event=`fill,1,,One fill event per dark execution
+true,0,0,q,(darkexecs`qty)~exec qty from darkres`events where event=`fill,1,,With the same quantities
+before,0,0,q,sellcfg2:darkcfg upsert (enlist `side)!enlist `SELL,1,,The same order selling
+before,0,0,q,sellres2:simorder.run[sellcfg2;trades;quotes],1,,Run it
+before,0,0,q,sellm:(select from sellres2`executions where liquidity=`D) lj trfprints,1,,Its dark fills matched to their prints
+true,0,0,q,all `B=sellm`printside,1,,A dark sell fills only against buyer-initiated prints
+before,0,0,q,aggdark:simorder.run[basecfg upsert `spreadcapture`darkshare!1 1f;trades;quotes],1,,An order whose every child is aggressive with darkshare 1
+true,0,0,q,not any (aggdark[`children]`venue) in `UBSA`LEVL,1,,Aggressive children never route dark
+true,0,0,q,all `MKT=aggdark[`children]`ordtype,1,,They stay marketable
+true,0,0,q,all `darkvenues`darkvenueshares`darkshare`darkfillshare in cols simorder.generate[market;(enlist `norders)!enlist 1;trades;quotes],1,,A generated flow carries the dark keys
+before,0,0,q,venueref:simconfig.loadvenues simconfig.path "venues.csv",1,,The venue reference
+before,0,0,q,usedvenues:raze (market`venues;market`primaryvenue;market`ordervenues;market`darkvenues;`TRF),1,,Every venue code the market file uses
+true,0,0,q,all usedvenues in key[venueref]`code,1,,Every venue code the market file uses is in the venue reference
+before,0,0,q,if[count unmapped:exec code from venueref where null tcacode; -1 raze ("warning: venues without a TCA code: ";" " sv string unmapped)],1,,Venues without a TCA code are reported as a warning
 comment,0,0,q,,1,,=== Mixed Market Tests ===
 before,0,0,q,xomresult:simtick.run simtick.compose[market;instruments`XOM;scenarios`normal;tickrun],1,,Generate a second instrument for the same day
 before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table
