@@ -270,7 +270,7 @@ before,0,0,q,pgtrades:pgresult`trade,1,,Its trades
 before,0,0,q,pgquotes:pgresult`quote,1,,Its quotes
 before,0,0,q,pgcfg:basecfg,1,,Setup a large passive order on it
 before,0,0,q,pgcfg[`sym]:`PG,1,,On PG
-before,0,0,q,pgcfg[`orderqty]:20000,1,,Large relative to its volume
+before,0,0,q,pgcfg[`orderqty]:160000,1,,Far larger than the size displayed at the touch, so the passive children cannot finish it
 before,0,0,q,pgcfg[`endtime]:d+0D09:40,1,,Over five minutes
 before,0,0,q,pgcfg[`spreadcapture]:0f,1,,All passive
 before,0,0,q,pgres:simorder.run[pgcfg;pgtrades;pgquotes],1,,Run it
@@ -326,7 +326,7 @@ before,0,0,q,tradescopy:trades,1,,The tape before the runs
 before,0,0,q,quotescopy:quotes,1,,And its quotes
 before,0,0,q,nodarkres:simorder.run[nodarkcfg;trades;quotes],1,,Run it
 before,0,0,q,nde:nodarkres`executions,1,,Its executions
-true,0,0,q,(count nde;sum nde`qty;`long$1000*sum nde[`price]*nde`qty;last nde`time;count nodarkres`children;count nodarkres`events)~(78;10000;2148172650;2026.08.18D09:44:30.842558923;20;186),1,,darkshare 0 reproduces the executions and events of the fixture order before the feature (recorded on 2026.09.24)
+true,0,0,q,(count nde;sum nde`qty;`long$1000*sum nde[`price]*nde`qty;last nde`time;count nodarkres`children;count nodarkres`events)~(38;10000;2148010880;2026.08.18D09:44:30.637220592;20;141),1,,darkshare 0 reproduces the executions and events of the fixture order: re-recorded 2026.09.24 when a resting child began filling as the market reached it (fewer, larger passive fills; qty and venue mix unchanged)
 true,0,0,q,not any nde[`venue] in `UBSA`LEVL,1,,With darkshare 0 no fill is dark
 true,0,0,q,not any `D=nde`liquidity,1,,And no fill carries the dark flag
 true,0,0,q,(trades~tradescopy)&quotes~quotescopy,1,,The tape is untouched by a run without dark routing
