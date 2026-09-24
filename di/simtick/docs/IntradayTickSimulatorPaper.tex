@@ -10,7 +10,8 @@
 \usepackage[utf8]{inputenc}
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{amsmath,amssymb,amsthm}
-\usepackage{booktabs,tabularx}
+\usepackage{booktabs,tabularx,longtable,array}
+\usepackage{upquote}
 \usepackage{enumitem}
 \usepackage{fancyhdr}
 \usepackage{xcolor}
@@ -403,8 +404,8 @@ Statistics reproduced by the implementation on the shipped presets.
 The market file's \key{orders} group, read by \key{di.simorder}: the venues and their routing shares, the latency, the sweep, the re-peg limit, the jitter, the capacity, the dark pools, the algorithm menu, the defaults of a generated order flow and the impact parameters. The values are those of the shipped US large-cap market. Every key of every module is listed with its layer and group in the generated pages \key{docs/parameters.md}.
 
 \begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}llX@{}}
+\footnotesize
+\begin{tabularx}{\linewidth}{@{}l>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X@{}}
 \toprule
 \textbf{Key} & \textbf{Shipped} & \textbf{Meaning}\\
 \midrule
@@ -422,14 +423,14 @@ The market file's \key{orders} group, read by \key{di.simorder}: the venues and 
 \key{algos} & VWAP IS AGGRESSIVE PASSIVE & the algo menu an order flow draws from (labels)\\
 \key{algopacings} & even arrival frontloaded even & each algo's pacing (even, frontloaded or arrival)\\
 \key{algospreadcaptures} & 0.1 0.35 0.9 0 & each algo's share of aggressive children, between 0 and 1\\
-\key{algourgencies} &  2   & each algo's urgency (arrival pacing only, null otherwise)\\
-\key{algomaxpcts} &  0.2   & each algo's participation cap (arrival pacing only, null otherwise)\\
+\key{algourgencies} & -- 2 -- -- & each algo's urgency (arrival pacing only, null otherwise)\\
+\key{algomaxpcts} & -- 0.2 -- -- & each algo's participation cap (arrival pacing only, null otherwise)\\
 \key{norders} & 5 & orders per instrument and day of a generated flow\\
 \key{accounts} & ACC1 ACC2 ACC3 & the accounts a generated flow draws from\\
 \key{sizepct} & 0.005 0.05 & lowest and highest order size of a generated flow, as a share of the day's volume\\
 \key{windowminutes} & 10 60 & shortest and longest order window of a generated flow, in minutes\\
 \key{childrenperminute} & 2 & children per minute of window of a generated order (at least 5 children)\\
-\key{orderimpactmodel} & participation & impact model of the child executions, participation (p^beta) or sqrtlaw\\
+\key{orderimpactmodel} & participation & impact model of the child executions, participation ($p^\beta$) or sqrtlaw\\
 \key{orderimpacteta} & 0.01 & impact coefficient, zero or positive (0 = no impact)\\
 \key{orderimpactbeta} & 0.5 & participation exponent, positive (0.5 is the square-root law)\\
 \key{orderimpacthalflifeseconds} & 300 & seconds over which the transient part of an execution's impact halves\\
@@ -438,5 +439,215 @@ The market file's \key{orders} group, read by \key{di.simorder}: the venues and 
 \bottomrule
 \end{tabularx}
 \end{center}
+
+% ===========================================================================
+\section{Example: One Day of Four US Stocks}\label{app:example}
+
+This example generates one trading day, 23 September 2026, for four US stocks chosen to span the range of liquidity: a mega cap, a mid cap, a small cap and a micro cap. Together they make costs and market impact visible for transaction cost analysis, and make unusual trading stand out for surveillance: the less liquid the stock, the larger a given order is against its normal activity.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}Xllrrl@{}}
+\toprule
+\textbf{Stock} & \textbf{Tier} & \textbf{Listing} & \textbf{Price} & \textbf{Market cap} & \textbf{Daily volume (shares)}\\
+\midrule
+The Coca-Cola Company (KO) & mega cap & NYSE & \$78 & \$335 bn & 12--17 m\\
+Hasbro, Inc.\ (HAS) & mid cap & Nasdaq & \$90 & \$12 bn & 1.7--2.6 m\\
+Sally Beauty Holdings, Inc.\ (SBH) & small cap & NYSE & \$16 & \$1.5 bn & 1.1--1.5 m\\
+Vera Bradley, Inc.\ (VRA) & micro cap & Nasdaq & \$3.75 & \$0.1 bn & 0.15--0.5 m\\
+\bottomrule
+\end{tabularx}
+
+\smallskip
+{\footnotesize Approximate figures from quotes during 2026.}
+\end{center}
+
+\paragraph{Calibration.} Price, listing and daily share volume follow recent quotes for each stock; volatility, spread, trade sizes and venue shares are estimates for stocks of each type and should be checked against market data before any quantitative use. \key{tradesperday} and \key{avgqty} are set together so that the number of trades times the mean trade size of the mixture (Section~6.3) is close to each stock's daily share volume. \key{impactticks} follows the square-root law, $\kappa\,\delta = Y\,\sigma_{\text{day}}\sqrt{\bar Q/V}\,S_0$ with $Y=0.3$: small in ticks for the low-priced stocks, but largest in basis points for them, about 3.4 bp per trade for VRA against 0.1 bp for KO.
+
+\paragraph{Venues.} Stocks trade most on their own listing exchange, so the lit venue shares depend on the listing: the NYSE split for KO and SBH, the Nasdaq split for HAS and VRA. They apply to the trades printed on exchange; \key{offexchangeshare} of all trades print off-exchange (venue TRF), and the auctions print on \key{primaryvenue}. The resulting share of all trades by venue is:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Venue} & \textbf{Coca-Cola} & \textbf{Hasbro} & \textbf{Sally Beauty} & \textbf{Vera Bradley}\\
+\midrule
+TRF (off-exchange) & 42.0\% & 40.0\% & 45.0\% & 50.0\%\\
+XNAS & 12.8\% & 24.0\% & 12.1\% & 20.0\%\\
+XNYS & 16.2\% & 3.0\% & 15.4\% & 2.5\%\\
+ARCX & 8.1\% & 9.0\% & 7.7\% & 7.5\%\\
+BATS & 7.0\% & 7.8\% & 6.6\% & 6.5\%\\
+EDGX & 7.0\% & 7.8\% & 6.6\% & 6.5\%\\
+IEXG & 2.9\% & 3.6\% & 2.8\% & 3.0\%\\
+MEMX & 4.1\% & 4.8\% & 3.9\% & 4.0\%\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Seeds.} Each stock gets its own seed. With a shared seed the four would draw the same random numbers and their price paths would move in step.
+
+\paragraph{All parameters.} The table lists all 98 configuration keys of the release, with the names used in the code. A value spanning the four columns is shared by all four stocks; it comes from the market file \key{us\_largecap} and the \key{normal} scenario unless the instrument row overrides it. \key{baseintensity} is not set but derived by \key{compose} from \key{tradesperday} (Section~3.2), here with a mean profile level of 1.004 and no jump bursts. The keys of the orders group configure \textbf{di.simorder} (Appendix~\ref{app:orders} describes them) and have no effect on the trades and quotes of this example.
+
+{\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.3cm}>{\centering\arraybackslash}p{2.55cm}>{\centering\arraybackslash}p{2.55cm}>{\centering\arraybackslash}p{2.55cm}>{\centering\arraybackslash}p{2.55cm}@{}}
+\toprule
+\textbf{Parameter} & \textbf{The Coca-Cola Company} & \textbf{Hasbro, Inc.} & \textbf{Sally Beauty Holdings, Inc.} & \textbf{Vera Bradley, Inc.}\\
+\endfirsthead
+\toprule
+\textbf{Parameter} & \textbf{The Coca-Cola Company} & \textbf{Hasbro, Inc.} & \textbf{Sally Beauty Holdings, Inc.} & \textbf{Vera Bradley, Inc.}\\
+\endhead
+\bottomrule
+\endfoot
+\midrule
+\multicolumn{5}{@{}l}{\textit{Essential (instrument)}} \\*
+\key{sym} & KO & HAS & SBH & VRA \\
+\key{price} & 78.00 & 90.00 & 16.00 & 3.75 \\
+\key{drift} & \multicolumn{4}{c}{0.05} \\
+\key{vol} & 0.16 & 0.30 & 0.45 & 0.65 \\
+\key{tradesperday} & 100000 & 18000 & 6000 & 1300 \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Session (market)}} \\*
+\key{openingtime} & \multicolumn{4}{c}{09:30} \\
+\key{closingtime} & \multicolumn{4}{c}{16:00} \\
+\key{tradingdays} & \multicolumn{4}{c}{252} \\
+\key{rngmodel} & \multicolumn{4}{c}{pseudo} \\
+\key{ticksize} & \multicolumn{4}{c}{0.01} \\
+\key{printgrid} & \multicolumn{4}{c}{0.1} \\
+\key{clock} & \multicolumn{4}{c}{transaction} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Arrivals (market)}} \\*
+\key{alpha} & \multicolumn{4}{c}{0.3} \\
+\key{beta} & \multicolumn{4}{c}{1.0} \\
+\key{profile} & \multicolumn{4}{c}{1.6 1.2 1.0 0.85 0.75 0.7 0.65 0.7 0.75 0.85 1.0 1.2 1.8} \\
+\key{jumpburst} & \multicolumn{4}{c}{3000 (no effect: no jumps)} \\
+\key{jumpburstminutes} & \multicolumn{4}{c}{1.0 (no effect: no jumps)} \\
+\key{quotespertrade} & \multicolumn{4}{c}{4} \\
+\key{quotetradelink} & \multicolumn{4}{c}{0.5} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Auctions (market)}} \\*
+\key{openauctionpct} & \multicolumn{4}{c}{0.01} \\
+\key{closeauctionpct} & \multicolumn{4}{c}{0.08} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Trade sizes (market, instrument overrides)}} \\*
+\key{qtymodel} & \multicolumn{4}{c}{mixture} \\
+\key{avgqty} & 40 & 40 & 150 & 200 \\
+\key{qtyvol} & \multicolumn{4}{c}{0.9} \\
+\key{roundlotshare} & 0.35 & 0.25 & 0.35 & 0.35 \\
+\key{roundlots} & \multicolumn{4}{c}{100 200 300 500 1000} \\
+\key{roundlotweights} & \multicolumn{4}{c}{0.5 0.2 0.1 0.12 0.08} \\
+\key{blockshare} & \multicolumn{4}{c}{0.002} \\
+\key{blockqty} & 10000 & 5000 & 5000 & 5000 \\
+\key{blockqtyvol} & \multicolumn{4}{c}{0.5} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Quotes (market, instrument overrides)}} \\*
+\key{spreadticks} & 1.05 & 2.5 & 1.5 & 2 \\
+\key{spreadopenmult} & \multicolumn{4}{c}{2.5} \\
+\key{spreadmidmult} & \multicolumn{4}{c}{1.0} \\
+\key{spreadclosemult} & \multicolumn{4}{c}{0.9} \\
+\key{spreaddecayminutes} & \multicolumn{4}{c}{15} \\
+\key{spreadactivity} & \multicolumn{4}{c}{0.5} \\
+\key{activitywindowseconds} & \multicolumn{4}{c}{60} \\
+\key{activityclip} & \multicolumn{4}{c}{0.25 4} \\
+\key{avgquotesize} & 2000 & 300 & 1000 & 800 \\
+\key{quotesizevol} & \multicolumn{4}{c}{0.6} \\
+\key{quotelot} & \multicolumn{4}{c}{100} \\
+\key{imbalancesignal} & \multicolumn{4}{c}{0.15} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Trades against the quotes (market, instrument overrides)}} \\*
+\key{sidepersistence} & \multicolumn{4}{c}{0.7} \\
+\key{midpointshare} & \multicolumn{4}{c}{0.12} \\
+\key{improvementshare} & \multicolumn{4}{c}{0.08} \\
+\key{improvementtick} & \multicolumn{4}{c}{0.1} \\
+\key{offexchangeshare} & 0.42 & 0.40 & 0.45 & 0.50 \\
+\key{offexchangeinside} & \multicolumn{4}{c}{0.95} \\
+\key{venues} & \multicolumn{4}{c}{XNAS XNYS ARCX BATS EDGX IEXG MEMX} \\
+\key{venueshares} & 0.22 0.28 0.14 0.12 0.12 0.05 0.07 & 0.40 0.05 0.15 0.13 0.13 0.06 0.08 & 0.22 0.28 0.14 0.12 0.12 0.05 0.07 & 0.40 0.05 0.15 0.13 0.13 0.06 0.08 \\
+\key{primaryvenue} & XNYS & XNAS & XNYS & XNAS \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Order-flow impact (market, instrument overrides)}} \\*
+\key{impactticks} & 0.07 & 0.4 & 0.2 & 0.15 \\
+\key{impacthalflifeseconds} & \multicolumn{4}{c}{30} \\
+\key{impactpermanent} & \multicolumn{4}{c}{0.3} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Scenario: normal}} \\*
+\key{volmult} & \multicolumn{4}{c}{1.0} \\
+\key{volumemult} & \multicolumn{4}{c}{1.0} \\
+\key{spreadmult} & \multicolumn{4}{c}{1.0} \\
+\key{pricemodel} & \multicolumn{4}{c}{gbm} \\
+\key{jumpintensity} & \multicolumn{4}{c}{0} \\
+\key{jumpmean} & \multicolumn{4}{c}{0} \\
+\key{jumpvol} & \multicolumn{4}{c}{0} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Scenario: day-to-day keys (used by di.simcalendar only)}} \\*
+\key{overnightshare} & \multicolumn{4}{c}{0.3} \\
+\key{gapdayweight} & \multicolumn{4}{c}{0.25} \\
+\key{regimepersistence} & \multicolumn{4}{c}{0.7} \\
+\key{regimecorr} & \multicolumn{4}{c}{0.7} \\
+\key{volregimesd} & \multicolumn{4}{c}{0.3} \\
+\key{volumeregimesd} & \multicolumn{4}{c}{0.3} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Run}} \\*
+\key{tradingdate} & \multicolumn{4}{c}{2026.09.23} \\
+\key{seed} & 42 & 43 & 44 & 45 \\
+\key{generatequotes} & \multicolumn{4}{c}{true} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Derived by compose}} \\*
+\key{baseintensity} & 2.98 & 0.536 & 0.179 & 0.0387 \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Orders (market; di.simorder only, not used in this example)}} \\*
+\key{ordervenues} & \multicolumn{4}{c}{XNAS ARCX BATS EDGX} \\
+\key{ordervenueshares} & \multicolumn{4}{c}{0.4 0.2 0.2 0.2} \\
+\key{latencyms} & \multicolumn{4}{c}{2.0} \\
+\key{sweepticks} & \multicolumn{4}{c}{1} \\
+\key{darkvenues} & \multicolumn{4}{c}{UBSA LEVL} \\
+\key{darkvenueshares} & \multicolumn{4}{c}{0.6 0.4} \\
+\key{darkshare} & \multicolumn{4}{c}{0.25} \\
+\key{darkfillshare} & \multicolumn{4}{c}{0.5} \\
+\key{maxreplaces} & \multicolumn{4}{c}{20} \\
+\key{jitter} & \multicolumn{4}{c}{0.3} \\
+\key{capacity} & \multicolumn{4}{c}{A} \\
+\key{algos} & \multicolumn{4}{c}{VWAP IS AGGRESSIVE PASSIVE} \\
+\key{algopacings} & \multicolumn{4}{c}{even arrival frontloaded even} \\
+\key{algospreadcaptures} & \multicolumn{4}{c}{0.1 0.35 0.9 0.0} \\
+\key{algourgencies} & \multicolumn{4}{c}{null 2 null null} \\
+\key{algomaxpcts} & \multicolumn{4}{c}{null 0.2 null null} \\
+\key{norders} & \multicolumn{4}{c}{5} \\
+\key{accounts} & \multicolumn{4}{c}{ACC1 ACC2 ACC3} \\
+\key{sizepct} & \multicolumn{4}{c}{0.005 0.05} \\
+\key{windowminutes} & \multicolumn{4}{c}{10 60} \\
+\key{childrenperminute} & \multicolumn{4}{c}{2} \\
+\key{orderimpactmodel} & \multicolumn{4}{c}{participation} \\
+\key{orderimpacteta} & \multicolumn{4}{c}{0.01} \\
+\key{orderimpactbeta} & \multicolumn{4}{c}{0.5} \\
+\key{orderimpacthalflifeseconds} & \multicolumn{4}{c}{300} \\
+\key{orderimpacttaperminutes} & \multicolumn{4}{c}{5} \\
+\key{orderimpactpermanent} & \multicolumn{4}{c}{0.3} \\
+\end{longtable}
+}
+
+\paragraph{Running the example.} In q, with the shipped files loaded as \key{market} and \key{sc} (the \key{normal} scenario), each stock is a dictionary of the keys it sets or overrides, composed and run with its own seed:
+
+\begin{small}
+\begin{verbatim}
+nas:`XNAS`XNYS`ARCX`BATS`EDGX`IEXG`MEMX!0.40 0.05 0.15 0.13 0.13 0.06 0.08
+nys:`XNAS`XNYS`ARCX`BATS`EDGX`IEXG`MEMX!0.22 0.28 0.14 0.12 0.12 0.05 0.07
+k:`sym`primaryvenue`price`drift`vol`tradesperday`spreadticks`avgqty,
+  `roundlotshare`blockqty`avgquotesize`offexchangeshare`impactticks
+ins:flip k!(`KO`HAS`SBH`VRA; `XNYS`XNAS`XNYS`XNAS;
+  78 90 16 3.75; 4#0.05; 0.16 0.30 0.45 0.65;
+  100000 18000 6000 1300; 1.05 2.5 1.5 2; 40 40 150 200;
+  0.35 0.25 0.35 0.35; 10000 5000 5000 5000; 2000 300 1000 800;
+  0.42 0.40 0.45 0.50; 0.07 0.4 0.2 0.15)
+ins:update venues:4#enlist key nas,
+  venueshares:(value nys;value nas;value nys;value nas) from ins
+run1:{[i;s] d:`tradingdate`seed!(2026.09.23;s);
+  simtick.run simtick.compose[market;i;sc;d]}
+r:run1'[ins;42 43 44 45]
+trade:`sym`time xasc raze r@\:`trade
+quote:`sym`time xasc raze r@\:`quote
+\end{verbatim}
+\end{small}
+
 
 \end{document}
