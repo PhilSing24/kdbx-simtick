@@ -69,26 +69,45 @@ date       closingtime volmult   volumemult dayseed  open     close  overnightre
 
 `generatequotes:0b` in the config returns `trade` and `days` only. The `days` table starts with the calendar and regime columns (`closingtime`, `volmult`, `volumemult`, `jumpintensity`, the seeds and the regime states `volstate` and `volumestate`) and ends with the day's open, close, overnight return, trades and volume.
 
-### Disk persistence
-```q
-/ Persist to date-partitioned kdb+ database
-q)simmarket.run[cfg;calendar;`:/tmp/mydb]
-`:/tmp/mydb
+### The output database
 
-/ Load and query
+With a path instead of `(::)`, `run` and `runmany` write a standard, compressed, date-partitioned kdb+ database that anyone loads with `\l`. One call simulates several stocks over a calendar:
+
+```q
+q)cfgs:simmarket.compose[market;instruments;scenarios;`NVDA`XOM`PG!`normal`normal`volatile;(enlist `seed)!enlist 42]
+q)simmarket.runmany[cfgs;calendar;`:/tmp/mydb]              / trades and quotes, zstd
+q)simmarket.writehdb[cfgs;calendar;`:/tmp/mydb;(enlist `tables)!enlist `trade]   / trades only
+
 q)\l /tmp/mydb
-q)5#select from trade where date=2026.08.18
-date       sym  time                          seq price   qty    aggressor cond venue
--------------------------------------------------------------------------------------
-2026.08.18 NVDA 2026.08.18D09:30:00.000000000 2   215     424344           O    XNAS
-2026.08.18 NVDA 2026.08.18D09:30:00.100212953 7   215.011 7      S         I    TRF
-2026.08.18 NVDA 2026.08.18D09:30:00.182414049 11  215.01  66     S         I    XNAS
-2026.08.18 NVDA 2026.08.18D09:30:00.232009923 14  215     300    S         R    XNAS
-2026.08.18 NVDA 2026.08.18D09:30:00.309357209 15  215     300    S         R    EDGX
-q)days
+q)select count i by date,sym from trade
+q)select sym,date,open,close,overnightret,trades,volume from days
 ```
 
-`trade` and `quote` are written per date partition; `days` is a splayed table at the root, loaded with the database.
+The layout:
+
+```
+mydb/
+  sym                symbol enumeration shared by all partitions
+  config             the run: every stock's composed configuration, the calendar,
+                     the tables written, the compression and the code version
+  2026.08.18/
+    trade/           all stocks that day, sorted by sym then time, `p#sym
+    quote/           the same, when requested
+    days/            one row per stock: regime multipliers, open, close, overnight gap, trades, volume
+  2026.08.19/ ...
+```
+
+Every partition holds every requested table, empty ones included, so date-range queries never break. The partition is the date; there is no partition by sym. `config` is a q object (a kdb+ root holds q objects only, so a JSON file cannot live there): `\l` loads it as the variable `config`, `simmarket.loadrun` reads it back, and `.j.j` gives the JSON.
+
+**One day at a time.** For each date of the calendar in order, every stock is simulated for that date (each carrying its own previous close into the day's open, with its own scenario and seeds), the stocks' tables are joined and the date's partition is written in one step, then the day's tables are dropped. Memory holds one day of all stocks; only each stock's close and the day's summary rows are carried forward.
+
+**Compression.** `writehdb[cfgs;calendar;dbpath;opts]` takes `opts` with any of `tables` (`` `trade`quote `` by default, or `` `trade ``; `days` is always written) and `compression`, the `(logical block size;algorithm;level)` triple applied to every column, `17 5 3` by default: 128 KB blocks, zstd level 3, which gives gzip's size at snappy's speed on tick data. `17 2 6` (gzip) is readable by kdb+ before 4.1; `()` writes uncompressed. The session's own compression setting is left as it was found.
+
+**Resume.** A date whose partition is complete (every requested table and `days` present, with a row per stock) is skipped, its closes carried forward, so an interrupted run continues where it stopped and, since every day has its own seeds, equals a full run exactly. `days` is written last, so a crash cannot leave a date looking complete; an incomplete date is deleted and written again from scratch. A database built with another configuration (other instruments, scenarios, tables or compression, or a calendar that is not extended) is refused rather than mixed.
+
+**Reproducing.** `r:simmarket.loadrun dbpath` returns the run's `configs`, `calendar`, `opts` and `version`; `simmarket.writehdb[r`configs;r`calendar;newpath;r`opts]` reproduces the database. The version is the git commit of the code that wrote it, and `loadrun` warns when the code running differs, since the same configuration and seeds reproduce the data only with the same code.
+
+The old single-stock layout (`days` at the root, no `sym` column) is replaced by this one: a one-stock database now has the same layout as a many-stock one. Databases written with the old layout should be regenerated.
 
 ### Several instruments
 
@@ -101,15 +120,19 @@ q)result:simmarket.runmany[cfgs;calendar;(::)]        / or a dbpath
 q)select sym,date,open,close,trades from result`days
 ```
 
-In memory the trades and quotes of every instrument come merged and sorted by time, and the `days` table gets a `sym` column; on disk the partitions hold every instrument, sorted by `sym` then time. An instrument named in the scenario dictionary but not in the table, or a scenario not in the scenario table, throws an error naming it.
+In memory the trades and quotes of every instrument come merged and sorted by time, and the `days` table gets a `sym` column; on disk the database above holds every instrument, sorted by `sym` then time within each partition. An instrument named in the scenario dictionary but not in the table, or a scenario not in the scenario table, throws an error naming it.
 
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `simmarket.run[cfg;calendar;dbpath]` | Run the simulation; returns a dict `trade`quote`days` in memory, or `dbpath` on disk |
-| `simmarket.runstep[cfg;dst;state;day]` | One day of the run (the step `run` folds over the regimes table) |
-| `simmarket.runmany[cfgs;calendar;dbpath]` | Run several instruments (a dictionary sym!config from `compose`) over the same calendar, merged |
+| `simmarket.run[cfg;calendar;dbpath]` | Run one stock; returns a dict `trade`quote`days` in memory, or writes the database and returns `dbpath` |
+| `simmarket.writehdb[cfgs;calendar;dbpath;opts]` | Several stocks written as a date-partitioned database one day at a time; `opts` with any of `tables` and `compression` |
+| `simmarket.loadrun[dbpath]` | The run that wrote a database: `configs`, `calendar`, `opts`, `version` |
+| `simmarket.version[]` | The git commit of the code (with `-dirty` when the modules have uncommitted changes) |
+| `simmarket.runstep[cfg;state;day]` | One day of an in-memory run (the step `run` folds over the regimes table) |
+| `simmarket.simday[cfg;day;price]` | One stock's day from its regimes row and its open: the tables, its days row and its close |
+| `simmarket.runmany[cfgs;calendar;dbpath]` | Run several instruments (a dictionary sym!config from `compose`) over the same calendar, merged in memory or written as the database with the default options |
 | `simmarket.compose[market;instruments;scenarios;scenario;run]` | The configuration of every instrument, on one scenario name or a dictionary sym!name |
 | `simmarket.daycfg[cfg;day;price]` | The simtick config for one day from its row of the regimes or days table: date, closing time, open price, vol and trades per day multiplied, jump intensity, base intensity derived, seed |
 | `simmarket.overnight[cfg;ndays]` | One overnight log return over a gap of `ndays` calendar days |
@@ -227,7 +250,7 @@ q)k4unit:use`local.k4unit
 q)k4unit.moduletest`di.simmarket
 ```
 
-The suite (127 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory and to disk, disk persistence and reproducibility.
+The suite (161 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) and reproducibility.
 
 ## Future Extensions
 

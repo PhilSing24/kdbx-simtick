@@ -305,6 +305,10 @@ with $s_v$ and $s_q$ the keys \key{volregimesd} and \key{volumeregimesd}. The vo
 
 The calendar is a table of dates with optional closing time, multipliers and jump intensity. A generator produces the NYSE trading days of a range under its rules: weekdays less New Year's Day (not observed on the Friday when it falls on a Saturday), Martin Luther King Jr.\ Day, Presidents' Day, Good Friday from the Gregorian Easter, Memorial Day, Juneteenth from 2022, Independence Day, Labor Day, Thanksgiving and Christmas, Saturday holidays observed on the Friday and Sunday ones on the Monday, with early closes at 13:00 on the day after Thanksgiving, July 3 and Christmas Eve when they are trading days. 2026 has 251 trading days.
 
+\subsection{The Output Database}
+
+Several stocks over a calendar are written as a standard date-partitioned kdb+ database, one day of all stocks at a time: for each date in order every stock is simulated for that date, carrying its own previous close into the open, the stocks' tables are joined and the date's partition is written in one step (the trades, the quotes when requested, and a \key{days} table with one row per stock), sorted by symbol then time with the symbol column parted and enumerated against the root symbol file, every column compressed (128\,KB blocks, zstd level 3 by default), and the day's tables are dropped. Memory holds one day of all stocks; only each stock's close is carried forward. \key{days} is written last, so a crash cannot leave a date looking complete: a complete date is skipped on a rerun and an incomplete one rewritten from scratch, and since every date has its own seeds an interrupted run resumed equals a full run exactly. The run itself (every stock's composed configuration, the calendar, the tables, the compression and the version of the code) is stored at the root, so the database is reproducible from that file alone with the same code, and a database built with another configuration is refused rather than mixed.
+
 % ===========================================================================
 \section{Orders Against the Tape}
 
