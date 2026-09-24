@@ -270,7 +270,7 @@ true,0,0,q,`configs`calendar`opts`version`commit~key hdbrun,1,loadrun returns th
 true,0,0,q,hdbrun[`configs]~hdbcfgs,1,The configs reload unchanged
 true,0,0,q,hdbrun[`calendar]~calendar,1,So does the calendar
 true,0,0,q,hdbrun[`version]~simmarket.moduleversion,1,The module version is the code's
-true,0,0,q,"0.1.0"~simmarket.moduleversion,1,The module version is 0.1.0
+true,0,0,q,simmarket.moduleversion~"0.1.0",1,The module version is 0.1.0
 true,0,0,q,hdbrun[`commit]=simmarket.version[],1,The commit is the code's
 true,0,0,q,-11h=type simmarket.version[],1,version (the commit) is a symbol
 before,0,0,q,system"rm -rf /tmp/simmarket_hdbreplay",1,Clean up
