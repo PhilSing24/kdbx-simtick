@@ -437,11 +437,13 @@ runmany:{[cfgs;calendar;dbpath]
 / ============================================================
 / writehdb writes a standard compressed date-partitioned kdb+ database:
 /   dbpath/sym            the symbol enumeration shared by all partitions
-/   dbpath/config         the run, a q dictionary: every stock's composed
+/   dbpath/simrun         the run, a q dictionary: every stock's composed
 /                         configuration, the calendar, the tables written,
-/                         the compression and the version of the code (a
-/                         kdb+ root holds q objects only: \l loads it as
-/                         the variable config; .j.j gives the JSON)
+/                         the compression, the module version and the git
+/                         commit of the code (a kdb+ root holds q objects
+/                         only: \l loads it as the variable simrun, a name
+/                         no user variable is likely to carry; .j.j gives
+/                         the JSON)
 /   dbpath/<date>/trade   all stocks that day, sorted by sym then time, `p#sym
 /   dbpath/<date>/quote   the same, when requested
 /   dbpath/<date>/days    one row per stock: regime, open, close, gap, trades, volume
@@ -451,6 +453,11 @@ runmany:{[cfgs;calendar;dbpath]
 / scratch, and a database built with another configuration is refused
 
 hdbdefaults:`tables`compression!(`trade`quote;17 5 3)
+
+/ the module's version, recorded in every database it writes next to the
+/ git commit, so a database written from a copied module folder (no git
+/ checkout) still carries a version
+moduleversion:"0.1.0"
 
 version:{[]
   / the git commit of the code (with -dirty when the modules have
@@ -482,25 +489,27 @@ hdbopts:{[opts]
   };
 
 saverun:{[dst;runcfg]
-  / config: the run as one q object file at the root
-  .Q.dd[dst;`config] set runcfg;
+  / simrun: the run as one q object file at the root
+  .Q.dd[dst;`simrun] set runcfg;
   };
 
 loadrun:{[dbpath]
-  / the run that wrote a database, from its config file: `configs (sym!
-  / configuration), `calendar, `opts (tables and compression) and
-  / `version; writehdb[r`configs;r`calendar;path;r`opts] reproduces the
-  / database with the same code. A warning is printed when the code that
-  / wrote it differs from the code running
+  / the run that wrote a database, from its simrun file: `configs (sym!
+  / configuration), `calendar, `opts (tables and compression), `version
+  / (the module version) and `commit (the git commit);
+  / writehdb[r`configs;r`calendar;path;r`opts] reproduces the database
+  / with the same code. A warning is printed when either the module
+  / version or the commit differs from the code running
   if[not -11h=type dbpath; '"loadrun: dbpath must be a file handle"];
-  f:.Q.dd[hsym`$string dbpath;`config];
-  if[()~key f; '"loadrun: no config at ",string dbpath];
+  f:.Q.dd[hsym`$string dbpath;`simrun];
+  if[()~key f; '"loadrun: no simrun at ",string dbpath];
   d:get f;
   opts:`tables`compression!(d`tables;d`compression);
-  ver:d`version;
-  now:.z.m.version[];
-  if[not ver=now; -1 "loadrun: the database was written by version ",string[ver],", the code running is ",string[now],": the same configuration and seeds reproduce it only with the same code"];
-  `configs`calendar`opts`version!(d`configs;.z.m.validate d`calendar;opts;ver)
+  if[not d[`version]~.z.m.moduleversion;
+    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,": the same configuration and seeds reproduce it only with the same code"];
+  if[not d[`commit]=.z.m.version[];
+    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
+  `configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit)
   };
 
 symfile:{[dst]
@@ -585,7 +594,7 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   /   128 KB blocks, zstd level 3; () for uncompressed; 17 2 6 for gzip,
   /   readable by kdb+ before 4.1)
   / returns: dbpath. A complete date is skipped, so an interrupted run
-  /   continues where it stopped and equals a full run; the config file
+  /   continues where it stopped and equals a full run; the simrun file
   /   at the root replays the run (see loadrun); a database built with
   /   another configuration, other than a shorter calendar, is refused
   if[not 99h=type cfgs; '"writehdb: cfgs must be a dictionary sym!configuration"];
@@ -595,8 +604,8 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   o:.z.m.hdbopts opts;
   calendar:.z.m.validate calendar;
   dst:hsym`$string dbpath;
-  runcfg:`configs`calendar`tables`compression`version!(cfgs;0!calendar;o`tables;o`compression;.z.m.version[]);
-  if[not ()~key .Q.dd[dst;`config];
+  runcfg:`configs`calendar`tables`compression`version`commit!(cfgs;0!calendar;o`tables;o`compression;.z.m.moduleversion;.z.m.version[]);
+  if[not ()~key .Q.dd[dst;`simrun];
     old:.z.m.loadrun dst;
     same:{[a;b] (asc[key a]#a)~asc[key b]#b};
     if[not all same'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
@@ -618,4 +627,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;writehdb;loadrun;version;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
+export:([run;runmany;writehdb;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])

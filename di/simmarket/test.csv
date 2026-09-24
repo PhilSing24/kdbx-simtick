@@ -218,7 +218,7 @@ before,0,0,q,hdb:`:/tmp/simmarket_hdb,1,The database path
 before,0,0,q,system"rm -rf /tmp/simmarket_hdb",1,Clean up any existing database
 before,0,0,q,hdbres:simmarket.writehdb[hdbcfgs;calendar;hdb;(`symbol$())!()],1,Write it one day of all stocks at a time
 true,0,0,q,hdbres~hdb,1,writehdb returns dbpath
-true,0,0,q,all `sym`config in key hdb,1,The root holds the sym file and the run's config
+true,0,0,q,all `sym`simrun in key hdb,1,The root holds the sym file and the run's simrun
 true,0,0,q,all (`$string calendar`date) in key hdb,1,One partition per calendar date
 before,0,0,q,readpart:{[db;d;name] s:get .Q.dd[db;`sym]; t:get .Q.par[db;d;name]; flip {[s;c] $[20h<=abs type c;s `long$c;c]}[s] each flip t},1,A partition's table read without loading the database (symbols resolved)
 before,0,0,q,memday:{[t;d] `sym`time xasc select from t where d=`date$time},1,A date of an in-memory table in the partition's order
@@ -265,15 +265,17 @@ before,0,0,q,othercfgs[`PG;`vol]:0.3,1,PG at another vol
 fail,0,0,q,simmarket.writehdb[othercfgs;calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,A different configuration into an existing database throws error
 fail,0,0,q,simmarket.writehdb[hdbcfgs;1_calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,Another calendar (not an extension of the database's) throws error
 fail,0,0,q,simmarket.writehdb[(enlist `NVDA)#hdbcfgs;calendar;`:/tmp/simmarket_hdbresume;(`symbol$())!()],1,Other instruments throw error
-before,0,0,q,hdbrun:simmarket.loadrun hdb,1,The run read back from the database's config
-true,0,0,q,`configs`calendar`opts`version~key hdbrun,1,loadrun returns the configs and the calendar and the options and the version
+before,0,0,q,hdbrun:simmarket.loadrun hdb,1,The run read back from the database's simrun file
+true,0,0,q,`configs`calendar`opts`version`commit~key hdbrun,1,loadrun returns the configs and the calendar and the options and the module version and the commit
 true,0,0,q,hdbrun[`configs]~hdbcfgs,1,The configs reload unchanged
 true,0,0,q,hdbrun[`calendar]~calendar,1,So does the calendar
-true,0,0,q,hdbrun[`version]=simmarket.version[],1,The version is the code's
-true,0,0,q,-11h=type simmarket.version[],1,version is a symbol
+true,0,0,q,hdbrun[`version]~simmarket.moduleversion,1,The module version is the code's
+true,0,0,q,"0.1.0"~simmarket.moduleversion,1,The module version is 0.1.0
+true,0,0,q,hdbrun[`commit]=simmarket.version[],1,The commit is the code's
+true,0,0,q,-11h=type simmarket.version[],1,version (the commit) is a symbol
 before,0,0,q,system"rm -rf /tmp/simmarket_hdbreplay",1,Clean up
 before,0,0,q,simmarket.writehdb[hdbrun`configs;hdbrun`calendar;`:/tmp/simmarket_hdbreplay;hdbrun`opts],1,The run replayed from the config file
-true,0,0,q,all {[d] all {[d;n] (readpart[`:/tmp/simmarket_hdbreplay;d;n])~readpart[hdb;d;n]}[d] each `trade`quote`days} each calendar`date,1,The config reloads and reproduces the run
+true,0,0,q,all {[d] all {[d;n] (readpart[`:/tmp/simmarket_hdbreplay;d;n])~readpart[hdb;d;n]}[d] each `trade`quote`days} each calendar`date,1,The simrun file reloads and reproduces the run
 true,0,0,q,`unset~@[value;`.z.zd;`unset],1,The writer leaves the session's compression setting as it found it (unset)
 before,0,0,q,system"rm -rf /tmp/simmarket_hdbempty",1,Clean up
 before,0,0,q,simmarket.writetable[`:/tmp/simmarket_hdbempty;2026.08.18;`quote;0#hdbmem`quote;17 5 3;`sym`time],1,An empty quote table written to a partition
