@@ -61,10 +61,10 @@ lines,:enlist ""
 lines,:raze {[vals;t;g] section[vals;string g;?[t;((=;`layer;enlist `market);(=;`group;enlist g));0b;()]]}[nvda;tick] each groups
 lines,:enlist "## Scenario (`di/simconfig/scenarios.csv`)"
 lines,:enlist ""
-lines,:enlist "One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The calendar group is read by `di.simmarket`."
+lines,:enlist "One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The days group is read by `di.simmarket`."
 lines,:enlist ""
 lines,:section[nvda;"scenario";?[tick;((=;`layer;enlist `scenario);(=;`group;enlist `scenario));0b;()]]
-lines,:section[nvda;"calendar (di.simmarket)";?[tick;((=;`layer;enlist `scenario);(=;`group;enlist `calendar));0b;()]]
+lines,:section[nvda;"days (di.simmarket)";?[tick;((=;`layer;enlist `scenario);(=;`group;enlist `days));0b;()]]
 lines,:enlist "## Run"
 lines,:enlist ""
 lines,:enlist "A dictionary with any of these; the market file's `run` group carries the defaults."

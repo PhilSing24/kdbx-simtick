@@ -82,7 +82,7 @@ fail,0,0,q,simmarket.compose[market;instruments;scenarios;`wild;runcfg],1,An unk
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;42;runcfg],1,A scenario that is neither a name nor a dictionary throws error
 true,0,0,q,`param`typ`layer`group`description~cols simmarket.describe[],1,describe returns the schema table
 true,0,0,q,6=count simmarket.describe[],1,With the six calendar keys
-true,0,0,q,all `calendar=(simmarket.describe[])`group,1,All of the calendar group
+true,0,0,q,all `days=(simmarket.describe[])`group,1,All of the days group
 comment,0,0,q,,1,=== Run In-Memory Tests ===
 before,0,0,q,result:simmarket.run[cfg;calendar;(::)],1,Run in-memory simulation
 before,0,0,q,trades:result`trade,1,The trades of all days

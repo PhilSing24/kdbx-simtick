@@ -450,8 +450,8 @@ runmany:{[cfgs;calendar;dbpath]
 
 describe:{[]
   / the calendar keys of the configuration schema (the scenario layer's
-  / calendar group), with their types and descriptions
-  ?[simtick.describe[];enlist (=;`group;enlist `calendar);0b;()]
+  / days group), with their types and descriptions
+  ?[simtick.describe[];enlist (=;`group;enlist `days);0b;()]
   };
 
 / export public interface
