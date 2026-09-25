@@ -299,8 +299,11 @@ shiftat:{[icfg;times;moves]
   / simultaneous child's signed impact, a share permanent of which stays through the day while the rest
   / halves every halflife and is ignored after 20 halflives (below a millionth of it); the sum is tapered
   / linearly to zero over the taper before closetime (so the close, and the next day di.simmarket starts
-  / from it, are unmoved: the permanent share is permanent within the day) and rounded to whole cents, so
-  / bid and ask move by the same tick
+  / from it, are unmoved: the permanent share is permanent within the day) and rounded to the cent grid
+  / stochastically - up with probability equal to the fractional part in cents - so bid and ask move by
+  / the same tick and the expected shift is exact: a 0.4-cent impact is a cent on 40% of the quotes it
+  / applies to and nothing on the rest, rather than always nothing. One draw per time, so a print at that
+  / time moves with its quote (see impact)
   / icfg: impact configuration (see validateimpact); a missing permanent share means 0
   / times: ascending timestamps of one day
   / moves: `time`amount, amount in currency, positive pushing the price up
@@ -317,7 +320,8 @@ shiftat:{[icfg;times;moves]
   d+:0f^(sums perm*moves`amount) moves[`time] bin times;
   close:(`date$first times)+icfg`closetime;
   w:$[0D<icfg`taper; 0f|1f&(`float$`long$close-times)%`float$`long$icfg`taper; `float$times<close];
-  0.01*`long$w*d%0.01
+  x:w*d%0.01;
+  0.01*floor[x]+(x-floor x)>count[x]?1f
   };
 
 impact:{[icfg;execs;trades;quotes]
