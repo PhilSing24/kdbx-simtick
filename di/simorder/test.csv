@@ -450,3 +450,27 @@ comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run
 true,0,0,q,run1~run2,1,,Same inputs produce identical output
+comment,0,0,q,,1,,=== Limit price ===
+before,0,0,q,limres:simorder.run[@[basecfg;`limitprice;:;1e9];trades;quotes],1,,A buy limit far above the market binds nothing
+true,0,0,q,(limres`executions)~ordresult`executions,1,,and leaves the executions exactly as without one
+true,0,0,q,1e9=first limres[`orders]`limitprice,1,,The parent order carries its limit
+true,0,0,q,null first ordertbl`limitprice,1,,and a null one without
+before,0,0,q,buylim:0.01*floor 100*first ordertbl`arrivalprice,1,,A buy limit at the arrival mid on the cent grid
+before,0,0,q,buyres:simorder.run[@[basecfg;`limitprice;:;buylim];trades;quotes],1,,Run the buy under it
+true,0,0,q,all buyres[`executions][`price]<=buylim+1e-9,1,,No buy fill is above the limit
+true,0,0,q,all buyres[`children][`limitprice]<=buylim+1e-9,1,,No passive buy child rests above it
+true,0,0,q,(sum buyres[`executions]`qty)=first buyres[`orders]`filledqty,1,,Its filledqty is the sum of its fills
+true,0,0,q,(first buyres[`orders]`filledqty)<=first buyres[`orders]`orderqty,1,,and never more than the order
+before,0,0,q,sellcfg:@[basecfg;`side;:;`SELL],1,,The same order as a sell
+before,0,0,q,selllim:0.01*ceiling 100*first ordertbl`arrivalprice,1,,A sell limit at the arrival mid
+before,0,0,q,sellres:simorder.run[@[sellcfg;`limitprice;:;selllim];trades;quotes],1,,Run the sell under it
+true,0,0,q,all sellres[`executions][`price]>=selllim-1e-9,1,,No sell fill is below the limit
+true,0,0,q,all (null sl)|(sl:sellres[`children]`limitprice)>=selllim-1e-9,1,,No passive sell child rests below it
+before,0,0,q,farlim:0.01*floor 100*(min trades`price)-1,1,,A buy limit a dollar under the day's low: nothing can fill
+before,0,0,q,farres:simorder.run[@[basecfg;`limitprice;:;farlim];trades;quotes],1,,Run the buy under it
+true,0,0,q,0=count farres`executions,1,,It fills nothing
+true,0,0,q,`partial=first farres[`orders]`status,1,,and ends partial
+true,0,0,q,0=first farres[`orders]`filledqty,1,,with nothing filled
+true,0,0,q,all 0=farres[`children]`filledqty,1,,and every child cancelled in full
+true,0,0,q,all `cancelled=farres[`children]`status,1,,with the status to say so
+fail,0,0,q,simorder.run[@[basecfg;`limitprice;:;-1f];trades;quotes],1,,A negative limit is rejected

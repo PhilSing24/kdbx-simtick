@@ -22,6 +22,7 @@ An order's configuration is composed from the market file's `orders` group (and 
 | `seed` | long | random seed of the jitter, the aggression and the venues (0N = no seed) | 1 |
 | `urgency` | float | arrival pacing only (required there): Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier |  |
 | `maxpct` | float | arrival pacing only (required there): participation cap per interval, own/(own+market), between 0 and 1 |  |
+| `limitprice` | float | the parent order's limit: a passive child never rests beyond it, an aggressive one never sweeps past it, a dark one ignores midpoint prints beyond it; quantity that cannot fill within it stays unfilled and the order ends partial. Null or absent = no limit |  |
 
 ## From the market file
 
