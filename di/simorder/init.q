@@ -49,6 +49,7 @@ validate:{[cfg]
   if[0>=cfg`orderqty; '"validate: orderqty must be positive"];
   if[0>=cfg`numchildren; '"validate: numchildren must be positive"];
   if[not cfg[`side] in `BUY`SELL; '"validate: side must be BUY or SELL"];
+  if[`limitprice in key cfg; if[not null cfg`limitprice; if[0>=cfg`limitprice; '"validate: limitprice must be positive, or null for no limit"]]];
   if[not cfg[`pacing] in `even`frontloaded`arrival; '"validate: pacing must be even, frontloaded or arrival"];
   if[not cfg[`spreadcapture] within 0 1; '"validate: spreadcapture must be between 0 and 1 (0=mid, 1=far touch)"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
@@ -380,11 +381,26 @@ aggressivefills:{[cfg;quotes;t;qty]
   buy:cfg[`side]=`BUY;
   touch:$[buy;q`ask;q`bid];
   disp:$[buy;q`asksize;q`bidsize];
-  f1:qty&disp;
-  f2:qty-f1;
+  / the order's limit, when it has one: a level beyond it is not taken, and what would have filled
+  / there stays unfilled
+  lp:.z.m.limitof cfg;
+  inside:{[buy;lp;p] $[null lp;1b;buy;p<=lp+1e-9;p>=lp-1e-9]}[buy;lp];
+  f1:$[inside touch;qty&disp;0];
+  sweep:touch+cfg[`ticksize]*cfg[`sweepticks]*$[buy;1;-1];
+  f2:$[inside sweep;qty-f1;0];
   r:([]time:enlist t+lat;price:enlist touch;qty:enlist f1;liquidity:enlist `R);
-  if[f2>0; r,:([]time:enlist t+lat;price:enlist touch+cfg[`ticksize]*cfg[`sweepticks]*$[buy;1;-1];qty:enlist f2;liquidity:enlist `R)];
+  if[f2>0; r,:([]time:enlist t+lat;price:enlist sweep;qty:enlist f2;liquidity:enlist `R)];
   select from r where qty>0
+  };
+
+limitof:{[cfg]
+  / the order's limit price, null when it has none
+  $[`limitprice in key cfg;cfg`limitprice;0n]
+  };
+
+heldwithin:{[buy;lp;p]
+  / a resting price p held within the order's limit lp: a buy never above it, a sell never below it
+  $[null lp;p;buy;p&lp;p|lp]
   };
 
 passivefills:{[cfg;trades;quotes;t;expiry;qty]
@@ -415,8 +431,12 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
   tt:trades`time;
   s:t+lat;
   q0:.z.m.quoteat[quotes;s];
-  L:$[buy;q0`bid;q0`ask];
-  Q:`float$$[buy;q0`bidsize;q0`asksize];
+  / the near touch, held within the order's limit: a child never rests beyond it. Away from the touch
+  / it is alone at its level (the book beyond the touch is not modelled), so it has no queue
+  lp:.z.m.limitof cfg;
+  touch0:$[buy;q0`bid;q0`ask];
+  L:.z.m.heldwithin[buy;lp;touch0];
+  Q:$[1e-9>abs L-touch0;`float$$[buy;q0`bidsize;q0`asksize];0f];
   Q0:Q;                                   / the level's displayed size when the child joined it
   leaves:qty;
   replaces:0;
@@ -441,7 +461,7 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
     jend:1+qt bin expiry;
     if[j<jend;
       later:j+til jend-j;
-      nt:$[buy;quotes[`bid] later;quotes[`ask] later];
+      nt:.z.m.heldwithin[buy;lp] $[buy;quotes[`bid] later;quotes[`ask] later];
       thru:$[buy;nt<L-1e-9;nt>L+1e-9];
       moved:$[pegging;1e-9<abs nt-L;thru];
       k:first where moved;
@@ -480,8 +500,9 @@ passivefills:{[cfg;trades;quotes;t;expiry;qty]
     if[(leaves>0)&ev in `away`thru;
       $[replaces<cfg`maxreplaces;
         [qn:.z.m.quoteat[quotes;s];
-         L:$[buy;qn`bid;qn`ask];
-         Q:`float$$[buy;qn`bidsize;qn`asksize];
+         touchn:$[buy;qn`bid;qn`ask];
+         L:.z.m.heldwithin[buy;lp;touchn];
+         Q:$[1e-9>abs L-touchn;`float$$[buy;qn`bidsize;qn`asksize];0f];
          Q0:Q;
          replaces+:1;
          events,:([]time:enlist s;event:enlist `replace;qty:enlist leaves;price:enlist L;leavesqty:enlist leaves)];
@@ -526,6 +547,8 @@ darkfills:{[cfg;trades;quotes;t;expiry;qty]
     pr:aj[`time;pr;`time`bid`ask#quotes];
     opp:$[buy;`S;`B];
     pr:select from pr where venue=`TRF,aggressor=opp,1e-9>abs price-0.5*bid+ask;
+    lp:.z.m.limitof cfg;
+    if[not null lp; pr:pr where $[buy;pr[`price]<=lp+1e-9;pr[`price]>=lp-1e-9]];
     if[count pr;
       take:floor cfg[`darkfillshare]*pr`qty;
       cum:leaves&sums take;
@@ -554,11 +577,14 @@ child:{[cfg;trades;quotes;spec]
   r:$[dark; .z.m.darkfills[cfg;trades;quotes;t;expiry;qty];
     aggressive;
     [f:.z.m.aggressivefills[cfg;quotes;t;qty];
-     lim:first f`price;
+     lim:$[count f;first f`price;0n];
+     lv:qty-sum f`qty;
      ev:([]time:t,t+`timespan$`long$500000*cfg`latencyms;event:`new`ack;qty:2#qty;price:2#lim;leavesqty:2#qty);
      ev,:([]time:f`time;event:count[f]#`fill;qty:f`qty;price:f`price;leavesqty:qty-sums f`qty);
-     ev,:([]time:enlist last f`time;event:enlist `done;qty:enlist 0;price:enlist lim;leavesqty:enlist 0);
-     `fills`events`leaves`replaces`limit!(f;ev;0;0;0n)];
+     / what the order's limit kept it from taking is cancelled at once: an aggressive child does not rest
+     ev,:$[0=lv;([]time:enlist last f`time;event:enlist `done;qty:enlist 0;price:enlist lim;leavesqty:enlist 0);
+       ([]time:enlist t+`timespan$`long$1000000*cfg`latencyms;event:enlist `cancel;qty:enlist lv;price:enlist lim;leavesqty:enlist lv)];
+     `fills`events`leaves`replaces`limit!(f;ev;lv;0;0n)];
     .z.m.passivefills[cfg;trades;quotes;t;expiry;qty]];
   f:r`fills;
   filled:sum f`qty;
@@ -578,7 +604,8 @@ execute:{[cfg;trades;quotes]
   / dark draws come after the others and only when darkshare is above 0,
   / so darkshare 0 leaves the seeded stream and the output as they were);
   / then a final aggressive child before endtime for whatever is left, so
-  / the order completes
+  / the order completes - unless its limit stops it, in which case what the
+  / limit refused stays unfilled and the order ends partial
   / cfg: order config dict
   / trades, quotes: the day's tables
   / returns: dict `children`events`executions
@@ -637,7 +664,7 @@ buildorder:{[cfg;quotes;executions]
   filled:sum executions`qty;
   ([]orderid:enlist cfg`orderid;account:enlist cfg`account;algo:enlist cfg`algo;
     sym:enlist cfg`sym;side:enlist cfg`side;orderqty:enlist cfg`orderqty;
-    ordtype:enlist `ALGO;limitprice:enlist 0n;capacity:enlist cfg`capacity;
+    ordtype:enlist `ALGO;limitprice:enlist .z.m.limitof cfg;capacity:enlist cfg`capacity;
     starttime:enlist cfg`starttime;endtime:enlist cfg`endtime;
     arrivalprice:enlist 0.5*q[`bid]+q`ask;
     filledqty:enlist filled;
@@ -774,7 +801,8 @@ generate:{[market;spec;trades;quotes]
   algo:spec[`algos] m?count spec`algos;
   m0:algomenu ([]algo:algo);
   seeds:$[null spec`seed; m#0N; 1+(til[m]+7919*spec`seed) mod 2147483647];
-  (key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;
+  / generated flow carries no limit: the column is there because compose and run accept one
+  (key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;limitprice:m#0n;
     sym:d`sym;side:`BUY`SELL m?2;orderqty:qty;starttime:start;endtime:start+w;
     numchildren:5|`long$spec[`childrenperminute]*w%0D00:01;
     pacing:m0`pacing;spreadcapture:m0`spreadcapture;ticksize:m#spec`ticksize;jitter:m#spec`jitter;
@@ -844,6 +872,7 @@ schema[`darkshare]:("F";`market;`orders;"probability a passive child is sent to 
 schema[`darkfillshare]:("F";`market;`orders;"the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1")
 schema[`urgency]:("F";`optional;`order;"arrival pacing only (required there): Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:("F";`optional;`order;"arrival pacing only (required there): participation cap per interval, own/(own+market), between 0 and 1")
+schema[`limitprice]:("F";`optional;`order;"the parent order's limit: a passive child never rests beyond it, an aggressive one never sweeps past it, a dark one ignores midpoint prints beyond it; quantity that cannot fill within it stays unfilled and the order ends partial. Null or absent = no limit")
 
 files:{[]
   / the shipped market file and order rows
@@ -886,4 +915,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;runflow;generate;menu;compose;loadmarket;loadorders;files;marketday;schedule;jittered;sizing;intervals;trajectory;capped;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])
+export:([run;runmany;runflow;generate;menu;compose;loadmarket;loadorders;files;marketday;schedule;jittered;sizing;intervals;trajectory;capped;limitof;heldwithin;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])
