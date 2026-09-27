@@ -69,7 +69,7 @@ true,0,0,q,2026.11.27D13:00=last exec time from genresult`trade,1,And closes ear
 after,0,0,q,system"rm -f /tmp/simmarket_saved.csv",1,Clean up the saved calendar
 comment,0,0,q,,1,=== Compose Tests ===
 before,0,0,q,cfgs:simmarket.compose[market;instruments;scenarios;`normal;runcfg],1,Every instrument on the normal scenario
-true,0,0,q,`NVDA`XOM`PG~key cfgs,1,One configuration per instrument of the table
+true,0,0,q,`NVDA`XOM`PG`MSFT~key cfgs,1,One configuration per instrument of the table
 true,0,0,q,cfg~cfgs`NVDA,1,Each is the instrument composed on the scenario
 before,0,0,q,mixed:simmarket.compose[market;instruments;scenarios;`NVDA`PG!`normal`volatile;runcfg],1,A scenario per instrument
 true,0,0,q,`NVDA`PG~key mixed,1,Only the named instruments
@@ -121,6 +121,7 @@ true,0,0,q,all 0f=nogapdays`overnightret,1,With overnightshare 0 there is no gap
 true,0,0,q,(1_nogapdays`open)~-1_nogapdays`close,1,With overnightshare 0 each day opens exactly at the previous close
 before,0,0,q,gapcfg:cfg,1,Setup config for a large overnight share
 before,0,0,q,gapcfg[`overnightshare]:0.9,1,Most of the variance overnight
+before,0,0,q,gapcfg[`jumploadings]:"",1,Without the common jumps (they need more variance than a tenth of the day leaves)
 before,0,0,q,gapdays:(simmarket.run[gapcfg;calendar;(::)])`days,1,Days with a large overnight share
 true,0,0,q,(avg abs 1_gapdays`overnightret)>avg abs 1_days`overnightret,1,A larger overnightshare gives larger gaps
 true,0,0,q,(abs simmarket.overnight[cfg;1])<0.2,1,overnight returns a log return of plausible size
@@ -170,6 +171,7 @@ before,0,0,q,shortcal:20#longcal,1,The first twenty days of the long calendar
 true,0,0,q,(20#reg`regimeseed)~(simmarket.regimes[cfg;shortcal])`regimeseed,1,A date's regime seed does not depend on the calendar it is in
 before,0,0,q,cc2ins:instruments`PG,1,PG for a two-year close-to-close vol check
 before,0,0,q,cc2ins[`tradesperday]:6000,1,Made quiet so two years run fast (the transaction clock keeps the daily variance)
+before,0,0,q,cc2ins[`jumpburst]:40,1,With bursts in proportion
 before,0,0,q,cc2ins[`quotespertrade]:2f,1,And with few quotes
 before,0,0,q,cc2cfg:simtick.compose[market;cc2ins;scenarios`normal;runcfg],1,Composed on the normal scenario
 before,0,0,q,cc2cfg[`generatequotes]:0b,1,Trades only
@@ -216,16 +218,17 @@ true,0,0,q,99h=type qresult,1,Result with quotes is dict
 true,0,0,q,`trade`quote`days~key qresult,1,Dict has trade quote and days keys
 true,0,0,q,`sym`time`seq`bid`ask`bidsize`asksize~cols qresult`quote,1,Quotes has correct columns
 comment,0,0,q,,1,=== Several Instruments Tests ===
-before,0,0,q,manycfgs:simmarket.compose[market;update tradesperday:5000 from instruments;scenarios;`normal;runcfg],1,The three instruments made quiet
+before,0,0,q,thinins:update jumpburst:30 from update tradesperday:5000 from instruments,1,The instruments made quiet with bursts in proportion
+before,0,0,q,manycfgs:simmarket.compose[market;thinins;scenarios;`normal;runcfg],1,The four instruments made quiet
 before,0,0,q,many:simmarket.runmany[manycfgs;calendar;(::)],1,Run them over the calendar
 true,0,0,q,`trade`days~key many,1,The merged result has the trades and the days (no quotes requested)
 true,0,0,q,(asc many[`trade]`time)~many[`trade]`time,1,The merged trades are sorted by time
-true,0,0,q,3=count distinct many[`trade]`sym,1,With every instrument
+true,0,0,q,4=count distinct many[`trade]`sym,1,With every instrument
 true,0,0,q,`sym`date~2#cols many`days,1,The days table has a sym column first
-true,0,0,q,9=count many`days,1,And one row per instrument and day
+true,0,0,q,12=count many`days,1,And one row per instrument and day
 true,0,0,q,(select from many[`trade] where sym=`PG)~(simmarket.run[manycfgs`PG;calendar;(::)])`trade,1,An instrument's tape is that of its own run
 comment,0,0,q,,1,=== Database Tests ===
-before,0,0,q,hdbcfgs:simmarket.compose[market;update tradesperday:5000 from instruments;scenarios;`NVDA`PG!`normal`volatile;`seed`generatequotes!(42;1b)],1,Two stocks with their own scenarios
+before,0,0,q,hdbcfgs:simmarket.compose[market;thinins;scenarios;`NVDA`PG!`normal`volatile;`seed`generatequotes!(42;1b)],1,Two stocks with their own scenarios
 before,0,0,q,hdbmem:simmarket.runmany[hdbcfgs;calendar;(::)],1,The same run in memory
 before,0,0,q,hdb:`:/tmp/simmarket_hdb,1,The database path
 before,0,0,q,system"rm -rf /tmp/simmarket_hdb",1,Clean up any existing database
@@ -334,6 +337,43 @@ before,0,0,q,sgxccret:1_log sgxccdays[`close]%prev sgxccdays`close,1,Close-to-cl
 true,0,0,q,(abs ((dev sgxccret)*sqrt 250)-sgxcc`vol)<0.05*sgxcc`vol,1,With a break the close-to-close vol is still within 5% of the configured vol: the break takes its share of the budget
 true,0,0,q,((dev sgxccdays`breakret)*sqrt 250) within 0.6 1.4*sgxcc[`vol]*sqrt 0.05*1-0.3,1,The break returns carry about breakshare of the intraday variance
 fail,0,0,q,simmarket.run[sgxcc upsert (enlist `breakshare)!enlist 1f;calendar;(::)],1,breakshare of 1 throws error
+comment,0,0,q,,1,=== Co-movement Tests ===
+before,0,0,q,cmins:update jumpburst:20 from update quotespertrade:2f from update tradesperday:3000 from instruments,1,The four instruments made quiet so two years run fast
+before,0,0,q,cmcfgs:simmarket.compose[market;cmins;scenarios;`normal;runcfg],1,Their configurations
+before,0,0,q,cmimplied:simmarket.correlations cmcfgs,1,The correlations they imply
+before,0,0,q,cmpairs:(`NVDA`MSFT;`NVDA`XOM;`NVDA`PG;`MSFT`XOM;`MSFT`PG;`XOM`PG),1,The six pairs
+true,0,0,q,all 1f=cmimplied'[key cmcfgs;key cmcfgs],1,The implied correlation of a stock with itself is 1
+true,0,0,q,all {[c;p] c[p 0;p 1]=c[p 1;p 0]}[cmimplied] each cmpairs,1,The implied correlations are symmetric
+before,0,0,q,cmnojump:simmarket.correlations simmarket.compose[market;update jumploadings:count[i]#enlist "" from cmins;scenarios;`normal;runcfg],1,The correlations implied without common jumps
+true,0,0,q,1e-9>abs cmnojump[`NVDA;`MSFT]-(0.65*0.65)+0.35*0.35,1,Without common jumps two stocks of a sector correlate at the sum over factors of the products of their loadings
+true,0,0,q,1e-9>abs cmnojump[`NVDA;`XOM]-0.65*0.55,1,And two stocks of different sectors at the product of their market loadings
+true,0,0,q,cmimplied[`NVDA;`MSFT]>cmnojump[`NVDA;`MSFT],1,Common jumps add to the correlation
+before,0,0,q,cmmatrix:{[c;k] c[;k] each k}[cmimplied;key cmcfgs],1,The implied correlations as a matrix
+before,0,0,q,cmquad:{[m;x] sum x*m mmu x}[cmmatrix] each {[n;i] -1+n?2f}[4] each til 1000,1,Quadratic forms of the matrix on a thousand random vectors
+true,0,0,q,all 0<=cmquad,1,The implied correlation matrix is positive semi-definite
+before,0,0,q,cmres:simmarket.runmany[cmcfgs;longcal;(::)],1,Two years of the four stocks
+before,0,0,q,cmret:exec 1_deltas log close by sym from cmres`days,1,Their close-to-close log returns
+true,0,0,q,all 0.1>abs {[r;c;p] (r[p 0] cor r p 1)-c[p 0;p 1]}[cmret;cmimplied] each cmpairs,1,Over two years every pair's correlation is within 0.1 of the implied one (standard error 0.04)
+true,0,0,q,all 0.05>abs 1-{[r;c;s] ((dev r s)*sqrt 252)%c[s;`vol]}[cmret;cmcfgs] each key cmcfgs,1,And every stock's close-to-close vol is within 5% of its configured vol: the factors and the common jumps are inside the variance budget
+before,0,0,q,cmgaps:exec 1_overnightret by sym from cmres`days,1,Their overnight returns
+true,0,0,q,0.1>abs (cmgaps[`NVDA] cor cmgaps`MSFT)-(0.65*0.65)+0.35*0.35,1,The overnight gaps of two stocks correlate at the product of their loadings
+true,0,0,q,0.1>abs (cmgaps[`XOM] cor cmgaps`PG)-0.55*0.45,1,For every pair
+before,0,0,q,cmshort:simmarket.runmany[cmcfgs;20#longcal;(::)],1,Twenty days of the four stocks
+true,0,0,q,(select from cmshort[`trade] where sym=`PG)~(simmarket.run[cmcfgs`PG;20#longcal;(::)])`trade,1,With factors a stock's tape is still the one of its own run: the factors depend on the date not on the stocks of the run
+true,0,0,q,(select from cmshort[`trade] where sym=`NVDA)~(simmarket.runmany[`NVDA`XOM#cmcfgs;20#longcal;(::)])[`trade] where `NVDA=(simmarket.runmany[`NVDA`XOM#cmcfgs;20#longcal;(::)])[`trade]`sym,1,Whatever the other stocks
+fail,0,0,q,simmarket.runmany[@[cmcfgs;`XOM;{x upsert (enlist `factorprofile)!enlist 13#1f}];calendar;(::)],1,Stocks with different factor keys in one run throw error
+fail,0,0,q,simmarket.run[cfg upsert (enlist `seed)!enlist 0N;calendar;(::)],1,Factor loadings without a seed throw error
+fail,0,0,q,simmarket.run[cfg upsert (enlist `jumploadings)!enlist "market 20";calendar;(::)],1,Common jumps carrying more variance than the day throw error
+before,0,0,q,eppsins:update jumpburst:100 from update tradesperday:20000 from instruments,1,Busier stocks for the intraday correlation
+before,0,0,q,eppscfgs:`NVDA`MSFT#simmarket.compose[market;eppsins;scenarios;`normal;`seed`generatequotes!(42;1b)],1,NVDA and MSFT with quotes
+before,0,0,q,eppsq:(simmarket.runmany[eppscfgs;10#longcal;(::)])`quote,1,Ten days of their quotes
+before,0,0,q,eppsbar:{[q;s;h] exec last 0.5*bid+ask by h xbar time from q where sym=s},1,A stock's last mid per bar
+before,0,0,q,eppscor:{[q;h] a:eppsbar[q;`NVDA;h]; b:eppsbar[q;`MSFT;h]; k:(key a) inter key b; (1_deltas log a k) cor 1_deltas log b k},1,The correlation of the two stocks' returns at a horizon
+before,0,0,q,epps5s:eppscor[eppsq;0D00:00:05],1,At five seconds
+before,0,0,q,epps10m:eppscor[eppsq;0D00:10:00],1,At ten minutes
+true,0,0,q,epps5s>0.2,1,Two stocks co-move within the day: at five seconds
+true,0,0,q,epps10m>0.2,1,And at ten minutes
+true,0,0,q,epps10m<cmimplied[`NVDA;`MSFT],1,Below the daily correlation: order-flow impact and tick rounding add noise of the stock's own that a day washes out
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simmarket.run[cfg;calendar;(::)],1,First run
 before,0,0,q,run2:simmarket.run[cfg;calendar;(::)],1,Second run
