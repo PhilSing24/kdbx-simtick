@@ -81,9 +81,8 @@ before,0,0,q,venues:simconfig.loadvenues simconfig.path "venues.csv",1,,The ship
 true,0,0,q,99h=type venues,1,,loadvenues returns a keyed table
 true,0,0,q,`code~first cols venues,1,,Keyed by code
 true,0,0,q,`name`type`tcacode~cols value venues,1,,With the name and type and the TCA code
-true,0,0,q,all (value[venues]`type) in `lit`dark`trf,1,,Every type is lit or dark or trf
+true,0,0,q,all (value[venues]`type) in `lit`trf,1,,The shipped venues are lit venues and the reporting facility
 true,0,0,q,`NASDAQ=venues[`XNAS;`tcacode],1,,XNAS maps to the TCA code NASDAQ
-true,0,0,q,`dark`dark~{[v;c] v[c;`type]}[venues] each `UBSA`LEVL,1,,The two ATSs are dark venues
 true,0,0,q,`trf=venues[`TRF;`type],1,,TRF is the reporting facility
 before,0,0,q,badvenues:0!venues,1,,A venue file with an unknown type
 before,0,0,q,badvenues[0;`type]:`foo,1,,Set the first row's type to foo

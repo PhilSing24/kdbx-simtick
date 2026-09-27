@@ -14,10 +14,12 @@ quotes:result`quote
 
 -1"trades: ",string[count trades]," rows, quotes: ",string[count quotes]," rows";
 
-/ the good and bad order rows, composed with the market's orders keys
-orders:simorder.loadorders simorder.files[]`orders
-ordresult:simorder.run[simorder.compose[market;orders`good];trades;quotes]
-badresult:simorder.run[simorder.compose[market;orders`bad];trades;quotes]
+/ the good and bad order rows, composed with the joined market (the tick market and this module's defaults)
+of:simorder.files[]
+omarket:simorder.loadmarket[of`market;of`defaults]
+orders:simorder.loadorders of`orders
+ordresult:simorder.run[simorder.compose[omarket;orders`good];trades;quotes]
+badresult:simorder.run[simorder.compose[omarket;orders`bad];trades;quotes]
 
 / sanity checks
 -1"good qty total: ",string sum ordresult[`executions]`qty;

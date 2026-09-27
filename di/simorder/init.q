@@ -2,9 +2,10 @@
 / Generates a parent order + child fills against an existing trades/quotes
 / market (from di.simtick / di.simmarket), with configurable execution
 / quality (pacing, spread capture) to demonstrate good vs. bad execution.
-/ An order's configuration is composed from the market file's orders group
-/ and an order row (see compose); the market file also holds the algo menu
-/ and the defaults of a generated order flow, and the impact parameters
+/ The module owns its keys: a defaults file per market (markets/*.json:
+/ routing, dark pools, algo menu, order-flow defaults, impact) is joined to
+/ the tick market by loadmarket, and an order's configuration is composed
+/ from that joined market and an order row (see compose)
 
 simtick:use`di.simtick
 simconfig:use`di.simconfig
@@ -804,7 +805,7 @@ generate:{[market;spec;trades;quotes]
   m0:algomenu ([]algo:algo);
   seeds:$[null spec`seed; m#0N; 1+(til[m]+7919*spec`seed) mod 2147483647];
   / generated flow carries no limit: the column is there because compose and run accept one
-  (key .z.m.schema) xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;limitprice:m#0n;
+  .z.m.orderkeys[] xcols ([]orderid:`$"ORD",/:-4#'"0000",/:string 1+til m;limitprice:m#0n;
     sym:d`sym;side:`BUY`SELL m?2;orderqty:qty;starttime:start;endtime:start+w;
     numchildren:5|`long$spec[`childrenperminute]*w%0D00:01;
     pacing:m0`pacing;spreadcapture:m0`spreadcapture;ticksize:m#spec`ticksize;jitter:m#spec`jitter;
@@ -843,10 +844,13 @@ runflow:{[market;spec;trades;quotes]
 / CONFIGURATION SCHEMA AND LAYERS
 / ============================================================
 / schema: key!(type;layer;group;description), see di.simconfig. An order
-/ row (di/simconfig/orders.csv, or a dictionary) gives the essential and
-/ order keys; the market file's orders group (and its session group for
-/ ticksize) gives the market keys, which a row may override; urgency and
-/ maxpct are read for arrival pacing only
+/ row (orders.csv, or a dictionary) gives the essential and order keys;
+/ the joined market gives the market keys (the routing and dark groups of
+/ this module's defaults file, and the tick market's ticksize), which a
+/ row may override; urgency and maxpct are read for arrival pacing only.
+/ The flow layer (the algo menu and the defaults of a generated order
+/ flow) and the impact layer are read from the joined market by generate
+/ and impactcfg, and are not part of an order's configuration
 schema:()!()
 schema[`orderid]:("S";`essential;`order;"unique order identifier")
 schema[`sym]:("S";`essential;`order;"ticker symbol - must match the trades/quotes tables")
@@ -861,27 +865,81 @@ schema[`account]:("S";`order;`order;"the account the order is for")
 schema[`algo]:("S";`order;`order;"the algorithm working the order (a label: VWAP, IS, ...)")
 schema[`seed]:("J";`order;`order;"random seed of the jitter, the aggression and the venues (0N = no seed)")
 schema[`ticksize]:("F";`market;`session;"minimum price increment; fill prices sit on the tick or exactly at the midpoint (half ticks)")
-schema[`latencyms]:("F";`market;`orders;"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
-schema[`maxreplaces]:("J";`market;`orders;"how many times a passive child re-pegs to the near touch when it moves, either way, before resting where it is")
-schema[`jitter]:("F";`market;`orders;"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
-schema[`capacity]:("S";`market;`orders;"A (agency) or P (principal)")
-schema[`ordervenues]:("SL";`market;`orders;"lit venues (MIC codes) the children are routed to")
-schema[`ordervenueshares]:("FL";`market;`orders;"their routing shares (sum to 1)")
-schema[`sweepticks]:("J";`market;`orders;"ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken")
-schema[`darkvenues]:("SL";`market;`orders;"the dark pools (MPIDs) a passive child can be routed to")
-schema[`darkvenueshares]:("FL";`market;`orders;"their routing shares among dark children (sum to 1)")
-schema[`darkshare]:("F";`market;`orders;"probability a passive child is sent to a dark pool instead of a lit venue, between 0 and 1 (0 = no dark routing); aggressive children never go dark")
-schema[`darkfillshare]:("F";`market;`orders;"the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1")
+schema[`latencyms]:("F";`market;`routing;"milliseconds from a child's send to its arrival at the market (and half of it to its ack)")
+schema[`maxreplaces]:("J";`market;`routing;"how many times a passive child re-pegs to the near touch when it moves, either way, before resting where it is")
+schema[`jitter]:("F";`market;`routing;"random shift of each child's time, as a share of half the gap to its neighbours, between 0 and 1 (0 = exact schedule)")
+schema[`capacity]:("S";`market;`routing;"A (agency) or P (principal)")
+schema[`ordervenues]:("SL";`market;`routing;"lit venues (MIC codes) the children are routed to")
+schema[`ordervenueshares]:("FL";`market;`routing;"their routing shares (sum to 1)")
+schema[`sweepticks]:("J";`market;`routing;"ticks beyond the touch at which the rest of an aggressive child fills once the displayed size is taken")
+schema[`darkvenues]:("SL";`market;`dark;"the dark pools (MPIDs) a passive child can be routed to")
+schema[`darkvenueshares]:("FL";`market;`dark;"their routing shares among dark children (sum to 1)")
+schema[`darkshare]:("F";`market;`dark;"probability a passive child is sent to a dark pool instead of a lit venue, between 0 and 1 (0 = no dark routing); aggressive children never go dark")
+schema[`darkfillshare]:("F";`market;`dark;"the most a dark child takes of an opposite-side off-exchange midpoint print, as a share of it, between 0 and 1")
+schema[`algos]:("SL";`flow;`algos;"the algo menu an order flow draws from (labels)");
+schema[`algopacings]:("SL";`flow;`algos;"each algo's pacing (even, frontloaded or arrival)");
+schema[`algospreadcaptures]:("FL";`flow;`algos;"each algo's share of aggressive children, between 0 and 1");
+schema[`algourgencies]:("FL";`flow;`algos;"each algo's urgency (arrival pacing only, null otherwise)");
+schema[`algomaxpcts]:("FL";`flow;`algos;"each algo's participation cap (arrival pacing only, null otherwise)");
+schema[`norders]:("J";`flow;`flow;"orders per instrument and day of a generated flow");
+schema[`accounts]:("SL";`flow;`flow;"the accounts a generated flow draws from");
+schema[`sizepct]:("FL";`flow;`flow;
+  "lowest and highest order size of a generated flow, as a share of the day's volume");
+schema[`windowminutes]:("FL";`flow;`flow;"shortest and longest order window of a generated flow, in minutes");
+schema[`childrenperminute]:("F";`flow;`flow;
+  "children per minute of window of a generated order (at least 5 children)");
+schema[`orderimpactmodel]:("S";`impact;`impact;
+  "impact model of the child executions, participation (p^beta) or sqrtlaw");
+schema[`orderimpacteta]:("F";`impact;`impact;"impact coefficient, zero or positive (0 = no impact)");
+schema[`orderimpactbeta]:("F";`impact;`impact;"participation exponent, positive (0.5 is the square-root law)");
+schema[`orderimpacthalflifeseconds]:("F";`impact;`impact;
+  "seconds over which the transient part of an execution's impact halves");
+schema[`orderimpacttaperminutes]:("F";`impact;`impact;
+  "minutes before the close over which the impact shift falls linearly to zero");
+schema[`orderimpactpermanent]:("F";`impact;`impact;
+  "share of each execution's impact that stays through the day, between 0 and 1");
 schema[`urgency]:("F";`optional;`order;"arrival pacing only (required there): Almgren-Chriss urgency (kappa x horizon), positive; higher trades earlier")
 schema[`maxpct]:("F";`optional;`order;"arrival pacing only (required there): participation cap per interval, own/(own+market), between 0 and 1")
 schema[`limitprice]:("F";`optional;`order;"the parent order's limit: a passive child never rests beyond it, an aggressive one never sweeps past it, a dark one ignores midpoint prints beyond it; quantity that cannot fill within it stays unfilled and the order ends partial. Null or absent = no limit")
 
-files:{[]
-  / the shipped market file and order rows
-  `market`orders!simconfig.path each ("markets/us_largecap.json";"orders.csv")
+orderkeys:{[]
+  / the keys of an order's configuration: the schema without the flow and
+  / impact layers, which generate and impactcfg read from the joined market
+  :(key .z.m.schema) where not value[.z.m.schema][;1] in `flow`impact;
   };
 
-loadmarket:{[filepath] simtick.loadmarket filepath};
+datafile:{[relative]
+  / the handle of a file shipped with this module, in the directory of the
+  / module that is loaded
+  :hsym `$(.Q.m.mp `di.simorder),"/",relative;
+  };
+
+files:{[]
+  / the shipped files: the tick market (di.simtick's), this module's
+  / defaults for that market, its order rows and its venues (dark pools)
+  m:simconfig.path "markets/us_largecap.json";
+  :`market`defaults`orders`venues!(m;.z.m.datafile "markets/us_largecap.json";.z.m.datafile "orders.csv";.z.m.datafile "venues.csv");
+  };
+
+loaddefaults:{[filepath]
+  / this module's defaults for a market: a JSON file whose groups hold
+  / the routing, dark pool, algo menu, order-flow and impact keys, cast by
+  / the schema; an unknown key throws
+  :simconfig.loadmarket[.z.m.schema;filepath];
+  };
+
+loadmarket:{[marketfile;defaultsfile]
+  / the joined market the module works from: the tick market (a market
+  / file of di.simtick, from which ticksize, closingtime and the default
+  / seed are read) and this module's defaults for it
+  :(simtick.loadmarket marketfile),.z.m.loaddefaults defaultsfile;
+  };
+
+venues:{[]
+  / the venue reference for executions: the tick market's venues (lit
+  / venues and TRF) and this module's dark pools, keyed by code
+  :(simconfig.loadvenues simconfig.path "venues.csv"),simconfig.loadvenues .z.m.datafile "venues.csv";
+  };
 
 loadorders:{[filepath]
   / the order rows: a CSV keyed by name; the essential columns must be
@@ -896,25 +954,24 @@ loadorders:{[filepath]
 
 compose:{[market;order]
   / the flat configuration of an order: the market's keys of the schema
-  / (its orders group and ticksize), then the order row's filled entries,
-  / cast, checked for unknown and missing keys and validated
-  / market: the market dictionary (loadmarket) or any composed config carrying it
+  / (routing, dark pools and ticksize), then the order row's filled
+  / entries, cast, checked for unknown and missing keys and validated
+  / market: the joined market (loadmarket) or any dictionary carrying its keys
   / order: a row of loadorders (orders`good) or a dictionary with orderid,
   /   sym, side, orderqty, starttime, endtime, numchildren, pacing,
   /   spreadcapture, account, algo, seed and any override
+  sch:.z.m.orderkeys[]#.z.m.schema;
   mkeys:(key .z.m.schema) where `market=value[.z.m.schema][;1];
   mk:(key[market] inter mkeys)#market;
   none:(`symbol$())!();
-  .z.m.validate simconfig.compose[.z.m.schema;mk;order;none;none]
+  .z.m.validate simconfig.compose[sch;mk;order;none;none]
   };
 
 describe:{[]
-  / the order schema as a table, followed by the market file's other
-  / orders keys (the algo menu, the flow defaults and the impact keys, held
-  / in di.simtick's schema)
-  own:simconfig.describe .z.m.schema;
-  own,select from simtick.describe[] where grp=`orders,not param in key .z.m.schema
+  / the module's schema as a table: the order's keys, then the flow
+  / layer (the algo menu and the order-flow defaults) and the impact layer
+  simconfig.describe .z.m.schema
   };
 
 / export public interface
-export:([run;runmany;runflow;generate;menu;compose;loadmarket;loadorders;files;marketday;schedule;jittered;sizing;intervals;trajectory;capped;limitof;heldwithin;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])
+export:([run;runmany;runflow;generate;menu;compose;loadmarket;loaddefaults;loadorders;files;venues;orderkeys;marketday;schedule;jittered;sizing;intervals;trajectory;capped;limitof;heldwithin;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])

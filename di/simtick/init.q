@@ -1048,38 +1048,6 @@ schema[`impactticks]:("F";`market;`impact;"order-flow impact: ticks an average-s
   "direction (0 = none), scaled by sqrt(qty / mean size)");
 schema[`impacthalflifeseconds]:("F";`market;`impact;"order-flow impact: seconds over which the transient part of a trade's impact halves");
 schema[`impactpermanent]:("F";`market;`impact;"order-flow impact: share of a trade's impact that never decays, between 0 and 1");
-schema[`ordervenues]:("SL";`market;`orders;"di.simorder: lit venues (MIC codes) the child orders are routed to");
-schema[`ordervenueshares]:("FL";`market;`orders;"di.simorder: their routing shares (sum to 1)");
-schema[`latencyms]:("F";`market;`orders;"di.simorder: milliseconds from a child's send to its arrival at the market (and half of it to its ack)");
-schema[`sweepticks]:("J";`market;`orders;"di.simorder: ticks beyond the touch at which the rest of an aggressive ",
-  "child fills once the displayed size is taken");
-schema[`darkvenues]:("SL";`market;`orders;"di.simorder: the dark pools (MPIDs) a passive child can be routed to");
-schema[`darkvenueshares]:("FL";`market;`orders;"di.simorder: their routing shares among dark children (sum to 1)");
-schema[`darkshare]:("F";`market;`orders;"di.simorder: probability a passive child is sent to a dark pool instead of a ",
-  "lit venue, between 0 and 1 (0 = no dark routing)");
-schema[`darkfillshare]:("F";`market;`orders;"di.simorder: the most a dark child takes of an opposite-side ",
-  "off-exchange midpoint print, as a share of it, between 0 and 1");
-schema[`maxreplaces]:("J";`market;`orders;"di.simorder: how many times a passive child re-pegs to the near touch when ",
-  "it moves away, before resting where it is");
-schema[`jitter]:("F";`market;`orders;"di.simorder: random shift of each child's time, as a share of half the gap to ",
-  "its neighbours, between 0 and 1 (0 = exact schedule)");
-schema[`capacity]:("S";`market;`orders;"di.simorder: A (agency) or P (principal), the default of the order rows");
-schema[`algos]:("SL";`market;`orders;"di.simorder: the algo menu an order flow draws from (labels)");
-schema[`algopacings]:("SL";`market;`orders;"di.simorder: each algo's pacing (even, frontloaded or arrival)");
-schema[`algospreadcaptures]:("FL";`market;`orders;"di.simorder: each algo's share of aggressive children, between 0 and 1");
-schema[`algourgencies]:("FL";`market;`orders;"di.simorder: each algo's urgency (arrival pacing only, null otherwise)");
-schema[`algomaxpcts]:("FL";`market;`orders;"di.simorder: each algo's participation cap (arrival pacing only, null otherwise)");
-schema[`norders]:("J";`market;`orders;"di.simorder: orders per instrument and day of a generated flow");
-schema[`accounts]:("SL";`market;`orders;"di.simorder: the accounts a generated flow draws from");
-schema[`sizepct]:("FL";`market;`orders;"di.simorder: lowest and highest order size of a generated flow, as a share of the day's volume");
-schema[`windowminutes]:("FL";`market;`orders;"di.simorder: shortest and longest order window of a generated flow, in minutes");
-schema[`childrenperminute]:("F";`market;`orders;"di.simorder: children per minute of window of a generated order (at least 5 children)");
-schema[`orderimpactmodel]:("S";`market;`orders;"di.simorder: impact model of the child executions, participation (p^beta) or sqrtlaw");
-schema[`orderimpacteta]:("F";`market;`orders;"di.simorder: impact coefficient, zero or positive (0 = no impact)");
-schema[`orderimpactbeta]:("F";`market;`orders;"di.simorder: participation exponent, positive (0.5 is the square-root law)");
-schema[`orderimpacthalflifeseconds]:("F";`market;`orders;"di.simorder: seconds over which the transient part of an execution's impact halves");
-schema[`orderimpacttaperminutes]:("F";`market;`orders;"di.simorder: minutes before the close over which the impact shift falls linearly to zero");
-schema[`orderimpactpermanent]:("F";`market;`orders;"di.simorder: share of each execution's impact that stays through the day, between 0 and 1");
 schema[`volmult]:("F";`scenario;`scenario;"multiplies the instrument's vol (applied once by compose, then 1)");
 schema[`volumemult]:("F";`scenario;`scenario;"multiplies the instrument's tradesperday (applied once by compose, then 1)");
 schema[`spreadmult]:("F";`scenario;`scenario;"multiplies the mean spread in ticks (applied once by compose, then 1); ",

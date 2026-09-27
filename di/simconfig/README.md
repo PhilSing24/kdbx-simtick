@@ -15,7 +15,7 @@ A tick simulator has many knobs, and most of them describe a market and hardly e
 | Scenario | what makes a day type: multipliers on volatility, volume and spread, jump settings, the regimes of a multi-day run | CSV, one row per scenario, `scenarios.csv` |
 | Run | date or calendar, seed, whether to return quotes | a small dictionary |
 
-A later layer overrides an earlier one. The shipped files are examples; every loader takes any path. Three markets ship: `markets/us_largecap.json` with `instruments.csv`, `markets/sgx.json` with `instruments_sg.csv`, and `markets/hkex.json` with `instruments_hk.csv` (whose rows carry their board lots); the scenario rows serve all three. The market files name the common factors and the instrument rows carry their loadings on them (`factorloadings`, `jumploadings`, name value pairs in one cell, so adding a factor adds no column). `di.simorder` composes an order the same way, from the market file's `orders` group and an order row of `orders.csv` (see its README).
+A later layer overrides an earlier one. The shipped files are examples; every loader takes any path. Three markets ship: `markets/us_largecap.json` with `instruments.csv`, `markets/sgx.json` with `instruments_sg.csv`, and `markets/hkex.json` with `instruments_hk.csv` (whose rows carry their board lots); the scenario rows serve all three. The market files name the common factors and the instrument rows carry their loadings on them (`factorloadings`, `jumploadings`, name value pairs in one cell, so adding a factor adds no column).
 
 ## Usage
 
@@ -36,7 +36,7 @@ q)cfg:simconfig.loadconfig[schema;`:run.json]
 
 ## Venue reference
 
-`venues.csv` lists every venue code a market file can use, with its full name, its type (`lit`, `dark` or `trf`) and the code the TCA application (`kdbx-tca`) uses for it. The simulators keep MIC codes (and the MPIDs of the two dark pools) and never read the file; an export maps codes through it:
+`venues.csv` lists every venue code a market file can use, with its full name, its type (`lit` or `trf`) and the code the TCA application (`kdbx-tca`) uses for it. The simulators keep MIC codes and never read the file; an export maps codes through it. The loader takes any venue file, and accepts the type `dark` for a module that ships dark pools:
 
 ```q
 q)venues:simconfig.loadvenues simconfig.path "venues.csv"
@@ -46,7 +46,7 @@ type   | `lit
 tcacode| `NASDAQ
 ```
 
-The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both map to `CBOE`, so the TCA application sees exchange groups, not individual exchanges, and its venue analysis cannot separate Arca from NYSE. `IEXG` and `MEMX` have no TCA code yet (an empty cell); the simorder suite reports such rows as a warning. `TRF` is the tape's code for every off-exchange print, never a venue a broker reports.
+The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both map to `CBOE`, so the TCA application sees exchange groups, not individual exchanges, and its venue analysis cannot separate Arca from NYSE. `IEXG` and `MEMX` have no TCA code yet (an empty cell). `TRF` is the tape's code for every off-exchange print, never a venue a broker reports.
 
 ## Rules
 
@@ -63,7 +63,7 @@ The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and 
 | `simconfig.loadmarket[schema;filepath]` | A market file, its groups flattened |
 | `simconfig.loadinstruments[schema;filepath]` | Instrument rows keyed by `sym`; the five required columns must be filled |
 | `simconfig.loadscenarios[schema;filepath]` | Scenario rows keyed by `name` |
-| `simconfig.loadvenues[filepath]` | The venue reference keyed by `code`: name, type (`lit`, `dark`, `trf`) and the TCA application's code |
+| `simconfig.loadvenues[filepath]` | A venue reference keyed by `code`: name, type (`lit`, `dark`, `trf`) and the TCA application's code |
 | `simconfig.loadrows[schema;filepath;keycol]` | Any typed CSV of rows keyed by a column |
 | `simconfig.saveconfig[filepath;cfg]` | Write a composed configuration as JSON |
 | `simconfig.loadconfig[schema;filepath]` | Read one back |
@@ -72,7 +72,7 @@ The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and 
 | `simconfig.nonnull[dict]` | The entries of a row that carry a value |
 | `simconfig.path[relative]` | A shipped file's handle |
 
-A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol, `F` float, `J` long, `B` boolean, `D` date, `U` minute, `P` timestamp, `SL` `FL` `JL` lists of those, `*` as given. Layers: `essential`, `market`, `instrument`, `order` (`di.simorder`'s per-order keys), `scenario`, `run`, `optional` (cast when present, never required) and `derived` (left to the module's own compose). Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `derived`.
+A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol, `F` float, `J` long, `B` boolean, `D` date, `U` minute, `P` timestamp, `SL` `FL` `JL` lists of those, `*` as given. Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `optional` (cast when present, never required) and `derived` (left to the module's own compose). A module may name layers of its own; `describe` lists them after these. Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `derived`.
 
 ## Testing
 

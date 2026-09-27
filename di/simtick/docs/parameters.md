@@ -27,7 +27,7 @@ Columns of the instrument row that a stock may leave empty. The loadings are nam
 
 ## Market (`di/simconfig/markets/us_largecap.json`)
 
-Grouped as in the file. An instrument row may override any of these (XOM and PG override `spreadticks` and `primaryvenue`). The `orders` group is read by `di.simorder` and listed on its page.
+Grouped as in the file. An instrument row may override any of these (XOM and PG override `spreadticks` and `primaryvenue`).
 
 ### session
 
