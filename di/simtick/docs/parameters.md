@@ -16,6 +16,15 @@ Set on the instrument row (`di/simconfig/instruments.csv`) or given to `simtick.
 | `vol` | float | annual volatility of the close-to-close return | 0.45 |
 | `tradesperday` | long | average number of trades per day (long-run average over the day-to-day regime) | 500000 |
 
+## Instrument: optional keys
+
+Columns of the instrument row that a stock may leave empty. The loadings are name value pairs in one cell, so adding a factor to the market adds no column.
+
+| Parameter | Type | Description | Shipped value |
+|---|---|---|---|
+| `factorloadings` |  | the stock's loadings on the factors, as name value pairs (market 0.65 Technology 0.35); a loading is the stock's correlation with the factor, the sum of their squares is at most 1 and the rest of the variance is the stock's own; the daily correlation of two stocks is the sum over factors of the products of their loadings | market 0.65 Technology 0.35 |
+| `jumploadings` |  | multipliers of each factor's jumps on the stock, as name value pairs (market 1.5), on top of its own jumps | market 1.5 |
+
 ## Market (`di/simconfig/markets/us_largecap.json`)
 
 Grouped as in the file. An instrument row may override any of these (XOM and PG override `spreadticks` and `primaryvenue`). The `orders` group is read by `di.simorder` and listed on its page.
@@ -45,6 +54,15 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 | `jumpburstminutes` | float | mean delay in minutes of those immigrants after the jump | 1 |
 | `quotespertrade` | float | quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity | 4 |
 | `quotetradelink` | float | share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1 | 0.5 |
+
+### factors
+
+| Parameter | Type | Description | Shipped value |
+|---|---|---|---|
+| `factors` | symbol list | the market's common factors, any number and any names (market, sectors, statistical factors); each has an independent path per date, shared by every stock; empty for no co-movement | market Technology Energy ConsumerStaples |
+| `factorprofile` | float list | intraday variance profile of the factors, positive weights per equal bin of the trading time, so common moves are larger when the market is busy | 1.6 1.2 1 0.85 0.75 0.7 0.65 0.7 0.75 0.85 1 1.2 1.8 |
+| `factorjumpintensities` | float list | common jumps per day on each factor (0 = none): the same instants for every stock | 0.5 0 0 0 |
+| `factorjumpvols` | float list | standard deviation of the log size of each factor's jumps | 0.01 0 0 0 |
 
 ### auctions
 
@@ -149,4 +167,6 @@ A dictionary with any of these; the market file's `run` group carries the defaul
 
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
-| `baseintensity` | float | immigrant arrival rate before the profile and the cascades (trades/sec), derived by compose from tradesperday | 14.89996 |
+| `jumpcomp` | float | multiplier of the common jumps' variance taken out of the diffusion: 1 for a single day, the square of the day's volatility regime under di.simmarket | 1 |
+| `factorseed` | long | seed of the day's factor paths and common jumps, derived from the run seed and the date alone, so every stock of a run shares them on a date (null without a seed) | 1530423654 |
+| `baseintensity` | float | immigrant arrival rate before the profile and the cascades (trades/sec), derived by compose from tradesperday | 14.8361 |

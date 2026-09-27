@@ -1,4 +1,5 @@
-sym,price,drift,vol,tradesperday,spreadticks,primaryvenue
-NVDA,215.00,0.08,0.45,500000,,
-XOM,166.00,0.06,0.22,80000,1.2,XNYS
-PG,141.00,0.05,0.17,50000,1.3,XNYS
+sym,price,drift,vol,tradesperday,spreadticks,primaryvenue,factorloadings,jumploadings
+NVDA,215.00,0.08,0.45,500000,,,market 0.65 Technology 0.35,market 1.5
+XOM,166.00,0.06,0.22,80000,1.2,XNYS,market 0.55 Energy 0.45,market 0.8
+PG,141.00,0.05,0.17,50000,1.3,XNYS,market 0.45 ConsumerStaples 0.30,market 0.4
+MSFT,420.00,0.07,0.28,300000,,,market 0.65 Technology 0.35,market 1.1

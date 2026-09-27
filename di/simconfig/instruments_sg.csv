@@ -1,4 +1,4 @@
-sym,price,drift,vol,tradesperday
-D05,45.00,0.05,0.20,15000
-Z74,3.20,0.03,0.22,8000
-C6L,6.50,0.04,0.25,5000
+sym,price,drift,vol,tradesperday,factorloadings,jumploadings,jumpburst
+D05,45.00,0.05,0.20,15000,market 0.60,market 1.0,100
+Z74,3.20,0.03,0.22,8000,market 0.40,market 0.6,50
+C6L,6.50,0.04,0.25,5000,market 0.50,market 1.2,30

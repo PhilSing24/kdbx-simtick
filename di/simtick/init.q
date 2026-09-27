@@ -102,6 +102,19 @@ shape:{[cfg;progress]
   w[i]+(x-i)*w[i+1]-w[i]
   };
 
+mixseed:{[a;b]
+  / a seed from two integers, hashed (md5), between 1 and 2^31-1. q's
+  / generator gives correlated streams for seeds that are related (a
+  / constant apart, or consecutive): the draws of two such streams
+  / correlate at 0.7 and more, all along the stream. Seeds derived from a
+  / date, a run seed or a ticker are therefore hashed, never computed by
+  / arithmetic, so that the streams are independent
+  / a, b: integers (atoms, or lists of the same length)
+  / returns: long seed(s)
+  f:{[a;b] 1+(256 sv `long$4#md5 (string a),"|",string b) mod 2147483646};
+  $[(0>type a)&0>type b; f[a;b]; f'[a;b]]
+  };
+
 poisson:{[rate;duration]
   / event times of a homogeneous Poisson process on [0;duration)
   / rate: events per unit time, positive
@@ -266,6 +279,119 @@ clocksteps:{[cfg;times]
     (0f,1_deltas times)%cfg[`tradingdays]*.z.m.tradingseconds cfg]
   };
 
+/ ============================================================
+/ CO-MOVEMENT: COMMON FACTORS
+/ ============================================================
+/ A stock's log-mid is driven by its own Brownian motion and by the
+/ market's factors F_k, independent standard Brownian motions in trading
+/ time with the intraday variance profile factorprofile and variance 1
+/ over the day. With loadings b (|b|^2 <= 1) the diffusive return of the
+/ day is sigma/sqrt(D) * (b.F + sqrt(1-|b|^2) W), W the stock's own, so
+/ its variance is unchanged and two stocks correlate at b_i.b_j. The
+/ factors live in calendar time and the stock's own part on its clock;
+/ the factors' paths, their gap normals and their jumps are drawn from
+/ factorseed alone, before the stock's own seed is set, so every stock of
+/ a date shares them and a stock without loadings draws nothing new
+
+factorseedfor:{[seed;date]
+  / the factor seed of a date: from the run seed and the date alone,
+  / hashed (see mixseed) so the factors' stream is independent of every
+  / stock's own
+  $[null seed; 0N; .z.m.mixseed[.z.m.mixseed[seed;`long$date];5]]
+  };
+
+loadings:{[cfg;k]
+  / a stock's loadings on the market's factors, aligned with cfg`factors
+  / (0 where a factor is not named)
+  / cfg: config dict with `factors and, optionally, the key k
+  / k: `factorloadings or `jumploadings, a string of name value pairs
+  / returns: float per factor
+  f:$[`factors in key cfg; (),cfg`factors; `symbol$()];
+  z:(count f)#0f;
+  if[not k in key cfg; :z];
+  v:cfg k;
+  if[not 10h=abs type v; :z];
+  tok:{x where 0<count each x} " " vs (),v;
+  if[0=count tok; :z];
+  if[1=(count tok) mod 2; '"loadings: ",string[k]," must be name value pairs - ",v];
+  names:`$tok 2*til (count tok) div 2;
+  vals:"F"$tok 1+2*til (count tok) div 2;
+  if[any null vals; '"loadings: ",string[k]," has a value that is not a number - ",v];
+  if[count unknown:names except f; '"loadings: ",string[k]," names factors the market does not have - ",", " sv string unknown];
+  if[count[names]<>count distinct names; '"loadings: ",string[k]," names a factor twice - ",v];
+  @[z;f?names;:;vals]
+  };
+
+hasfactors:{[cfg]
+  / whether the stock takes anything from the factors
+  any 0<>.z.m.loadings[cfg;`factorloadings],.z.m.loadings[cfg;`jumploadings]
+  };
+
+factorgaps:{[cfg]
+  / the factors' gap normals of the day, the first draws of the factor
+  / stream: one standard normal per factor for the overnight gap and one
+  / for the mid-day break
+  / returns: dict `overnight`breakgap, a float per factor each
+  k:count cfg`factors;
+  if[not null cfg`factorseed; system "S ",string cfg`factorseed];
+  `overnight`breakgap!(.z.m.rng.normal[k;cfg];.z.m.rng.normal[k;cfg])
+  };
+
+factorday:{[cfg]
+  / the day's common inputs, from factorseed and the market's keys alone
+  / (the factors, their profile and jumps, the session)
+  / returns: dict `overnight`breakgap (see factorgaps), `path (per factor,
+  /   the factor's value before each trading second, 0 at the open, its
+  /   variance growing by factorprofile to 1 over the day), `variance (the
+  /   share of the day's factor variance before each second) and `jumps
+  /   (table `time`factor`size: trading seconds from the open, the
+  /   factor's index and the log size)
+  k:count cfg`factors;
+  g:.z.m.factorgaps cfg;
+  T:`long$.z.m.tradingseconds cfg;
+  w:.z.m.shape[@[cfg;`profile;:;cfg`factorprofile];(0.5+til T)%T];
+  w:w%sum w;
+  path:{[cfg;w;T;i] 0f,sums sqrt[w]*.z.m.rng.normal[T;cfg]}[cfg;w;T] each til k;
+  n:.z.m.rng.poisson[`float$cfg`factorjumpintensities;40];
+  jumps:raze {[cfg;T;n;i] ([]time:asc n[i]?`float$T;factor:n[i]#i;size:cfg[`factorjumpvols;i]*.z.m.rng.normal[n i;cfg])}[cfg;T;n] each til k;
+  g,`path`variance`jumps!(path;0f,sums w;`time xasc jumps)
+  };
+
+jumpvariance:{[cfg]
+  / the variance per day of the factors' jumps as the stock takes them:
+  / the sum over factors of intensity x (jump loading x jump vol)^2. It is
+  / taken out of the stock's diffusion, so vol stays the volatility of the
+  / close-to-close return with the common jumps in it
+  jl:.z.m.loadings[cfg;`jumploadings];
+  $[any 0<>jl; sum cfg[`factorjumpintensities]*jl*jl*cfg[`factorjumpvols]*cfg`factorjumpvols; 0f]
+  };
+
+diffusionvol:{[cfg;share]
+  / the annualized vol of the day's diffusion: the day's vol less the
+  / share of the variance over the mid-day break, less the common jumps'
+  / variance (times jumpcomp, the square of the day's volatility regime
+  / under di.simmarket, 1 otherwise, so the correction follows the regime
+  / and averages the jumps' variance over the days)
+  / cfg: config dict; share: the break's share of the day's variance
+  / returns: float; without common jumps exactly vol*sqrt(1-share)
+  j:.z.m.jumpvariance cfg;
+  if[0=j; :cfg[`vol]*sqrt 1-share];
+  comp:$[`jumpcomp in key cfg; cfg`jumpcomp; 1f];
+  v:(cfg[`vol]*cfg[`vol]*1-share)-comp*j*cfg`tradingdays;
+  if[v<=0; '"the common jumps carry more variance (",string[j]," a day) than the day of ",string[cfg`sym],": lower its jumploadings or the factors' jump intensities and vols"];
+  sqrt v
+  };
+
+commonjumps:{[cfg;fd]
+  / the factors' jumps as the stock takes them: each multiplied by the
+  / stock's jump loading on its factor, left out where the loading is 0
+  / returns: table `time`factor (the multiplicative jump), see jump.events
+  jl:.z.m.loadings[cfg;`jumploadings];
+  j:fd`jumps;
+  j:select from j where 0<>jl factor;
+  ([]time:j`time;factor:exp jl[j`factor]*j`size)
+  };
+
 pricepath:{[cfg;times;jumps]
   / the price path at the given points: start price, diffusion steps by the
   / config's clock, the jumps at or before each point, and over a mid-day
@@ -280,13 +406,26 @@ pricepath:{[cfg;times;jumps]
   times:`float$times;
   s:.z.m.session cfg;
   share:$[s[`hasbreak]&`breakshare in key cfg; cfg`breakshare; 0f];
+  / the factors' part: loadings b, the stock's own share of the variance
+  / 1-|b|^2, the day's factor inputs in cfg`factorday (see run)
+  b:.z.m.loadings[cfg;`factorloadings];
+  common:(any 0<>b)&`factorday in key cfg;
+  own:$[common; sqrt 1-sum b*b; 1f];
+  dvol:$[`factorday in key cfg; .z.m.diffusionvol[cfg;share]; cfg[`vol]*sqrt 1-share];
   dc:cfg;
-  dc[`vol]:cfg[`vol]*sqrt 1-share;
+  dc[`vol]:dvol*own;
   path:cfg[`price]*prds .z.m.diffusion[dc;.z.m.clocksteps[cfg;times]];
+  if[common;
+    fd:cfg`factorday;
+    sec:(`long$floor times)&-1+count first fd`path;
+    sd:dvol%sqrt cfg`tradingdays;
+    path*:exp (sd*sum b*fd[`path][;sec])-0.5*sd*sd*(sum b*b)*fd[`variance] sec];
   path*:1f^(prds jumps`factor) jumps[`time] bin times;
   if[share>0;
     v:share*cfg[`vol]*cfg[`vol]%cfg`tradingdays;
-    gap:(neg 0.5*v)+sqrt[v]*first .z.m.rng.normal[1;cfg];
+    z:first .z.m.rng.normal[1;cfg];
+    if[common; z:(own*z)+sum b*fd`breakgap];
+    gap:(neg 0.5*v)+sqrt[v]*z;
     path*:exp gap*times>=s`breakoffset];
   path
   };
@@ -307,7 +446,12 @@ price:{[cfg;times]
   if[any times<0; '"price: times must be non-negative"];
   reqkeys:`openingtime`closingtime`tradingdays`pricemodel`price`vol`drift;
   .z.m.val.haskeys[cfg;reqkeys;"price"];
+  / the day's factor inputs first, from their own seed, then the stock's
+  if[.z.m.hasfactors cfg;
+    cfg[`factorday]:.z.m.factorday cfg;
+    if[not null cfg`seed; system "S ",string cfg`seed]];
   jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;.z.m.tradingseconds cfg]; ([]time:`float$();factor:`float$())];
+  if[`factorday in key cfg; jumps:`time xasc jumps,.z.m.commonjumps[cfg;cfg`factorday]];
   .z.m.pricepath[cfg;times;jumps]
   };
 
@@ -627,6 +771,17 @@ validate:{[cfg]
         '"validate: the break must lie inside the day: openingtime < breakstart < breakend < closingtime"]]];
   if[`breakshare in key cfg; if[not (0<=cfg`breakshare)&1>cfg`breakshare; '"validate: breakshare must be between 0 and 1, 1 excluded"]];
   if[`breakauctionpct in key cfg; if[0>cfg`breakauctionpct; '"validate: breakauctionpct must be zero or positive"]];
+  if[`factors in key cfg;
+    k:count cfg`factors;
+    if[k<>count distinct cfg`factors; '"validate: factors must be distinct"];
+    if[not all k=count each cfg`factorjumpintensities`factorjumpvols; '"validate: factorjumpintensities and factorjumpvols must have one value per factor"];
+    if[k>0;
+      if[0>=min cfg`factorprofile; '"validate: factorprofile weights must be positive"];
+      if[0>min cfg[`factorjumpintensities],cfg`factorjumpvols; '"validate: factorjumpintensities and factorjumpvols must be zero or positive"]];
+    b:.z.m.loadings[cfg;`factorloadings];
+    if[1<sum b*b; '"validate: the squares of the factorloadings must sum to at most 1 (the rest is the stock's own variance), here ",string sum b*b];
+    jl:.z.m.loadings[cfg;`jumploadings];
+    if[`vol in key cfg; .z.m.diffusionvol[cfg;0f]]];
   if[not (0<cfg`printgrid)&1>=cfg`printgrid; '"validate: printgrid must be between 0 and 1"];
   if[not cfg[`offexchangeinside] within 0 1; '"validate: offexchangeinside must be between 0 and 1"];
   if[not cfg[`improvementtick] within 0 1; '"validate: improvementtick must be between 0 and 1"];
@@ -692,6 +847,11 @@ run:{[cfg]
   /   result:run[cfg]  / result`trade, result`quote
   cfg:.z.m.validate[cfg];
 
+  / the day's factor paths and common jumps, from the factor seed alone
+  / and before the stock's own seed, so a stock without loadings draws
+  / exactly what it drew before
+  if[.z.m.hasfactors cfg; cfg[`factorday]:.z.m.factorday cfg];
+
   / set seed for reproducibility (0N = no seed)
   if[not null cfg`seed; system "S ",string cfg`seed];
 
@@ -702,6 +862,7 @@ run:{[cfg]
   / to the wall clock when the tables are built
   duration:.z.m.tradingseconds cfg;
   jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration]; ([]time:`float$();factor:`float$())];
+  if[`factorday in key cfg; jumps:`time xasc jumps,.z.m.commonjumps[cfg;cfg`factorday]];
   tradeshock:.z.m.hawkes.shock[cfg;jumps`time;cfg`jumpburst];
   quoteshock:.z.m.hawkes.shock[cfg;jumps`time;`long$cfg[`jumpburst]*cfg`quotespertrade];
 
@@ -772,6 +933,10 @@ schema[`jumpburst]:("J";`market;`arrivals;"extra trade immigrants seeded by each
 schema[`jumpburstminutes]:("F";`market;`arrivals;"mean delay in minutes of those immigrants after the jump")
 schema[`quotespertrade]:("F";`market;`arrivals;"quote updates per trade on average: quotes arrive on their own Hawkes clock at this multiple of the trade intensity")
 schema[`quotetradelink]:("F";`market;`arrivals;"share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1")
+schema[`factors]:("SL";`market;`factors;"the market's common factors, any number and any names (market, sectors, statistical factors); each has an independent path per date, shared by every stock; empty for no co-movement")
+schema[`factorprofile]:("FL";`market;`factors;"intraday variance profile of the factors, positive weights per equal bin of the trading time, so common moves are larger when the market is busy")
+schema[`factorjumpintensities]:("FL";`market;`factors;"common jumps per day on each factor (0 = none): the same instants for every stock")
+schema[`factorjumpvols]:("FL";`market;`factors;"standard deviation of the log size of each factor's jumps")
 schema[`openauctionpct]:("F";`market;`auctions;"opening auction print as a fraction of the day's continuous volume (0 = none)")
 schema[`closeauctionpct]:("F";`market;`auctions;"closing auction print as a fraction of the day's continuous volume (0 = none)")
 schema[`breakauctionpct]:("F";`market;`auctions;"reopening print after the mid-day break as a fraction of the day's continuous volume, condition code B (0 = none; ignored without a break)")
@@ -849,9 +1014,13 @@ schema[`regimepersistence]:("F";`scenario;`days;"di.simmarket: AR(1) persistence
 schema[`regimecorr]:("F";`scenario;`days;"di.simmarket: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1")
 schema[`volregimesd]:("F";`scenario;`days;"di.simmarket: log spread of the volatility multiplier across days, normalized so the mean daily variance is the configured one")
 schema[`volumeregimesd]:("F";`scenario;`days;"di.simmarket: log spread of the volume multiplier across days")
+schema[`factorloadings]:("*";`optional;`factors;"the stock's loadings on the factors, as name value pairs (market 0.65 Technology 0.35); a loading is the stock's correlation with the factor, the sum of their squares is at most 1 and the rest of the variance is the stock's own; the daily correlation of two stocks is the sum over factors of the products of their loadings")
+schema[`jumploadings]:("*";`optional;`factors;"multipliers of each factor's jumps on the stock, as name value pairs (market 1.5), on top of its own jumps")
 schema[`tradingdate]:("D";`run;`run;"the day simulated (the market file carries a default)")
 schema[`seed]:("J";`run;`run;"random seed (0N = unseeded; the market file carries a default)")
 schema[`generatequotes]:("B";`run;`run;"return the quotes as well as the trades (they are always generated)")
+schema[`jumpcomp]:("F";`derived;`factors;"multiplier of the common jumps' variance taken out of the diffusion: 1 for a single day, the square of the day's volatility regime under di.simmarket")
+schema[`factorseed]:("J";`derived;`factors;"seed of the day's factor paths and common jumps, derived from the run seed and the date alone, so every stock of a run shares them on a date (null without a seed)")
 schema[`baseintensity]:("F";`derived;`arrivals;"immigrant arrival rate before the profile and the cascades (trades/sec), derived by compose from tradesperday")
 
 files:{[]
@@ -875,7 +1044,10 @@ intensityfor:{[cfg]
   / to add are taken out, the branching ratio's cascades are taken out, and
   / the rest is spread over the session at the profile's average level
   n:cfg[`alpha]%cfg`beta;
-  burst:$[`jump=cfg`pricemodel; cfg[`jumpintensity]*cfg[`jumpburst]%1-n; 0f];
+  / the jumps expected in a day: the stock's own and the factors' it takes
+  jl:.z.m.loadings[cfg;`jumploadings];
+  perday:$[`jump=cfg`pricemodel; cfg`jumpintensity; 0f]+$[count jl; sum cfg[`factorjumpintensities] where 0<>jl; 0f];
+  burst:perday*cfg[`jumpburst]%1-n;
   if[burst>=cfg`tradesperday;
     '"compose: the jump bursts are expected to add ",string[`long$burst]," trades a day, more than tradesperday ",string cfg`tradesperday];
   T:.z.m.tradingseconds cfg;
@@ -891,6 +1063,8 @@ derive:{[cfg]
   cfg[`volmult`volumemult`spreadmult]:1 1 1f;
   if[1>cfg`spreadticks; '"compose: spreadticks after spreadmult must be at least 1"];
   cfg[`baseintensity]:.z.m.intensityfor cfg;
+  cfg[`factorseed]:.z.m.factorseedfor[cfg`seed;cfg`tradingdate];
+  cfg[`jumpcomp]:1f;
   cfg
   };
 
@@ -945,4 +1119,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;quick;quickwith;session;tradingseconds;walltime;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])
+export:([run;quick;quickwith;mixseed;session;tradingseconds;walltime;loadings;hasfactors;factorday;factorgaps;factorseedfor;jumpvariance;diffusionvol;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])

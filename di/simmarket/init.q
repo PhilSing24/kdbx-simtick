@@ -72,6 +72,11 @@ validatecfg:{[cfg]
   .z.m.val.haskeys[cfg;reqkeys;"validatecfg"];
   if[not (0<=cfg`overnightshare)&1>cfg`overnightshare; '"validatecfg: overnightshare must be between 0 and 1, 1 excluded"];
   if[`breakshare in key cfg; if[not (0<=cfg`breakshare)&1>cfg`breakshare; '"validatecfg: breakshare must be between 0 and 1, 1 excluded"]];
+  if[`factors in key cfg;
+    if[(simtick.hasfactors cfg)&null cfg`seed;
+      '"validatecfg: ",string[cfg`sym]," has factor loadings and no seed: the stocks of a run share the factors through the seed"];
+    / the common jumps must leave the intraday diffusion some variance
+    simtick.diffusionvol[@[cfg;`vol`jumpcomp;:;(cfg[`vol]*sqrt 1-cfg`overnightshare;1f)];$[(simtick.session cfg)`hasbreak;cfg`breakshare;0f]]];
   if[0>cfg`gapdayweight; '"validatecfg: gapdayweight must be zero or positive"];
   if[not (0<=cfg`regimepersistence)&1>cfg`regimepersistence; '"validatecfg: regimepersistence must be between 0 and 1, 1 excluded"];
   if[0>min cfg`volregimesd`volumeregimesd; '"validatecfg: volregimesd and volumeregimesd must be zero or positive"];
@@ -87,16 +92,19 @@ validatecfg:{[cfg]
 seeds:{[cfg;dates]
   / the per-day seeds: a regime seed per date, shared by every instrument
   / (the market's day), and from it the instrument's day seed and gap seed;
-  / all null when the config has no seed
+  / all null when the config has no seed. Every seed is a hash of what it
+  / depends on (see simtick.mixseed): seeds computed by arithmetic from
+  / the date and the ticker gave streams that were correlated between
+  / instruments and between consecutive dates
   / cfg: config dict with `seed`sym
   / dates: list of dates
   / returns: table `date`regimeseed`dayseed`gapseed
   n:count dates;
   if[null cfg`seed; :([]date:dates;regimeseed:n#0N;dayseed:n#0N;gapseed:n#0N)];
-  regimeseed:1+(("j"$dates)+7919*cfg`seed) mod seedmod;
+  regimeseed:simtick.mixseed[n#cfg`seed;`long$dates];
   symhash:sum ("j"$string cfg`sym)*1+til count string cfg`sym;
-  dayseed:1+(symhash+31*regimeseed) mod seedmod;
-  gapseed:1+(3+17*dayseed) mod seedmod;
+  dayseed:simtick.mixseed[regimeseed;n#symhash];
+  gapseed:simtick.mixseed[dayseed;n#3];
   ([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed)
   };
 
@@ -200,11 +208,85 @@ daycfg:{[cfg;day;price]
   dc[`vol]:cfg[`vol]*day[`volmult]*sqrt 1-cfg`overnightshare;
   session:simtick.tradingseconds[dc]%simtick.tradingseconds cfg;
   dc[`tradesperday]:`long$cfg[`tradesperday]*day[`volumemult]*session;
+  / the bursts after jumps follow the day's activity, so the share of the
+  / day's trades they take is the one checked at composition on every day
+  dc[`jumpburst]:`long$cfg[`jumpburst]*day[`volumemult]*session;
   dc[`jumpintensity]:day`jumpintensity;
   if[0<day`jumpintensity; dc[`pricemodel]:`jump];
   dc[`baseintensity]:simtick.intensityfor dc;
+  / the factors' seed of the date, from the run's seed (not the day's own)
+  dc[`factorseed]:simtick.factorseedfor[cfg`seed;day`date];
+  / the common jumps' variance is taken out of the diffusion in proportion
+  / to the day's regime, so the correction is never more than the day has
+  dc[`jumpcomp]:day[`volmult]*day`volmult;
   dc[`seed]:day`dayseed;
   dc
+  };
+
+daygap:{[cfg;day;prevdate]
+  / the overnight log return into a day (see overnight), drawn from the
+  / day's gap seed; with factor loadings b the standard normal behind it
+  / is b.G + sqrt(1-|b|^2) z, G the factors' overnight normals of the date
+  / (shared by every stock) and z the stock's own, so the gaps of two
+  / stocks correlate as their days do and the gap's variance is unchanged
+  / cfg: configuration dictionary
+  / day: a row of the regimes table
+  / prevdate: the previous trading date, null on the first day (no gap)
+  / returns: float log return
+  if[null prevdate; :0f];
+  b:$[`factors in key cfg; simtick.loadings[cfg;`factorloadings]; `float$()];
+  common:any 0<>b;
+  g:$[common; (simtick.factorgaps @[cfg;`factorseed;:;simtick.factorseedfor[cfg`seed;day`date]])`overnight; `float$()];
+  if[not null day`gapseed; system "S ",string day`gapseed];
+  v:cfg[`overnightshare]*(cfg[`vol]*cfg`vol)%cfg`tradingdays;
+  v*:1+cfg[`gapdayweight]*(day[`date]-prevdate)-1;
+  z:first .z.m.rng.normal 1;
+  if[common; z:(z*sqrt 1-sum b*b)+sum b*g];
+  (neg 0.5*v)+sqrt[v]*z
+  };
+
+samefactors:{[cfgs]
+  / the stocks of a run share the factors: when any of them has loadings,
+  / the factor keys, the session and the seed must be the same for all
+  if[not any simtick.hasfactors each value cfgs; :(::)];
+  k:`factors`factorprofile`factorjumpintensities`factorjumpvols`openingtime`closingtime`breakstart`breakend`tradingdays`seed;
+  k:k where k in key first value cfgs;
+  d:k where 1<{[cfgs;x] count distinct cfgs[;x]}[value cfgs] each k;
+  if[count d; '"the stocks of a run share the factors, so these keys must be the same for all of them - ",", " sv string d];
+  };
+
+correlations:{[cfgs]
+  / the correlations of the daily close-to-close returns the configuration
+  / implies. Each stock's day variance V=vol^2/tradingdays is made of its
+  / overnight gap (overnightshare), its break gap (breakshare of the
+  / rest), its common jumps J (see simtick.jumpvariance) and its
+  / diffusion (what is left); the gaps and the diffusion of two stocks
+  / correlate at the product of their loadings summed over the factors,
+  / and their common jumps covary by intensity x jump loadings x jump
+  / vol^2, so
+  /   cov_ij = b_i.b_j (sqrt(G_i G_j)+sqrt(B_i B_j)+sqrt(D_i D_j)) + sum_k l_k jl_ik jl_jk s_k^2
+  / and the correlation is cov_ij/sqrt(V_i V_j). Positive semi-definite by
+  / construction; without common jumps it is b_i.b_j
+  / cfgs: dictionary sym!configuration (compose)
+  / returns: table keyed by sym, one column per sym
+  c:value cfgs;
+  n:count c;
+  b:simtick.loadings[;`factorloadings] each c;
+  jl:simtick.loadings[;`jumploadings] each c;
+  v:{[x] (x[`vol]*x`vol)%x`tradingdays} each c;
+  g:v*c[;`overnightshare];
+  sh:{[x] $[(simtick.session x)`hasbreak; x`breakshare; 0f]} each c;
+  bk:(v-g)*sh;
+  j:simtick.jumpvariance each c;
+  d:0f|(v-g+bk)-j;
+  lam:{[x] x[`factorjumpintensities]*x[`factorjumpvols]*x`factorjumpvols} each c;
+  p:`b`jl`v`g`bk`d`lam!(b;jl;v;g;bk;d;lam);
+  m:{[p;i;k]
+    if[i=k; :1f];
+    gaps:sqrt[p[`g;i]*p[`g;k]]+sqrt[p[`bk;i]*p[`bk;k]]+sqrt p[`d;i]*p[`d;k];
+    jumps:sum p[`lam;i]*p[`jl;i]*p[`jl;k];
+    ((gaps*sum p[`b;i]*p[`b;k])+jumps)%sqrt p[`v;i]*p[`v;k]}[p];
+  ([]sym:key cfgs)!flip key[cfgs]!flip {[m;n;i] m[i] each til n}[m;n] each til n
   };
 
 simday:{[cfg;day;price]
@@ -242,8 +324,7 @@ runstep:{[cfg;state;day]
   / day: a row of the regimes table
   / returns: the updated state
   date:day`date;
-  if[not null day`gapseed; system "S ",string day`gapseed];
-  gap:$[null state`prevdate; 0f; .z.m.overnight[cfg;date-state`prevdate]];
+  gap:.z.m.daygap[cfg;day;state`prevdate];
   open:state[`price]*exp gap;
   r:.z.m.simday[cfg;day;open];
   state[`trade],:enlist r`trade;
@@ -438,6 +519,7 @@ runmany:{[cfgs;calendar;dbpath]
   /   time, and the days table with a sym column; on disk, dbpath: the
   /   standard date-partitioned database of writehdb with its defaults
   if[not 99h=type cfgs; '"runmany: cfgs must be a dictionary sym!configuration"];
+  .z.m.samefactors cfgs;
   if[not (::)~dbpath; :.z.m.writehdb[cfgs;calendar;dbpath;(`symbol$())!()]];
   rs:.z.m.run[;calendar;(::)] each cfgs;
   merged:(`symbol$())!();
@@ -581,8 +663,7 @@ writeday:{[cfgs;regs;dst;o;state;i]
   system "rm -rf ",1_string .Q.par[dst;date;`];
   one:{[cfgs;regs;o;state;date;i;sym]
     cfg:cfgs sym; day:regs[sym] i;
-    if[not null day`gapseed; system "S ",string day`gapseed];
-    gap:$[null state`prevdate; 0f; .z.m.overnight[cfg;date-state`prevdate]];
+    gap:.z.m.daygap[cfg;day;state`prevdate];
     open:state[`price;sym]*exp gap;
     cfg[`generatequotes]:`quote in o`tables;
     r:.z.m.simday[cfg;day;open];
@@ -617,6 +698,7 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   if[not -11h=type dbpath; '"writehdb: dbpath must be a file handle"];
   cfgs:.z.m.validatecfg each cfgs;
   if[not (key cfgs)~value[cfgs][;`sym]; '"writehdb: the keys of cfgs must be their configurations' sym"];
+  .z.m.samefactors cfgs;
   o:.z.m.hdbopts opts;
   calendar:.z.m.validate calendar;
   dst:hsym`$string dbpath;
@@ -643,4 +725,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;writehdb;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
+export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])

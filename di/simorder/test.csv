@@ -7,7 +7,8 @@ before,0,0,q,market:simtick.loadmarket f`market,1,,Load the market layer (its or
 before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,,Load the instruments
 before,0,0,q,scenarios:simtick.loadscenarios f`scenarios,1,,Load the scenarios
 before,0,0,q,tickrun:`seed`generatequotes!(42;1b),1,,Seeded with quotes
-before,0,0,q,tickcfg:simtick.compose[market;instruments`NVDA;scenarios`normal;tickrun],1,,The NVDA normal day
+before,0,0,q,noload:{[i] `factorloadings`jumploadings _ i},1,,An instrument row without its factor loadings: this suite keeps the tapes it was written on
+before,0,0,q,tickcfg:simtick.compose[market;noload instruments`NVDA;scenarios`normal;tickrun],1,,The NVDA normal day
 before,0,0,q,tickresult:simtick.run[tickcfg],1,,Generate one day of market data
 before,0,0,q,trades:tickresult`trade,1,,Extract trades fixture
 before,0,0,q,quotes:tickresult`quote,1,,Extract quotes fixture
@@ -263,7 +264,7 @@ true,0,0,q,(sum exec interval from frontchildren where childid<=frontcfg`numchil
 before,0,0,q,arrresult:simorder.run[arrcfg;trades;quotes],1,,Run full order simulation (arrival pacing)
 true,0,0,q,(sum arrresult[`executions]`qty)=arrcfg`orderqty,1,,Arrival executions sum exactly to orderqty
 comment,0,0,q,,1,,=== Rollover Tests ===
-before,0,0,q,pgins:instruments`PG,1,,PG for a less liquid instrument
+before,0,0,q,pgins:noload instruments`PG,1,,PG for a less liquid instrument
 before,0,0,q,pgins[`tradesperday]:20000,1,,Made less liquid still
 before,0,0,q,pgresult:simtick.run simtick.compose[market;pgins;scenarios`normal;tickrun],1,,Its day
 before,0,0,q,pgtrades:pgresult`trade,1,,Its trades
@@ -403,7 +404,7 @@ before,0,0,q,usedvenues:raze (market`venues;market`primaryvenue;market`ordervenu
 true,0,0,q,all usedvenues in key[venueref]`code,1,,Every venue code the market file uses is in the venue reference
 before,0,0,q,if[count unmapped:exec code from venueref where null tcacode; -1 raze ("warning: venues without a TCA code: ";" " sv string unmapped)],1,,Venues without a TCA code are reported as a warning
 comment,0,0,q,,1,,=== Mixed Market Tests ===
-before,0,0,q,xomresult:simtick.run simtick.compose[market;instruments`XOM;scenarios`normal;tickrun],1,,Generate a second instrument for the same day
+before,0,0,q,xomresult:simtick.run simtick.compose[market;noload instruments`XOM;scenarios`normal;tickrun],1,,Generate a second instrument for the same day
 before,0,0,q,mixedtrades:`time xasc raze(trades;xomresult`trade),1,,Trades of both instruments in one table
 before,0,0,q,mixedquotes:`time xasc raze(quotes;xomresult`quote),1,,Quotes of both instruments in one table
 true,0,0,q,(simorder.run[basecfg;mixedtrades;mixedquotes])~simorder.run[basecfg;trades;quotes],1,,An order against mixed-instrument tables matches the single-instrument run

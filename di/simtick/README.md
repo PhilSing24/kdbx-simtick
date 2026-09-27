@@ -72,11 +72,31 @@ What the sessions do not model, on purpose: the auction phases (order input, no-
 - **Best bid and offer only**: there is no order book depth and no queue beyond the displayed size at the best prices.
 - **One-way link between quotes and trades**: trades trigger quote updates, but quotes do not trigger trades.
 - **Quotes per trade**: the shipped market uses 4 to keep the data small; real large caps show 10 to 30 (`quotespertrade`).
-- **Instruments are independent**: running several instruments gives separate days that do not move together.
+- **Co-movement is linear and constant**: stocks move together through common factors with fixed loadings (see Co-movement), so correlation does not rise on bad days and there is no leverage effect.
 - **Quote sizes lean toward the next price move**: this reproduces a real regularity, but the model uses the known next move to do it, so the signal is cleaner than in real data. Keep it in mind before training predictive models on the output.
 - **Price improvement**: trades slightly inside the spread sit on a tenth of a tick, and a small share of them are assigned to lit exchanges, where real prices would be on the tick or at the midpoint.
 
 **Not suitable for** market-making or high-frequency research that needs order book depth and queue dynamics; a full limit order book simulator is the right tool there.
+
+### Co-movement
+
+Stocks move together through common factors. The market file names them, any number and any names: a market factor, sectors, or statistical factors from a PCA. Each factor is a Brownian motion in trading time, independent of the others, with variance 1 over the day following `factorprofile`. A stock's row gives its loadings as name value pairs:
+
+```
+sym,price,drift,vol,tradesperday,...,factorloadings,jumploadings
+NVDA,215.00,0.08,0.45,500000,...,market 0.65 Technology 0.35,market 1.5
+MSFT,420.00,0.07,0.28,300000,...,market 0.65 Technology 0.35,market 1.1
+XOM,166.00,0.06,0.22,80000,...,market 0.55 Energy 0.45,market 0.8
+```
+
+- **Diffusion.** With loadings `b`, the day's diffusive return is `sigma/sqrt(D) * (b.F + sqrt(1-|b|^2) W)`, `F` the factors and `W` the stock's own Brownian motion. A loading is the stock's correlation with the factor; the squares of the loadings sum to at most 1 and the rest is the stock's own variance, so `vol` is unchanged. Two stocks correlate at the sum over factors of the products of their loadings: NVDA and XOM at 0.65 x 0.55 = 0.36, NVDA and MSFT at 0.65 x 0.65 + 0.35 x 0.35 = 0.55. Any set of loadings that passes validation gives a valid correlation matrix.
+- **Common jumps.** A factor can jump (`factorjumpintensities` per day, `factorjumpvols` the spread of the log size). Every stock takes the jump at the same instant, times its `jumploadings` entry: a 1% market jump moves NVDA 1.5% and XOM 0.8%, and each gets the burst of trading that follows. A stock's own jumps (`pricemodel` `jump`, `jumpintensity`) stay what they were: single-name news.
+- **The variance budget.** The variance of the common jumps is taken out of the stock's diffusion, so `vol` remains the volatility of the close-to-close return. A stock whose common jumps would carry more variance than its day is refused at composition.
+- **Shared by construction.** The day's factor paths, gap normals and jumps are drawn from `factorseed`, a hash of the run seed and the date, before the stock's own seed is set. Every stock of a date shares them with nothing passed between them; a stock's tape does not depend on which other stocks are simulated; and a stock without loadings draws exactly what it drew before, so `simtick.quick` and any five-value instrument are unchanged.
+
+Within the day two stocks correlate less than their loadings say, about 0.35 to 0.45 for NVDA and MSFT from five seconds to thirty minutes against 0.6 for daily returns: order-flow impact and tick rounding add noise of the stock's own, which a day washes out. `di.simmarket` carries the factors across days (overnight gaps, regimes) and returns the correlations a configuration implies.
+
+`jumpburst` is a number of trades, sized in the market file for a busy stock; a thin stock sets its own on its row (the SGX and HKEX rows do), or composition refuses it when the bursts would exceed its trades.
 
 ## Related modules
 
@@ -162,6 +182,11 @@ The first trade is the opening auction (`cond` `O`), which has no aggressor.
 | `simtick.saveconfig[filepath;cfg]` | Write a composed configuration to a JSON file |
 | `simtick.loadconfig[filepath]` | Read it back; `baseintensity` is checked against `tradesperday` |
 | `simtick.intensityfor[cfg]` | The base intensity that gives `tradesperday` trades under the configuration |
+| `simtick.loadings[cfg;key]` | A stock's `factorloadings` or `jumploadings` as a float per factor |
+| `simtick.factorday[cfg]` | The day's common inputs from `factorseed`: the factors' paths, gap normals and jumps |
+| `simtick.jumpvariance[cfg]` | The variance per day of the common jumps as the stock takes them |
+| `simtick.diffusionvol[cfg;share]` | The vol of the day's diffusion once the break's share and the common jumps are taken out |
+| `simtick.mixseed[a;b]` | A seed hashed from two integers (seeds related by arithmetic give correlated streams) |
 | `simtick.describe[]` | Every parameter with its type, layer, group and description |
 
 ## Configuration
@@ -216,7 +241,9 @@ q)k4unit.moduletest`di.simtick
 | Constant quantity | 2 | All sizes equal `avgqty` |
 | Reproducibility | 1 | The same seed gives the same output |
 | Sessions | 29 | Trading seconds and the wall clock with and without a break; no trade or quote in the break; the reopening print (time, quantity, venue, price, code `B`); the profile in trading time; the derived intensity within 2% over two sessions; `breakshare` puts variance over the break; validation of the break; HKEX board lots (round lots, odd lots, quote sizes, tick); the US odd-lot rule unchanged |
-| **Total** | **174** | |
+| Seed hash | 7 | `mixseed` is deterministic, in range, takes lists; streams of hashed seeds are independent across and along families; seeds computed by arithmetic are not |
+| Co-movement | 36 | Loadings parsed and aligned with the factors, empty and zero loadings; validation (squares above 1, unknown factor, bad pairs, list lengths, jumps above the day's variance); the factor seed by date; the day's factor inputs identical for two stocks; paths per factor, variance 1 following the profile; zero loadings reproduce the tape without factors exactly; the variance budget of diffusion and common jumps; two stocks jump at every common jump, in its direction, by their jump loading |
+| **Total** | **217** | |
 
 ## Documentation
 
