@@ -149,7 +149,7 @@ hawkes.children:{[params;parents]
 session:{[cfg]
   / the day's trading time: the open and close, whether the market has a
   / mid-day break (breakstart and breakend, null for none), the trading
-  / seconds T with the break removed, and the break's offset in trading
+  / seconds with the break removed, and the break's offset in trading
   / seconds from the open and its length in seconds. The engine works in
   / trading seconds (arrivals, profile, clocks) and maps to the wall clock
   / by inserting the break (see walltime)
@@ -158,10 +158,10 @@ session:{[cfg]
   hasbreak:$[`breakstart in key cfg; not null cfg`breakstart; 0b];
   breaklen:$[hasbreak; ((`timespan$cfg`breakend)-`timespan$cfg`breakstart)%nspersec; 0f];
   offset:$[hasbreak; ((`timespan$cfg`breakstart)-open)%nspersec; 0w];
-  `open`close`hasbreak`breakoffset`breaklen`T!(open;close;hasbreak;offset;breaklen;((close-open)%nspersec)-breaklen)
+  `open`close`hasbreak`breakoffset`breaklen`seconds!(open;close;hasbreak;offset;breaklen;((close-open)%nspersec)-breaklen)
   };
 
-tradingseconds:{[cfg] (.z.m.session cfg)`T};
+tradingseconds:{[cfg] (.z.m.session cfg)`seconds};
 
 walltime:{[cfg;secs]
   / trading seconds from the open to seconds from the open on the wall
@@ -348,12 +348,12 @@ factorday:{[cfg]
   /   factor's index and the log size)
   k:count cfg`factors;
   g:.z.m.factorgaps cfg;
-  T:`long$.z.m.tradingseconds cfg;
-  w:.z.m.shape[@[cfg;`profile;:;cfg`factorprofile];(0.5+til T)%T];
+  nsec:`long$.z.m.tradingseconds cfg;
+  w:.z.m.shape[@[cfg;`profile;:;cfg`factorprofile];(0.5+til nsec)%nsec];
   w:w%sum w;
-  path:{[cfg;w;T;i] 0f,sums sqrt[w]*.z.m.rng.normal[T;cfg]}[cfg;w;T] each til k;
+  path:{[cfg;w;nsec;i] 0f,sums sqrt[w]*.z.m.rng.normal[nsec;cfg]}[cfg;w;nsec] each til k;
   n:.z.m.rng.poisson[`float$cfg`factorjumpintensities;40];
-  jumps:raze {[cfg;T;n;i] ([]time:asc n[i]?`float$T;factor:n[i]#i;size:cfg[`factorjumpvols;i]*.z.m.rng.normal[n i;cfg])}[cfg;T;n] each til k;
+  jumps:raze {[cfg;nsec;n;i] ([]time:asc n[i]?`float$nsec;factor:n[i]#i;size:cfg[`factorjumpvols;i]*.z.m.rng.normal[n i;cfg])}[cfg;nsec;n] each til k;
   g,`path`variance`jumps!(path;0f,sums w;`time xasc jumps)
   };
 
@@ -1081,8 +1081,8 @@ intensityfor:{[cfg]
   burst:perday*cfg[`jumpburst]%1-n;
   if[burst>=cfg`tradesperday;
     '"compose: the jump bursts are expected to add ",string[`long$burst]," trades a day, more than tradesperday ",string cfg`tradesperday];
-  T:.z.m.tradingseconds cfg;
-  (cfg[`tradesperday]-burst)*(1-n)%T*.z.m.shapemean cfg
+  nsec:.z.m.tradingseconds cfg;
+  (cfg[`tradesperday]-burst)*(1-n)%nsec*.z.m.shapemean cfg
   };
 
 derive:{[cfg]
