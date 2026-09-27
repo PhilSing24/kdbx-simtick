@@ -456,6 +456,7 @@ true,0,0,q,all (`date$flowres[`executions]`time)=orderday flowres[`executions]`o
 before,0,0,q,flowall:simorder.runflow[omarket;flowspec;mixedtrades;mixedquotes],1,,Generate and run in one call
 true,0,0,q,`configs`orders`children`events`executions~key flowall,1,,runflow returns the configs and the four tables
 true,0,0,q,(flowall`orders)~flowres`orders,1,,runflow gives the same orders as generate then runmany
+true,0,0,q,simorder.version~first read0 hsym `$raze (.Q.m.mp `di.simorder;"/VERSION"),1,,The module version is read from the module's VERSION file
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,run1:simorder.run[basecfg;trades;quotes],1,,First run
 before,0,0,q,run2:simorder.run[basecfg;trades;quotes],1,,Second run

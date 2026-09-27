@@ -78,7 +78,12 @@ simmarket:use`di.simmarket
 
 ## Testing
 
-Each module carries a `test.csv` in k4unit format, run by the `local.k4unit` module:
+Each module carries a `test.csv` in k4unit format, run by `di.k4unit`, the Data Intellect test module. It ships upstream, so clone [DataIntellectTech/kdbx-modules](https://github.com/DataIntellectTech/kdbx-modules) and put the clone on `QPATH` after this repository (`make test` says so when it is missing):
+
+```bash
+export QPATH=/path/to/kdbx-modules:$HOME/.kx/mod:/path/to/kdbx-modules-upstream
+```
+
 
 ```bash
 make test                # all suites
@@ -91,7 +96,7 @@ make test-simorder
 Or from a q session:
 
 ```q
-q)k4unit:use`local.k4unit
+q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simtick
 ```
 
@@ -101,8 +106,6 @@ kdbx-modules/
 ├── Makefile
 ├── README.md
 ├── genparams.q            # generates the parameter reference pages
-├── local/
-│   └── k4unit.q           # test runner
 └── di/
     ├── simtick/           # 1 instrument, 1 day (atomic unit)
     │   ├── init.q
@@ -138,6 +141,8 @@ Each module should follow the [KDB-X module framework](https://code.kx.com/kdb-x
 
 - `init.q` — Module code
 - `test.csv` — Unit tests (k4unit format)
+- `VERSION` — The module's version (semver), read into its exported `version`
+- `deps.toml` — The modules it `use`s and their minimum versions, where it uses any
 - `README.md` — Documentation
 
 ## License

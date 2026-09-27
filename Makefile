@@ -31,18 +31,27 @@ repl:
 test: test-simtick-config test-simtick test-simmarket test-simorder
 
 # Individual module tests
-# The runner is the local.k4unit module; each target exits non-zero when a check fails or the suite aborts (the runner's error is trapped, since an untrapped error would end the piped q with status 0)
+# The runner is di.k4unit, the Data Intellect test module, which ships upstream and must be on QPATH
+# after this repository. Each target prints the counts and exits non-zero when a check fails, the
+# suite aborts, or the runner is not found
+define NOK4UNIT
+di.k4unit was not found on QPATH. It ships with the Data Intellect modules: clone https://github.com/DataIntellectTech/kdbx-modules and add the clone to QPATH after this repository, for example: export QPATH=$(patsubst %/,%,$(PROJECT_ROOT)):$$HOME/.kx/mod:$$HOME/kdbx-modules-upstream
+endef
+define K4RUN
+k4unit:@[use;`di.k4unit;{-1 "$(NOK4UNIT)"; exit 2}]; @[k4unit.moduletest;`$(1);{-1 "suite aborted: ",x;}]; r:k4unit.getresults[]; -1 "Passed: ",string sum r`ok; -1 "Failed: ",string sum not r`ok; exit $$[(0<count r)and all r`ok;0;1]
+endef
+
 test-simtick-config:
-	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simtick.config;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+	@echo '$(call K4RUN,di.simtick.config)' | q -q
 
 test-simtick:
-	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simtick;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+	@echo '$(call K4RUN,di.simtick)' | q -q
 
 test-simmarket:
-	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simmarket;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+	@echo '$(call K4RUN,di.simmarket)' | q -q
 
 test-simorder:
-	echo 'k4unit:use`local.k4unit; r:@[k4unit.moduletest;`di.simorder;{-1"suite aborted: ",x;()}]; exit $$[(98h=type r)and 0<count r;$$[all r`ok;0;1];1]' | q -q
+	@echo '$(call K4RUN,di.simorder)' | q -q
 
 # The parameter reference pages, generated from each module's describe[] and the shipped configuration files
 params:

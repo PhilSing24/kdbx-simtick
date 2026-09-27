@@ -233,5 +233,9 @@ describe:{[schema]
   :delete ord from `ord xasc t;
   };
 
+/ the module's version (semver), read from its VERSION file while the
+/ module loads (a module-local path resolves only then)
+version:first read0 `:::VERSION;
+
 / export public interface
-export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path]);
+export:([version;compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path]);

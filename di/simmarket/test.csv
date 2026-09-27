@@ -285,10 +285,11 @@ before,0,0,q,hdbrun:simmarket.loadrun hdb,1,The run read back from the database'
 true,0,0,q,`configs`calendar`opts`version`commit~key hdbrun,1,loadrun returns the configs and the calendar and the options and the module version and the commit
 true,0,0,q,hdbrun[`configs]~hdbcfgs,1,The configs reload unchanged
 true,0,0,q,hdbrun[`calendar]~calendar,1,So does the calendar
-true,0,0,q,hdbrun[`version]~simmarket.moduleversion,1,The module version is the code's
-true,0,0,q,simmarket.moduleversion~"0.1.0",1,The module version is 0.1.0
-true,0,0,q,hdbrun[`commit]=simmarket.version[],1,The commit is the code's
-true,0,0,q,-11h=type simmarket.version[],1,version (the commit) is a symbol
+true,0,0,q,hdbrun[`version]~simmarket.version,1,The module version is the code's
+true,0,0,q,simmarket.version~first read0 hsym `$raze (.Q.m.mp `di.simmarket;"/VERSION"),1,The module version is read from the module's VERSION file
+true,0,0,q,3=count "." vs simmarket.version,1,And is a semantic version
+true,0,0,q,hdbrun[`commit]=simmarket.commit[],1,The commit is the code's
+true,0,0,q,-11h=type simmarket.commit[],1,The commit is a symbol
 before,0,0,q,system"rm -rf /tmp/simmarket_hdbreplay",1,Clean up
 before,0,0,q,simmarket.writehdb[hdbrun`configs;hdbrun`calendar;`:/tmp/simmarket_hdbreplay;hdbrun`opts],1,The run replayed from the config file
 true,0,0,q,all {[d] all {[d;n] (readpart[`:/tmp/simmarket_hdbreplay;d;n])~readpart[hdb;d;n]}[d] each `trade`quote`days} each calendar`date,1,The simrun file reloads and reproduces the run

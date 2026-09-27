@@ -973,5 +973,9 @@ describe:{[]
   simconfig.describe .z.m.schema
   };
 
+/ the module's version (semver), read from its VERSION file while the
+/ module loads (a module-local path resolves only then)
+version:first read0 `:::VERSION;
+
 / export public interface
-export:([run;runmany;runflow;generate;menu;compose;loadmarket;loaddefaults;loadorders;files;venues;orderkeys;marketday;schedule;jittered;sizing;intervals;trajectory;capped;limitof;heldwithin;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])
+export:([version;run;runmany;runflow;generate;menu;compose;loadmarket;loaddefaults;loadorders;files;venues;orderkeys;marketday;schedule;jittered;sizing;intervals;trajectory;capped;limitof;heldwithin;validateimpact;impactcfg;dailyvol;childimpact;shiftat;impact;quoteat;aggressivefills;passivefills;child;execute;buildorder;describe;schema])

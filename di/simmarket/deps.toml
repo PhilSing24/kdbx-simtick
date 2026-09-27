@@ -1,0 +1,4 @@
+# Peer modules di.simmarket `use`s.
+[dependencies]
+"di.simtick" = "0.1.0"
+"di.simtick.config" = "0.1.0"

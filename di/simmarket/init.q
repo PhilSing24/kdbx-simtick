@@ -620,21 +620,21 @@ runmany:{[cfgs;calendar;dbpath]
 
 hdbdefaults:`tables`compression!(`trade`quote;17 5 3);
 
-/ the module's version, recorded in every database it writes next to the
-/ git commit, so a database written from a copied module folder (no git
-/ checkout) still carries a version
-moduleversion:"0.1.0";
+/ the module's version (semver), read from its VERSION file while the
+/ module loads (a module-local path resolves only then). It is recorded
+/ in every database the module writes, next to the git commit, so a
+/ database written from a copied module folder (no git checkout) still
+/ carries a version
+version:first read0 `:::VERSION;
 
-version:{[]
+commit:{[]
   / the git commit of the code (with -dirty when the modules have
   / uncommitted changes), or `unknown outside a checkout; the same
   / configuration and seeds reproduce a database only with the same code
-  roots:.Q.m.SP where not ()~/:key each hsym each `$.Q.m.SP,\:"/di/simmarket/init.q";
-  if[0=count roots; :`unknown];
-  root:first roots;
-  h:@[system;"git -C ",root," rev-parse --short HEAD 2>/dev/null";()];
+  dir:.Q.m.mp `di.simmarket;
+  h:@[system;"git -C ",dir," rev-parse --short HEAD 2>/dev/null";()];
   if[not count h; :`unknown];
-  dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simtick/config 2>/dev/null";()];
+  dirty:count @[system;"git -C ",dir," status --porcelain -- . ../simtick 2>/dev/null";()];
   :`$first[h],$[dirty;"-dirty";""];
   };
 
@@ -671,12 +671,12 @@ loadrun:{[dbpath]
   if[()~key f; '"loadrun: no simrun at ",string dbpath];
   d:get f;
   opts:`tables`compression!(d`tables;d`compression);
-  if[not d[`version]~.z.m.moduleversion;
-    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,
+  if[not d[`version]~.z.m.version;
+    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.version,
       ": the same configuration and seeds reproduce it only with the same code"];
-  if[not d[`commit]=.z.m.version[];
+  if[not d[`commit]=.z.m.commit[];
     -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
-      string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
+      string[.z.m.commit[]],": the same configuration and seeds reproduce it only with the same code"];
   :`configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit);
   };
 
@@ -802,7 +802,7 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   o:.z.m.hdbopts opts;
   calendar:.z.m.validate calendar;
   dst:hsym`$string dbpath;
-  runcfg:`configs`calendar`tables`compression`version`commit!(cfgs;0!calendar;o`tables;o`compression;.z.m.moduleversion;.z.m.version[]);
+  runcfg:`configs`calendar`tables`compression`version`commit!(cfgs;0!calendar;o`tables;o`compression;.z.m.version;.z.m.commit[]);
   if[not ()~key .Q.dd[dst;`simrun];
     old:.z.m.loadrun dst;
     if[not all .z.m.sameconfig'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
@@ -825,6 +825,6 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;
+export:([version;commit;run;runmany;writehdb;correlations;daygap;samefactors;loadrun;complete;writetable;
   writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;
   nysecalendar;validate;validatecfg;describe]);
