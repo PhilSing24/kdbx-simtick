@@ -301,7 +301,7 @@ after,0,0,q,system"rm -f /tmp/simtick_noname.csv /tmp/simtick_unknown.csv /tmp/s
 comment,0,0,q,,1,,=== Describe Tests ===
 before,0,0,q,schema:simtick.describe[],1,,Get schema
 true,0,0,q,98h=type schema,1,,describe returns table
-true,0,0,q,`param`typ`layer`group`description~cols schema,1,,describe has correct columns
+true,0,0,q,`param`typ`layer`grp`description~cols schema,1,,describe has correct columns
 true,0,0,q,(count schema)=count simtick.schema,1,,describe lists every parameter
 true,0,0,q,`sym`price`drift`vol`tradesperday~5#exec param from schema,1,,The essential five come first
 true,0,0,q,all `essential=5#exec layer from schema,1,,and are the essential layer

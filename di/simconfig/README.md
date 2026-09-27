@@ -67,7 +67,7 @@ The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and 
 | `simconfig.loadrows[schema;filepath;keycol]` | Any typed CSV of rows keyed by a column |
 | `simconfig.saveconfig[filepath;cfg]` | Write a composed configuration as JSON |
 | `simconfig.loadconfig[schema;filepath]` | Read one back |
-| `simconfig.describe[schema]` | The schema as a table: `param`, `typ`, `layer`, `group`, `description`, the essential keys first |
+| `simconfig.describe[schema]` | The schema as a table: `param`, `typ`, `layer`, `grp` (the group; `group` is a reserved word), `description`, the essential keys first |
 | `simconfig.cast[type;value]` | Cast one value by a schema type |
 | `simconfig.nonnull[dict]` | The entries of a row that carry a value |
 | `simconfig.path[relative]` | A shipped file's handle |
