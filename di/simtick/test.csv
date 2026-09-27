@@ -310,6 +310,52 @@ before,0,0,q,constcfg[`generatequotes]:0b,1,,Disable quotes
 before,0,0,q,consttrades:simtick.run[constcfg],1,,Generate trades
 true,0,0,q,1=count distinct exec qty from consttrades where cond in `R`I,1,,All continuous quantities equal
 true,0,0,q,constcfg[`avgqty]=first exec qty from consttrades where cond in `R`I,1,,Continuous quantity equals avgqty
+comment,0,0,q,,1,,=== Sessions Tests ===
+before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simconfig/markets/sgx.json",1,,The SGX market: two sessions around a lunch break
+before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simconfig/instruments_sg.csv",1,,Its instruments
+before,0,0,q,sgxcfg:simtick.compose[sgxmarket;sgxins`D05;scenarios`normal;`seed`generatequotes!(42;1b)],1,,DBS on a normal day
+before,0,0,q,sgxres:simtick.run sgxcfg,1,,Run it
+before,0,0,q,sgxt:sgxres`trade,1,,Its trades
+before,0,0,q,sgxq:sgxres`quote,1,,Its quotes
+before,0,0,q,sd:sgxcfg`tradingdate,1,,The day
+true,0,0,q,25200=simtick.tradingseconds sgxcfg,1,,SGX trades seven hours a day: the break is not trading time
+true,0,0,q,23400=simtick.tradingseconds cfg,1,,The US market has no break and trades six and a half hours
+true,0,0,q,(simtick.walltime[sgxcfg;10799 10800 10801f])~10799 14400 14401f,1,,Trading seconds map to the wall clock by inserting the break
+true,0,0,q,(simtick.walltime[cfg;10799 10800f])~10799 10800f,1,,Without a break the wall clock is the trading clock
+true,0,0,q,0=count select from sgxt where (time>sd+0D12:00)&time<sd+0D13:00,1,,No trade in the break
+true,0,0,q,0=count select from sgxq where (time>sd+0D12:00)&time<sd+0D13:00,1,,No quote in the break: the last one stays in force
+true,0,0,q,0<count select from sgxt where time<sd+0D12:00,1,,The morning session trades
+true,0,0,q,0<count select from sgxt where time>sd+0D13:00,1,,So does the afternoon
+true,0,0,q,(exec time from sgxt where cond=`B)~enlist sd+0D13:00,1,,One reopening print at the end of the break with condition code B
+true,0,0,q,(exec qty from sgxt where cond=`B)~enlist floor 0.5+sgxcfg[`breakauctionpct]*exec sum qty from sgxt where cond in `R`I,1,,For breakauctionpct of the continuous volume
+true,0,0,q,`XSES~first exec venue from sgxt where cond=`B,1,,On the primary venue
+true,0,0,q,(first exec price from sgxt where cond=`B)=first exec 0.01*floor 0.5+(0.5*bid+ask)%0.01 from sgxq where time>=sd+0D13:00,1,,At the mid of the first quote of the afternoon on the tick grid
+true,0,0,q,`O`B`C~exec cond from `time xasc select from sgxt where cond in `O`B`C,1,,The three auction prints frame the two sessions
+true,0,0,q,(count select from sgxt where time within (sd+0D13:00;sd+0D13:30))>count select from sgxt where time within (sd+0D11:30;sd+0D12:00),1,,The profile is in trading time: the afternoon opens busier than the morning ends
+before,0,0,q,sgxcount:{[c;s] c[`seed]:s; count select from simtick.run[c] where cond in `R`I},1,,Continuous trades of one seeded SGX run
+before,0,0,q,sgxmean:avg sgxcount[sgxcfg upsert (enlist `generatequotes)!enlist 0b] each 1+til 10,1,,Mean over ten seeds
+true,0,0,q,(abs sgxmean-15000)<0.02*15000,1,,The derived intensity gives tradesperday trades over the two sessions within 2%
+before,0,0,q,gapof:{[c;s] c[`seed]:s; q:(simtick.run c)`quote; log (exec first 0.5*bid+ask from q where time>=sd+0D13:00)%exec last 0.5*bid+ask from q where time<sd+0D12:00},1,,The mid's log return across the break of one seeded run
+before,0,0,q,gapsbig:gapof[sgxcfg upsert (enlist `breakshare)!enlist 0.5] each 1+til 10,1,,Ten break returns with half the day's variance over the break
+before,0,0,q,gapsnone:gapof[sgxcfg upsert (enlist `breakshare)!enlist 0f] each 1+til 10,1,,Ten with none
+true,0,0,q,(dev gapsbig)>3*dev gapsnone,1,,breakshare puts variance over the break
+true,0,0,q,(dev gapsbig) within 0.004 0.02,1,,Of about the configured size (sqrt of half of vol^2/tradingdays is 0.9%)
+true,0,0,q,10=count distinct simtick.price[sgxcfg upsert `seed`breakshare!(7;0.5);10800 10801 10802 10803 10804 10805 10806 10807 10808 10809f],1,,price applies the break to the points after it
+fail,0,0,q,simtick.run sgxcfg upsert `breakstart`breakend!13:00 12:00,1,,A break ending before it starts throws error
+fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakend)!enlist 0Nu,1,,A break with one end null throws error
+fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakshare)!enlist 1f,1,,breakshare of 1 throws error
+fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakstart)!enlist 08:00,1,,A break outside the day throws error
+before,0,0,q,hkmarket:simtick.loadmarket hsym`$"di/simconfig/markets/hkex.json",1,,The HKEX market
+before,0,0,q,hkins:simtick.loadinstruments hsym`$"di/simconfig/instruments_hk.csv",1,,Its instruments with their board lots
+before,0,0,q,hkcfg:simtick.compose[hkmarket;hkins`0005;scenarios`normal;`seed`generatequotes!(42;1b)],1,,HSBC with a 400-share board lot
+before,0,0,q,hkres:simtick.run hkcfg,1,,Run it
+true,0,0,q,400 800 1200 2000~hkcfg`roundlots,1,,The instrument row sets the board lots
+true,0,0,q,(avg 0=(exec qty from hkres`trade where cond in `R`I) mod 400) within 0.3 0.5,1,,About roundlotshare of the continuous trades are board-lot multiples (a few irregular lots land on one too)
+true,0,0,q,all 400>exec qty from hkres`trade where cond=`I,1,,Odd lots are below the board lot
+true,0,0,q,all 0=(exec bidsize from hkres`quote) mod 400,1,,Quote sizes are multiples of the board lot
+true,0,0,q,all 1e-9>abs (exec bid from hkres`quote)-0.05*floor 0.5+(exec bid from hkres`quote)%0.05,1,,Quotes sit on the instrument's tick
+true,0,0,q,0=count select from hkres`trade where (time>hkcfg[`tradingdate]+0D12:00)&time<hkcfg[`tradingdate]+0D13:00,1,,No trade in the HKEX break
+true,0,0,q,all 100>exec qty from trades where cond=`I,1,,In the US an odd lot is below 100 shares as before
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,seedcfg:cfg,1,,Setup seeded config
 before,0,0,q,seedcfg[`seed]:999,1,,Set seed
