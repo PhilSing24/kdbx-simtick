@@ -96,3 +96,4 @@ before,0,0,q,`:/tmp/simconfig_dupvenues.csv 0: csv 0: (0!venues) upsert 0!1#venu
 fail,0,0,q,simconfig.loadvenues`:/tmp/simconfig_dupvenues.csv,1,,A repeated code throws error
 after,0,0,q,system"rm -f /tmp/simconfig_badvenues.csv /tmp/simconfig_dupvenues.csv",1,,Clean up venue files
 after,0,0,q,system"rm -f /tmp/simconfig_market.json /tmp/simconfig_badmarket.json /tmp/simconfig_instruments.csv /tmp/simconfig_badins.csv /tmp/simconfig_scenarios.csv /tmp/simconfig_saved.json",1,,Clean up
+true,0,0,q,simconfig.version~first read0 hsym `$raze (.Q.m.mp `di.simtick.config;"/VERSION"),1,,The module version is read from the module's VERSION file

@@ -419,6 +419,7 @@ true,0,0,q,all (signum cjret[cjqn;cjbt] each cjbig`time)=signum cjbig`size,1,,NV
 true,0,0,q,all (signum cjret[cjqx;cjbt] each cjbig`time)=signum cjbig`size,1,,So does XOM at the same instants
 true,0,0,q,all 0.002>abs (cjret[cjqn;cjbt] each cjbig`time)-1.5*cjbig`size,1,,NVDA moves by its jump loading times the jump (within the diffusion of four seconds)
 true,0,0,q,all 0.002>abs (cjret[cjqx;cjbt] each cjbig`time)-0.8*cjbig`size,1,,XOM by its own
+true,0,0,q,simtick.version~first read0 hsym `$raze (.Q.m.mp `di.simtick;"/VERSION"),1,,The module version is read from the module's VERSION file
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,seedcfg:cfg,1,,Setup seeded config
 before,0,0,q,seedcfg[`seed]:999,1,,Set seed

@@ -104,7 +104,7 @@ Every partition holds every requested table, empty ones included, so date-range 
 
 **Resume.** A date whose partition is complete (every requested table and `days` present, with a row per stock) is skipped, its closes carried forward, so an interrupted run continues where it stopped and, since every day has its own seeds, equals a full run exactly. `days` is written last, so a crash cannot leave a date looking complete; an incomplete date is deleted and written again from scratch. A database built with another configuration (other instruments, scenarios, tables or compression, or a calendar that is not extended) is refused rather than mixed.
 
-**Reproducing.** `r:simmarket.loadrun dbpath` returns the run's `configs`, `calendar`, `opts`, `version` and `commit`; `simmarket.writehdb[r`configs;r`calendar;newpath;r`opts]` reproduces the database. `version` is the module's version string (`simmarket.moduleversion`, `0.1.0`), which a database written from a copied module folder still carries; `commit` is the git commit of the checkout that wrote it, or `unknown` outside one. `loadrun` warns when either differs from the code running, since the same configuration and seeds reproduce the data only with the same code.
+**Reproducing.** `r:simmarket.loadrun dbpath` returns the run's `configs`, `calendar`, `opts`, `version` and `commit`; `simmarket.writehdb[r`configs;r`calendar;newpath;r`opts]` reproduces the database. `version` is the module's version (`simmarket.version`, read from its `VERSION` file), which a database written from a copied module folder still carries; `commit` is the git commit of the checkout that wrote it, or `unknown` outside one. `loadrun` warns when either differs from the code running, since the same configuration and seeds reproduce the data only with the same code.
 
 The old single-stock layout (`days` at the root, no `sym` column) is replaced by this one: a one-stock database now has the same layout as a many-stock one. Databases written with the old layout should be regenerated.
 
@@ -129,8 +129,8 @@ In memory the trades and quotes of every instrument come merged and sorted by ti
 | `simmarket.writehdb[cfgs;calendar;dbpath;opts]` | Several stocks written as a date-partitioned database one day at a time; `opts` with any of `tables` and `compression` |
 | `simmarket.correlations[cfgs]` | The close-to-close correlations a configuration implies, as a table keyed by sym |
 | `simmarket.loadrun[dbpath]` | The run that wrote a database: `configs`, `calendar`, `opts`, `version`, `commit`; warns when the module version or the commit differs from the code running |
-| `simmarket.version[]` | The git commit of the code (with `-dirty` when the modules have uncommitted changes), or `unknown` outside a checkout |
-| `simmarket.moduleversion` | The module's version string, `0.1.0` |
+| `simmarket.version` | The module's version, read from its `VERSION` file |
+| `simmarket.commit[]` | The git commit of the code (with `-dirty` when the modules have uncommitted changes), or `unknown` outside a checkout |
 | `simmarket.runstep[cfg;state;day]` | One day of an in-memory run (the step `run` folds over the regimes table) |
 | `simmarket.simday[cfg;day;price]` | One stock's day from its regimes row and its open: the tables, its days row and its close |
 | `simmarket.runmany[cfgs;calendar;dbpath]` | Run several instruments (a dictionary sym!config from `compose`) over the same calendar, merged in memory or written as the database with the default options |
@@ -269,7 +269,7 @@ make test-simmarket
 or from a q session:
 
 ```q
-q)k4unit:use`local.k4unit
+q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simmarket
 ```
 

@@ -73,6 +73,7 @@ The mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and 
 | `simconfig.cast[type;value]` | Cast one value by a schema type |
 | `simconfig.nonnull[dict]` | The entries of a row that carry a value |
 | `simconfig.path[relative]` | A shipped file's handle |
+| `simconfig.version` | The module's version, read from its `VERSION` file |
 
 A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol, `F` float, `J` long, `B` boolean, `D` date, `U` minute, `P` timestamp, `SL` `FL` `JL` lists of those, `*` as given. Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `optional` (cast when present, never required) and `derived` (left to the module's own compose). A module may name layers of its own; `describe` lists them after these. Layers: `essential`, `market`, `instrument`, `scenario`, `run`, `derived`.
 
@@ -80,6 +81,13 @@ A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol
 
 ```bash
 make test-simtick-config
+```
+
+or in a q session, with `di.k4unit` on `QPATH`:
+
+```q
+q)k4unit:use`di.k4unit
+q)k4unit.moduletest`di.simtick.config
 ```
 
 ## License

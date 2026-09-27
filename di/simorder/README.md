@@ -361,7 +361,7 @@ make test-simorder
 or from a q session:
 
 ```q
-q)k4unit:use`local.k4unit
+q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simorder
 ```
 

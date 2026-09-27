@@ -185,6 +185,7 @@ The first trade is the opening auction (`cond` `O`), which has no aggressor.
 | `simtick.jumpvariance[cfg]` | The variance per day of the common jumps as the stock takes them |
 | `simtick.diffusionvol[cfg;share]` | The vol of the day's diffusion once the break's share and the common jumps are taken out |
 | `simtick.mixseed[a;b]` | A seed hashed from two integers (seeds related by arithmetic give correlated streams) |
+| `simtick.version` | The module's version, read from its `VERSION` file |
 | `simtick.describe[]` | Every parameter with its type, layer, group and description |
 
 ## Configuration
@@ -218,7 +219,7 @@ make test-simtick
 or in a q session:
 
 ```q
-q)k4unit:use`local.k4unit
+q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simtick
 ```
 
