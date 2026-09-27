@@ -1,12 +1,12 @@
 / di.simmarket - multi-day tick simulation over a trading calendar
-/ Runs di.simtick day after day: each day opens at the previous close moved
+/ runs di.simtick day after day: each day opens at the previous close moved
 / by an overnight return, has its own volatility and volume regime, closing
 / time and jump intensity, and its own seed, and the days are summarized
 / in a table from which any day can be regenerated alone
 
 / load simtick module
-simtick:use`di.simtick
-simconfig:use`di.simconfig
+simtick:use`di.simtick;
+simconfig:use`di.simconfig;
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -24,20 +24,26 @@ rng.normal:{[n]
   u:2 0N#1-m?1.0;
   r:sqrt -2f*log u 0;
   theta:2f*acos[-1]*u 1;
-  n#(r*cos theta),r*sin theta
+  :n#(r*cos theta),r*sin theta;
   };
 
 / modulus of the per-day seeds (a prime below 2^31)
-seedmod:2147483647
+seedmod:2147483647;
 
 / optional calendar columns, their CSV types and their meaning when null
-calcols:`closingtime`volmult`volumemult`jumpintensity
-calctypes:"UFFF"
+calcols:`closingtime`volmult`volumemult`jumpintensity;
+calctypes:"UFFF";
 
 
 / ============================================================
-/ VALIDATION
+/ validation
 / ============================================================
+
+nullcolumn:{[n;t]
+  / a column of n nulls for an optional calendar column left out: minutes
+  / for the closing time, floats for the others
+  :n#$[t="U";0Nu;0n];
+  };
 
 validate:{[calendar]
   / validate a calendar and return it as a table
@@ -58,8 +64,8 @@ validate:{[calendar]
   n:count dates;
   missing:calcols where not calcols in cols calendar;
   filled:calendar;
-  if[count missing; filled:calendar,'flip missing!{[n;t] n#$[t="U";0Nu;0n]}[n] each calctypes calcols?missing];
-  (`date,calcols) xcols filled
+  if[count missing; filled:calendar,'flip missing!.z.m.nullcolumn[n] each calctypes calcols?missing];
+  :(`date,calcols) xcols filled;
   };
 
 validatecfg:{[cfg]
@@ -81,12 +87,12 @@ validatecfg:{[cfg]
   if[not (0<=cfg`regimepersistence)&1>cfg`regimepersistence; '"validatecfg: regimepersistence must be between 0 and 1, 1 excluded"];
   if[0>min cfg`volregimesd`volumeregimesd; '"validatecfg: volregimesd and volumeregimesd must be zero or positive"];
   if[not cfg[`regimecorr] within -1 1; '"validatecfg: regimecorr must be between -1 and 1"];
-  cfg
+  :cfg;
   };
 
 
 / ============================================================
-/ SEEDS AND REGIMES
+/ seeds and regimes
 / ============================================================
 
 seeds:{[cfg;dates]
@@ -105,14 +111,20 @@ seeds:{[cfg;dates]
   symhash:sum ("j"$string cfg`sym)*1+til count string cfg`sym;
   dayseed:simtick.mixseed[regimeseed;n#symhash];
   gapseed:simtick.mixseed[dayseed;n#3];
-  ([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed)
+  :([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed);
   };
 
 innovation:{[seed]
   / two standard normals from the stream seeded by seed (no reseed when
   / null): the day's volatility and volume shocks before their correlation
   if[not null seed; system "S ",string seed];
-  .z.m.rng.normal 2
+  :.z.m.rng.normal 2;
+  };
+
+ar1step:{[st;e]
+  / one step of the standardized AR(1): the state (phi;x) moved by the
+  / innovation e, keeping the unit stationary variance
+  :(st 0;(st[0]*st 1)+e*sqrt 1-st[0]*st 0);
   };
 
 ar1:{[phi;eps]
@@ -120,7 +132,7 @@ ar1:{[phi;eps]
   / driven by the standard normal innovations eps, started at the first
   / innovation. The state carried through the scan is (phi;x), since a
   / scan over a projection with a float atom as initial value is refused by q
-  (first eps),last each {[st;e] (st 0;(st[0]*st 1)+e*sqrt 1-st[0]*st 0)}\[(phi;first eps);1_eps]
+  :(first eps),last each .z.m.ar1step\[(phi;first eps);1_eps];
   };
 
 regimes:{[cfg;calendar]
@@ -134,7 +146,7 @@ regimes:{[cfg;calendar]
   / multiplier is exp(sd*x-sd^2), whose square has mean 1, since volatility
   / enters the day as variance: the close-to-close variance then averages
   / the configured vol^2/tradingdays instead of exceeding it by exp(sd^2).
-  / Volume and volatility move together at regimecorr, as they do in
+  / volume and volatility move together at regimecorr, as they do in
   / markets, without being one thing
   / cfg: config dict (see validatecfg)
   / calendar: a calendar (see validate)
@@ -153,13 +165,19 @@ regimes:{[cfg;calendar]
   volsd:cfg`volregimesd;
   volumesd:cfg`volumeregimesd;
   r:calendar,'sd;
-  r:update volstate:x,volumestate:y,volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd from r;
-  update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r
+  r:update
+    volstate:x,
+    volumestate:y,
+    volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,
+    volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd
+  from
+    r;
+  :update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r;
   };
 
 
 / ============================================================
-/ OVERNIGHT GAP
+/ overnight gap
 / ============================================================
 
 overnight:{[cfg;ndays]
@@ -173,12 +191,12 @@ overnight:{[cfg;ndays]
   / returns: float log return
   v:cfg[`overnightshare]*(cfg[`vol]*cfg`vol)%cfg`tradingdays;
   v*:1+cfg[`gapdayweight]*ndays-1;
-  (neg 0.5*v)+sqrt[v]*first .z.m.rng.normal 1
+  :(neg 0.5*v)+sqrt[v]*first .z.m.rng.normal 1;
   };
 
 
 / ============================================================
-/ CORE SIMULATION
+/ core simulation
 / ============================================================
 
 daycfg:{[cfg;day;price]
@@ -203,7 +221,8 @@ daycfg:{[cfg;day;price]
   if[(simtick.session cfg)`hasbreak;
     if[day[`closingtime]<=cfg`breakend;
       dc[`closingtime]:day[`closingtime]&cfg`breakstart;
-      dc[`breakstart]:0Nu; dc[`breakend]:0Nu]];
+      dc[`breakstart]:0Nu;
+      dc[`breakend]:0Nu]];
   dc[`price]:price;
   dc[`vol]:cfg[`vol]*day[`volmult]*sqrt 1-cfg`overnightshare;
   session:simtick.tradingseconds[dc]%simtick.tradingseconds cfg;
@@ -220,7 +239,7 @@ daycfg:{[cfg;day;price]
   / to the day's regime, so the correction is never more than the day has
   dc[`jumpcomp]:day[`volmult]*day`volmult;
   dc[`seed]:day`dayseed;
-  dc
+  :dc;
   };
 
 daygap:{[cfg;day;prevdate]
@@ -242,7 +261,12 @@ daygap:{[cfg;day;prevdate]
   v*:1+cfg[`gapdayweight]*(day[`date]-prevdate)-1;
   z:first .z.m.rng.normal 1;
   if[common; z:(z*sqrt 1-sum b*b)+sum b*g];
-  (neg 0.5*v)+sqrt[v]*z
+  :(neg 0.5*v)+sqrt[v]*z;
+  };
+
+countvalues:{[cfgs;k]
+  / how many different values the configurations give a key
+  :count distinct cfgs[;k];
   };
 
 samefactors:{[cfgs]
@@ -251,8 +275,40 @@ samefactors:{[cfgs]
   if[not any simtick.hasfactors each value cfgs; :(::)];
   k:`factors`factorprofile`factorjumpintensities`factorjumpvols`openingtime`closingtime`breakstart`breakend`tradingdays`seed;
   k:k where k in key first value cfgs;
-  d:k where 1<{[cfgs;x] count distinct cfgs[;x]}[value cfgs] each k;
+  d:k where 1<.z.m.countvalues[value cfgs] each k;
   if[count d; '"the stocks of a run share the factors, so these keys must be the same for all of them - ",", " sv string d];
+  };
+
+dayvariance:{[cfg]
+  / the variance of a stock's close-to-close return
+  :(cfg[`vol]*cfg`vol)%cfg`tradingdays;
+  };
+
+breakshareof:{[cfg]
+  / the share of the intraday variance over the mid-day break, 0 on a
+  / market without one
+  :$[(simtick.session cfg)`hasbreak; cfg`breakshare; 0f];
+  };
+
+jumprates:{[cfg]
+  / the variance per day of each factor's jumps: intensity x jump vol^2
+  :cfg[`factorjumpintensities]*cfg[`factorjumpvols]*cfg`factorjumpvols;
+  };
+
+paircorrelation:{[p;i;k]
+  / the implied correlation of stocks i and k (see correlations)
+  / p: dict of per-stock lists: loadings b, jump loadings jl, day variance
+  /   v, and its parts g (overnight), bk (break), d (diffusion), and the
+  /   factors' jump rates lam
+  if[i=k; :1f];
+  gaps:sqrt[p[`g;i]*p[`g;k]]+sqrt[p[`bk;i]*p[`bk;k]]+sqrt p[`d;i]*p[`d;k];
+  jumps:sum p[`lam;i]*p[`jl;i]*p[`jl;k];
+  :((gaps*sum p[`b;i]*p[`b;k])+jumps)%sqrt p[`v;i]*p[`v;k];
+  };
+
+correlationrow:{[p;n;i]
+  / the implied correlations of stock i with each of the n stocks
+  :.z.m.paircorrelation[p;i] each til n;
   };
 
 correlations:{[cfgs]
@@ -273,20 +329,15 @@ correlations:{[cfgs]
   n:count c;
   b:simtick.loadings[;`factorloadings] each c;
   jl:simtick.loadings[;`jumploadings] each c;
-  v:{[x] (x[`vol]*x`vol)%x`tradingdays} each c;
+  v:.z.m.dayvariance each c;
   g:v*c[;`overnightshare];
-  sh:{[x] $[(simtick.session x)`hasbreak; x`breakshare; 0f]} each c;
+  sh:.z.m.breakshareof each c;
   bk:(v-g)*sh;
   j:simtick.jumpvariance each c;
   d:0f|(v-g+bk)-j;
-  lam:{[x] x[`factorjumpintensities]*x[`factorjumpvols]*x`factorjumpvols} each c;
+  lam:.z.m.jumprates each c;
   p:`b`jl`v`g`bk`d`lam!(b;jl;v;g;bk;d;lam);
-  m:{[p;i;k]
-    if[i=k; :1f];
-    gaps:sqrt[p[`g;i]*p[`g;k]]+sqrt[p[`bk;i]*p[`bk;k]]+sqrt p[`d;i]*p[`d;k];
-    jumps:sum p[`lam;i]*p[`jl;i]*p[`jl;k];
-    ((gaps*sum p[`b;i]*p[`b;k])+jumps)%sqrt p[`v;i]*p[`v;k]}[p];
-  ([]sym:key cfgs)!flip key[cfgs]!flip {[m;n;i] m[i] each til n}[m;n] each til n
+  :([]sym:key cfgs)!flip key[cfgs]!flip .z.m.correlationrow[p;n] each til n;
   };
 
 simday:{[cfg;day;price]
@@ -307,12 +358,14 @@ simday:{[cfg;day;price]
   / the first at or after the reopening; null on a day without a break
   breakret:0n;
   if[(simtick.session dc)`hasbreak;
-    bs:day[`date]+`timespan$dc`breakstart; be:day[`date]+`timespan$dc`breakend;
-    pb:exec last price from trades where time<bs; pa:exec first price from trades where time>=be;
+    bs:day[`date]+`timespan$dc`breakstart;
+    be:day[`date]+`timespan$dc`breakend;
+    pb:exec last price from trades where time<bs;
+    pa:exec first price from trades where time>=be;
     if[not (null pb)|null pa; breakret:log pa%pb]];
   row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;breakret:enlist breakret;
     trades:enlist count trades;volume:enlist sum trades`qty);
-  `trade`quote`day`close!(trades;quotes;row;close)
+  :`trade`quote`day`close!(trades;quotes;row;close);
   };
 
 runstep:{[cfg;state;day]
@@ -332,7 +385,7 @@ runstep:{[cfg;state;day]
   state[`days],:enlist update overnightret:gap from r`day;
   state[`prevdate]:date;
   state[`price]:r`close;
-  state
+  :state;
   };
 
 run:{[cfg;calendar;dbpath]
@@ -347,12 +400,12 @@ run:{[cfg;calendar;dbpath]
   /   on disk, dbpath: the standard date-partitioned database of writehdb,
   /   with this one stock
   /
-  / Example (in-memory):
+  / example (in-memory):
   /   cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
   /   result:simmarket.run[cfg;calendar;(::)]
   /   result`days
   /
-  / Example (persist to disk):
+  / example (persist to disk):
   /   simmarket.run[cfg;calendar;`:/tmp/mydb]
   cfg:.z.m.validatecfg cfg;
   if[not (::)~dbpath; :.z.m.writehdb[(enlist cfg`sym)!enlist cfg;calendar;dbpath;(`symbol$())!()]];
@@ -361,14 +414,14 @@ run:{[cfg;calendar;dbpath]
   init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
   state:.z.m.runstep[cfg]/[init;reg];
   days:raze state`days;
-  $[cfg`generatequotes;
+  :$[cfg`generatequotes;
     `trade`quote`days!(raze state`trade;raze state`quote;days);
-    `trade`days!(raze state`trade;days)]
+    `trade`days!(raze state`trade;days)];
   };
 
 
 / ============================================================
-/ CALENDAR AND CONFIG LOADING
+/ calendar and config loading
 / ============================================================
 
 loadcalendar:{[filepath]
@@ -383,7 +436,7 @@ loadcalendar:{[filepath]
   if[not `date in hdr; '"loadcalendar: the CSV must have a date column"];
   if[count unknown:hdr except `date,calcols; '"loadcalendar: unknown columns - ",", " sv string unknown];
   types:(`date,calcols)!"D",calctypes;
-  .z.m.validate (types hdr;enlist csv) 0: filepath
+  :.z.m.validate (types hdr;enlist csv) 0: filepath;
   };
 
 savecalendar:{[filepath;calendar]
@@ -392,51 +445,56 @@ savecalendar:{[filepath;calendar]
   / calendar: a calendar (see validate)
   / returns: filepath
   if[not -11h=type filepath; '"savecalendar: filepath must be a file handle"];
-  filepath 0: csv 0: .z.m.validate calendar
+  :filepath 0: csv 0: .z.m.validate calendar;
   };
 
 
 / ============================================================
-/ NYSE CALENDAR
+/ NYSE calendar
 / ============================================================
 / q dates count from 2000.01.01, a Saturday: d mod 7 is 0 Saturday, 1 Sunday, 2 Monday ... 6 Friday
 
 nyse.ymd:{[y;m;d]
   / the date of a year, month and day
-  (`date$`month$(12*y-2000)+m-1)+d-1
+  :(`date$`month$(12*y-2000)+m-1)+d-1;
   };
 
 nyse.easter:{[y]
   / Easter Sunday of a year (anonymous Gregorian algorithm)
   / the sums are spelled out with neg: q evaluates right to left, so a
   / chain like b-f+1 is b-(f+1)
-  a:y mod 19; b:y div 100; c:y mod 100; d:b div 4; e:b mod 4;
+  a:y mod 19;
+  b:y div 100;
+  c:y mod 100;
+  d:b div 4;
+  e:b mod 4;
   f:(b+8) div 25;
   g:(sum (b;1;neg f)) div 3;
   h:(sum (19*a;b;15;neg d;neg g)) mod 30;
-  i:c div 4; k:c mod 4;
+  i:c div 4;
+  k:c mod 4;
   l:(sum (32;2*e;2*i;neg h;neg k)) mod 7;
   m:(sum (a;11*h;22*l)) div 451;
   n:sum (h;l;114;neg 7*m);
-  .z.m.nyse.ymd[y;n div 31;1+n mod 31]
+  :.z.m.nyse.ymd[y;n div 31;1+n mod 31];
   };
 
 nyse.nthweekday:{[y;m;wd;n]
   / the nth weekday wd (2 Monday ... 5 Thursday) of month m of year y
   d0:.z.m.nyse.ymd[y;m;1];
-  d0+(7*n-1)+(wd-d0 mod 7) mod 7
+  :d0+(7*n-1)+(wd-d0 mod 7) mod 7;
   };
 
 nyse.lastweekday:{[y;m;wd]
   / the last weekday wd of month m of year y
   dl:.z.m.nyse.ymd[y;m+1;1]-1;
-  dl-((dl mod 7)-wd) mod 7
+  :dl-((dl mod 7)-wd) mod 7;
   };
 
 nyse.observed:{[d]
   / the weekday on which a holiday falling on d is observed: Friday before a
   / Saturday, Monday after a Sunday
-  $[0=d mod 7; d-1; 1=d mod 7; d+1; d]
+  :$[0=d mod 7; d-1; 1=d mod 7; d+1; d];
   };
 
 nyse.holidays:{[y]
@@ -453,7 +511,7 @@ nyse.holidays:{[y]
   h,:.z.m.nyse.observed .z.m.nyse.ymd[y;7;4];
   h,:.z.m.nyse.nthweekday[y;9;2;1],.z.m.nyse.nthweekday[y;11;5;4];
   h,:.z.m.nyse.observed .z.m.nyse.ymd[y;12;25];
-  asc h where not (h mod 7) in 0 1
+  :asc h where not (h mod 7) in 0 1;
   };
 
 nyse.halfdays:{[y]
@@ -461,7 +519,7 @@ nyse.halfdays:{[y]
   / July 3 and Christmas Eve when they are trading days
   hol:.z.m.nyse.holidays y;
   h:(1+.z.m.nyse.nthweekday[y;11;5;4]),.z.m.nyse.ymd[y;7;3],.z.m.nyse.ymd[y;12;24];
-  asc h where (not (h mod 7) in 0 1)&not h in hol
+  :asc h where (not (h mod 7) in 0 1)&not h in hol;
   };
 
 nysecalendar:{[from;to]
@@ -479,13 +537,18 @@ nysecalendar:{[from;to]
   half:raze .z.m.nyse.halfdays each years;
   d:from+til 1+to-from;
   d:d where (not (d mod 7) in 0 1)&not d in hol;
-  .z.m.validate ([]date:d;closingtime:?[d in half;13:00;16:00])
+  :.z.m.validate ([]date:d;closingtime:?[d in half;13:00;16:00]);
   };
 
 
 / ============================================================
-/ SEVERAL INSTRUMENTS
+/ several instruments
 / ============================================================
+
+composeone:{[market;instruments;scenarios;run;sym;sce]
+  / one instrument composed on its scenario
+  :simtick.compose[market;instruments sym;scenarios sce;run];
+  };
 
 compose:{[market;instruments;scenarios;scenario;run]
   / the configuration of each instrument of a multi-instrument run, one
@@ -504,7 +567,12 @@ compose:{[market;instruments;scenarios;scenario;run]
     '"compose: instruments not in the instrument table - ",", " sv string missing];
   if[count unknown:(distinct value scenario) where not (distinct value scenario) in exec name from scenarios;
     '"compose: scenarios not in the scenario table - ",", " sv string unknown];
-  syms!{[m;i;s;r;sym;sce] simtick.compose[m;i sym;s sce;r]}[market;instruments;scenarios;run]'[syms;value scenario]
+  :syms!.z.m.composeone[market;instruments;scenarios;run]'[syms;value scenario];
+  };
+
+dayswithsym:{[sym;r]
+  / the days table of one instrument's run with its sym column first
+  :`sym xcols update sym:sym from r`days;
   };
 
 runmany:{[cfgs;calendar;dbpath]
@@ -525,13 +593,13 @@ runmany:{[cfgs;calendar;dbpath]
   merged:(`symbol$())!();
   merged[`trade]:`time`sym xasc raze rs[;`trade];
   if[all `quote in/: key each rs; merged[`quote]:`time`sym xasc raze rs[;`quote]];
-  merged[`days]:`sym`date xasc raze {[sym;r] `sym xcols update sym:sym from r`days}'[key rs;value rs];
-  merged
+  merged[`days]:`sym`date xasc raze .z.m.dayswithsym'[key rs;value rs];
+  :merged;
   };
 
 
 / ============================================================
-/ THE OUTPUT DATABASE: ONE DAY OF ALL STOCKS AT A TIME
+/ the output database: one day of all stocks at a time
 / ============================================================
 / writehdb writes a standard compressed date-partitioned kdb+ database:
 /   dbpath/sym            the symbol enumeration shared by all partitions
@@ -545,17 +613,17 @@ runmany:{[cfgs;calendar;dbpath]
 /   dbpath/<date>/trade   all stocks that day, sorted by sym then time, `p#sym
 /   dbpath/<date>/quote   the same, when requested
 /   dbpath/<date>/days    one row per stock: regime, open, close, gap, trades, volume
-/ Every partition holds every requested table; days is written last, so a
+/ every partition holds every requested table; days is written last, so a
 / crash cannot leave a date looking complete. A complete date is skipped on
 / a rerun (its closes carried forward), an incomplete one is rewritten from
 / scratch, and a database built with another configuration is refused
 
-hdbdefaults:`tables`compression!(`trade`quote;17 5 3)
+hdbdefaults:`tables`compression!(`trade`quote;17 5 3);
 
 / the module's version, recorded in every database it writes next to the
 / git commit, so a database written from a copied module folder (no git
 / checkout) still carries a version
-moduleversion:"0.1.0"
+moduleversion:"0.1.0";
 
 version:{[]
   / the git commit of the code (with -dirty when the modules have
@@ -567,7 +635,7 @@ version:{[]
   h:@[system;"git -C ",root," rev-parse --short HEAD 2>/dev/null";()];
   if[not count h; :`unknown];
   dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simconfig 2>/dev/null";()];
-  `$first[h],$[dirty;"-dirty";""]
+  :`$first[h],$[dirty;"-dirty";""];
   };
 
 hdbopts:{[opts]
@@ -583,7 +651,7 @@ hdbopts:{[opts]
   if[not ()~o`compression; o[`compression]:`long$(),o`compression];
   if[not (()~o`compression)|3=count o`compression;
     '"writehdb: compression must be (logical block size;algorithm;level) or ()"];
-  o
+  :o;
   };
 
 saverun:{[dst;runcfg]
@@ -604,16 +672,24 @@ loadrun:{[dbpath]
   d:get f;
   opts:`tables`compression!(d`tables;d`compression);
   if[not d[`version]~.z.m.moduleversion;
-    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,": the same configuration and seeds reproduce it only with the same code"];
+    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,
+      ": the same configuration and seeds reproduce it only with the same code"];
   if[not d[`commit]=.z.m.version[];
-    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
-  `configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit)
+    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
+      string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
+  :`configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit);
   };
 
 symfile:{[dst]
   / the enumeration domain of a database as a symbol list (empty when new)
   f:.Q.dd[dst;`sym];
-  $[()~key f; `symbol$(); get f]
+  :$[()~key f; `symbol$(); get f];
+  };
+
+written:{[dst;date;name]
+  / whether a table of a date's partition has been written (its .d file
+  / is there)
+  :`.d in key .Q.par[dst;date;name];
   };
 
 complete:{[dst;date;names;syms]
@@ -622,7 +698,7 @@ complete:{[dst;date;names;syms]
   / returns: the days rows (with syms resolved) when complete, () otherwise
   dir:.Q.par[dst;date;`];
   if[()~key dir; :()];
-  ok:all {[dst;date;name] `.d in key .Q.par[dst;date;name]}[dst;date] each names,`days;
+  ok:all .z.m.written[dst;date] each names,`days;
   if[not ok; :()];
   days:@[get;.Q.par[dst;date;`days];()];
   if[not 98h=type days; :()];
@@ -630,7 +706,19 @@ complete:{[dst;date;names;syms]
   s:.z.m.symfile dst;
   days:update sym:s `long$sym from days;
   if[not (asc syms)~asc distinct days`sym; :()];
-  days
+  :days;
+  };
+
+setsplayed:{[path;t]
+  / a table written splayed at a path
+  .Q.dd[path;`] set t;
+  :(::);
+  };
+
+caught:{[e]
+  / the message of an error trapped, for the caller to signal once it has
+  / restored what it changed
+  :e;
   };
 
 writetable:{[dst;date;name;t;compression;sortcols]
@@ -642,9 +730,24 @@ writetable:{[dst;date;name;t;compression;sortcols]
   path:.Q.par[dst;date;name];
   zdbefore:@[value;`.z.zd;`unset];
   if[count compression; `.z.zd set compression];
-  r:@[{[p;t] .Q.dd[p;`] set t; ::}[path];t;{[e] e}];
+  r:@[.z.m.setsplayed path;t;.z.m.caught];
   $[`unset~zdbefore; if[count compression; system "x .z.zd"]; `.z.zd set zdbefore];
   if[10h=type r; 'r];
+  };
+
+stockday:{[cfgs;regs;o;state;i;sym]
+  / one stock's day of a database: its overnight gap, the day simulated
+  / with the quotes when they are written, and its row of days with its
+  / sym and its gap
+  / returns: dict `trade`quote`day`close (see simday)
+  cfg:cfgs sym;
+  day:regs[sym] i;
+  gap:.z.m.daygap[cfg;day;state`prevdate];
+  open:state[`price;sym]*exp gap;
+  cfg[`generatequotes]:`quote in o`tables;
+  r:.z.m.simday[cfg;day;open];
+  r[`day]:`sym xcols update sym:sym,overnightret:gap from r`day;
+  :r;
   };
 
 writeday:{[cfgs;regs;dst;o;state;i]
@@ -661,22 +764,19 @@ writeday:{[cfgs;regs;dst;o;state;i]
     state[`prevdate]:date;
     :state];
   system "rm -rf ",1_string .Q.par[dst;date;`];
-  one:{[cfgs;regs;o;state;date;i;sym]
-    cfg:cfgs sym; day:regs[sym] i;
-    gap:.z.m.daygap[cfg;day;state`prevdate];
-    open:state[`price;sym]*exp gap;
-    cfg[`generatequotes]:`quote in o`tables;
-    r:.z.m.simday[cfg;day;open];
-    r[`day]:`sym xcols update sym:sym,overnightret:gap from r`day;
-    r}[cfgs;regs;o;state;date;i];
-  rs:syms!one each syms;
+  rs:syms!.z.m.stockday[cfgs;regs;o;state;i] each syms;
   trade:raze rs[;`trade];
   .z.m.writetable[dst;date;`trade;trade;o`compression;`sym`time];
   if[`quote in o`tables; .z.m.writetable[dst;date;`quote;raze rs[;`quote];o`compression;`sym`time]];
   .z.m.writetable[dst;date;`days;delete date from raze rs[;`day];o`compression;enlist `sym];
   state[`price]:syms!rs[;`close] syms;
   state[`prevdate]:date;
-  state
+  :state;
+  };
+
+sameconfig:{[a;b]
+  / whether two configurations hold the same keys and values, in any order
+  :(asc[key a]#a)~asc[key b]#b;
   };
 
 writehdb:{[cfgs;calendar;dbpath;opts]
@@ -705,24 +805,28 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   runcfg:`configs`calendar`tables`compression`version`commit!(cfgs;0!calendar;o`tables;o`compression;.z.m.moduleversion;.z.m.version[]);
   if[not ()~key .Q.dd[dst;`simrun];
     old:.z.m.loadrun dst;
-    same:{[a;b] (asc[key a]#a)~asc[key b]#b};
-    if[not all same'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
+    if[not all .z.m.sameconfig'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
     if[not (asc key old`configs)~asc key cfgs; '"writehdb: ",string[dbpath]," holds a database built for other instruments"];
     if[not old[`opts]~o; '"writehdb: ",string[dbpath]," holds a database written with other tables or compression"];
-    if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on another calendar (a calendar can only be extended)"]];
+    if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on ",
+      "another calendar (a calendar can only be extended)"]];
   system "mkdir -p ",1_string dst;
   .z.m.saverun[dst;runcfg];
   regs:.z.m.regimes[;calendar] each cfgs;
   init:`prevdate`price!(0Nd;key[cfgs]!`float$value[cfgs][;`price]);
   .z.m.writeday[cfgs;regs;dst;o]/[init;til count calendar];
-  dbpath
+  :dbpath;
   };
 
 describe:{[]
   / the calendar keys of the configuration schema (the scenario layer's
   / days group), with their types and descriptions
-  ?[simtick.describe[];enlist (=;`group;enlist `days);0b;()]
+  / select from simtick.describe[] where group=`days
+  / (in functional form: the column's name, group, is a reserved word)
+  :?[simtick.describe[];enlist (=;`group;enlist `days);0b;()];
   };
 
 / export public interface
-export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
+export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;
+  writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;
+  nysecalendar;validate;validatecfg;describe]);

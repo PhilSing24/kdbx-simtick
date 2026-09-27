@@ -1,6 +1,6 @@
 / di.simconfig - layered configuration for the di.* simulators
 
-/ Four layers, composed in order, a later one overriding an earlier one:
+/ four layers, composed in order, a later one overriding an earlier one:
 /   market     how a market works (JSON, one file per market)
 /   instrument what makes a stock itself (a CSV row: sym, price, drift, vol,
 /              tradesperday, and any key it overrides)
@@ -11,7 +11,7 @@
 / every value by the schema's type, and throws on a missing key naming the
 / layer that should supply it. A module passes its own schema in.
 
-/ A schema is a dictionary key!(type;layer;group;description):
+/ a schema is a dictionary key!(type;layer;group;description):
 /   type   S symbol, F float, J long, B boolean, D date, U minute,
 /          P timestamp, and SL FL JL for lists of those; * keeps the value
 /   layer  essential (the instrument's required keys), market, instrument,
@@ -21,30 +21,36 @@
 /   group  a short label for the reference page
 
 
-layers:`essential`market`instrument`order`scenario`run`optional`derived
+layers:`essential`market`instrument`order`scenario`run`optional`derived;
+
+candidate:{[relative;dir]
+  / the handle of di/simconfig/<relative> under a directory of the module
+  / search path (the working directory when the entry is empty)
+  :hsym `$$[dir~"";"";dir,"/"],"di/simconfig/",relative;
+  };
 
 path:{[relative]
   / the first file at di/simconfig/<relative> in the module search path,
   / so the shipped market, instrument and scenario files are found from
   / any working directory; a loader takes any other path as well
-  cands:{[r;p] hsym `$$[p~"";"";p,"/"],"di/simconfig/",r}[relative] each .Q.m.SP;
+  cands:.z.m.candidate[relative] each .Q.m.SP;
   found:cands where not ()~/:key each cands;
   if[0=count found; '"path: not found in the module search path - ",relative];
-  first found
+  :first found;
   };
 
 
 / ============================================================
-/ TYPES
+/ types
 / ============================================================
 
 parseatom:{[base;s]
   / a value from a string (a CSV cell or a JSON string) by its type code
   s:(),s;
-  $[base="S"; `$s;
+  :$[base="S"; `$s;
     base="B"; (lower s) in ("1";"true";"yes";"y");
     base="*"; s;
-    base$s]
+    base$s];
   };
 
 castlist:{[base;v]
@@ -53,7 +59,7 @@ castlist:{[base;v]
   / would otherwise come back as a char atom)
   if[10h=abs type v; v:{(),x} each " " vs (),v];
   if[(0h=type v)&10h=abs type first v; :$[base="S"; `$v; base$v]];
-  $[base="S"; $[11h=abs type v; v; `$v]; base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v; v]
+  :$[base="S"; $[11h=abs type v; v; `$v]; base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v; v];
   };
 
 cast:{[t;v]
@@ -63,13 +69,13 @@ cast:{[t;v]
   if["L"=last t; :.z.m.castlist[base;v]];
   if[10h=abs type v; :.z.m.parseatom[base;v]];
   if[base="S"; :$[11h=abs type v; v; `$v]];
-  $[base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v;
-    base="D"; `date$v; base="U"; `minute$v; base="P"; `timestamp$v; v]
+  :$[base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v;
+    base="D"; `date$v; base="U"; `minute$v; base="P"; `timestamp$v; v];
   };
 
 isnull:{[v]
   / whether a value carries nothing: a null atom, an empty string or list
-  $[0>type v; null v; 0=count v]
+  :$[0>type v; null v; 0=count v];
   };
 
 nonnull:{[d]
@@ -77,18 +83,24 @@ nonnull:{[d]
   / row: an empty cell is no override)
   if[not 99h=type d; :(`symbol$())!()];
   k:(key d) where not .z.m.isnull each value d;
-  k!d k
+  :k!d k;
   };
 
 
 / ============================================================
-/ LOADERS
+/ loaders
 / ============================================================
+
+groupkeys:{[v]
+  / the keys of one top-level entry of a market file: the group's own
+  / dictionary, or nothing for a scalar
+  :$[99h=type v; v; (`symbol$())!()];
+  };
 
 flatten:{[d]
   / a JSON document's groups flattened into one dictionary; a top-level
   / scalar is kept as it is
-  raze {[v] $[99h=type v; v; (`symbol$())!()]} each value d
+  :raze .z.m.groupkeys each value d;
   };
 
 loadmarket:{[schema;filepath]
@@ -98,7 +110,15 @@ loadmarket:{[schema;filepath]
   d:.j.k raze read0 filepath;
   m:.z.m.flatten d;
   if[count unknown:(key m) except key schema; '"loadmarket: unknown keys - ",", " sv string unknown];
-  key[m]!.z.m.cast'[schema[key m][;0];value m]
+  :key[m]!.z.m.cast'[schema[key m][;0];value m];
+  };
+
+csvtype:{[schema;c]
+  / the type a CSV column is read with: the name column a symbol, list
+  / and starred types a string (compose casts them), the others by the
+  / schema
+  t:schema[c;0];
+  :$[c=`name; "S"; ("L"=last t) or "*"=first t; "*"; first t];
   };
 
 loadrows:{[schema;filepath;keycol]
@@ -110,11 +130,11 @@ loadrows:{[schema;filepath;keycol]
   hdr:`$csv vs first read0 filepath;
   if[not keycol in hdr; '"loadrows: the CSV must have a ",string[keycol]," column"];
   if[count unknown:hdr except keycol,key schema; '"loadrows: unknown columns - ",", " sv string unknown];
-  types:{[schema;c] t:schema[c;0]; $[c=`name; "S"; ("L"=last t) or "*"=first t; "*"; first t]}[schema] each hdr;
+  types:.z.m.csvtype[schema] each hdr;
   t:(types;enlist csv) 0: filepath;
   / keyed by a copy of the key column (id), so that a row taken by its key
   / still carries its sym or name among its values
-  `id xkey update id:t[keycol] from t
+  :`id xkey update id:t[keycol] from t;
   };
 
 loadinstruments:{[schema;filepath]
@@ -124,19 +144,19 @@ loadinstruments:{[schema;filepath]
   req:`price`drift`vol`tradesperday;
   if[count missing:req where not req in cols t; '"loadinstruments: missing columns - ",", " sv string missing];
   if[any raze null (0!t) req; '"loadinstruments: sym, price, drift, vol and tradesperday must be filled on every row"];
-  t
+  :t;
   };
 
 loadscenarios:{[schema;filepath]
   / the scenario layer: rows keyed by name
-  .z.m.loadrows[schema;filepath;`name]
+  :.z.m.loadrows[schema;filepath;`name];
   };
 
 loadvenues:{[filepath]
   / the venue reference (venues.csv): every venue code the market file can
   / use, keyed by code, with its full name, its type (lit, dark or trf) and
   / the code the TCA application uses for it (null when it has none yet).
-  / The engines never read it; exports map codes with it
+  / the engines never read it; exports map codes with it
   if[not -11h=type filepath; '"loadvenues: filepath must be a file handle"];
   hdr:`$csv vs first read0 filepath;
   if[not `code`name`type`tcacode~hdr; '"loadvenues: the columns must be code, name, type, tcacode"];
@@ -144,13 +164,18 @@ loadvenues:{[filepath]
   if[count[t]<>count distinct t`code; '"loadvenues: repeated codes"];
   if[any null t`code; '"loadvenues: every row needs a code"];
   if[not all t[`type] in `lit`dark`trf; '"loadvenues: type must be lit, dark or trf"];
-  `code xkey t
+  :`code xkey t;
   };
 
 
 / ============================================================
-/ COMPOSE, SAVE, RELOAD
+/ compose, save, reload
 / ============================================================
+
+keywithlayer:{[schema;k]
+  / a key with the layer that should supply it, for an error message
+  :string[k]," (",string[schema[k;1]]," layer)";
+  };
 
 compose:{[schema;market;instrument;scenario;run]
   / the flat configuration: market, then the instrument's filled entries,
@@ -167,8 +192,20 @@ compose:{[schema;market;instrument;scenario;run]
   cfg:key[cfg]!.z.m.cast'[schema[key cfg][;0];value cfg];
   need:(key schema) where not (value[schema][;1]) in `optional`derived;
   if[count missing:need where not need in key cfg;
-    '"compose: missing keys - ",", " sv {[schema;k] string[k]," (",string[schema[k;1]]," layer)"}[schema] each missing];
-  cfg
+    '"compose: missing keys - ",", " sv .z.m.keywithlayer[schema] each missing];
+  :cfg;
+  };
+
+writejson:{[filepath;cfg]
+  / a configuration written as one line of JSON
+  filepath 0: enlist .j.j cfg;
+  :(::);
+  };
+
+caught:{[e]
+  / the message of an error trapped, for the caller to signal once it has
+  / restored what it changed
+  :e;
   };
 
 saveconfig:{[filepath;cfg]
@@ -176,8 +213,9 @@ saveconfig:{[filepath;cfg]
   / from it alone (see loadconfig)
   if[not -11h=type filepath; '"saveconfig: filepath must be a file handle"];
   / floats written at full precision (.j.j follows \P), so the reload replays exactly
-  prec:system"P"; system"P 17";
-  r:@[{[f;c] f 0: enlist .j.j c; ::}[filepath;];cfg;{[e] e}];
+  prec:system"P";
+  system"P 17";
+  r:@[.z.m.writejson filepath;cfg;.z.m.caught];
   system"P ",string prec;
   if[10h=type r; 'r];
   };
@@ -188,7 +226,7 @@ loadconfig:{[schema;filepath]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
   d:.j.k raze read0 filepath;
   if[count unknown:(key d) except key schema; '"loadconfig: unknown keys - ",", " sv string unknown];
-  key[d]!.z.m.cast'[schema[key d][;0];value d]
+  :key[d]!.z.m.cast'[schema[key d][;0];value d];
   };
 
 describe:{[schema]
@@ -196,8 +234,8 @@ describe:{[schema]
   / group is a q keyword, so the column is built under another name and renamed
   t:([]param:key schema;typ:value[schema][;0];layer:value[schema][;1];grp:value[schema][;2];description:value[schema][;3]);
   t:update ord:(`essential`market`instrument`order`scenario`run`optional`derived)?layer from t;
-  `param`typ`layer`group`description xcol delete ord from `ord xasc t
+  :`param`typ`layer`group`description xcol delete ord from `ord xasc t;
   };
 
 / export public interface
-export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path])
+export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path]);
