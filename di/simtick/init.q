@@ -58,6 +58,19 @@ rng.normal:{[n;cfg]
   };
 
 
+rng.poissonterm:{[lams;u;st;m]
+  / one term of the inversion: the m-th term of the distribution is added
+  / to the cumulative one and the variate raised where the uniform is
+  / still above it
+  / lams: list of means; u: the uniforms; m: the term's index, from 1
+  / st: dict `term`cdf`k, the last term, the cumulative distribution and
+  /   the variates so far
+  / returns: the updated state
+  term:st[`term]*lams%m;
+  cdf:st[`cdf]+term;
+  :`term`cdf`k!(term;cdf;st[`k]+u>cdf);
+  };
+
 rng.poisson:{[lams;maxk]
   / Poisson variates with element-wise means, by inversion truncated at maxk
   / lams: list of means, non-negative
@@ -67,11 +80,9 @@ rng.poisson:{[lams;maxk]
   / the variate X is the number of k from 0 up with P(X<=k) below the uniform
   u:(count lams)?1.0;
   term:exp neg lams;
-  cdf:term;
-  k:`long$u>cdf;
-  m:1;
-  while[m<=maxk; term*:lams%m; cdf+:term; k+:u>cdf; m+:1];
-  k
+  st:`term`cdf`k!(term;term;`long$u>term);
+  st:.z.m.rng.poissonterm[lams;u]/[st;1+til maxk];
+  :st`k;
   };
 
 profile:{[cfg]
@@ -115,6 +126,16 @@ mixseed:{[a;b]
   $[(0>type a)&0>type b; f[a;b]; f'[a;b]]
   };
 
+poissonshort:{[duration;t]
+  / whether the waits drawn so far stop short of the end of the interval
+  :duration>last t;
+  };
+
+poissonblock:{[rate;m;t]
+  / another block of m exponential waits, after the last time drawn
+  :t,last[t]+sums neg log[1-m?1.0]%rate;
+  };
+
 poisson:{[rate;duration]
   / event times of a homogeneous Poisson process on [0;duration)
   / rate: events per unit time, positive
@@ -126,8 +147,8 @@ poisson:{[rate;duration]
   / 1-u keeps the uniform away from 0, so no wait is infinite
   m:1+`long$(rate*duration)+4*sqrt rate*duration;
   t:sums neg log[1-m?1.0]%rate;
-  while[duration>last t; t,:last[t]+sums neg log[1-m?1.0]%rate];
-  t where t<duration
+  t:.z.m.poissonblock[rate;m]/[.z.m.poissonshort duration;t];
+  :t where t<duration;
   };
 
 hawkes.children:{[params;parents]
