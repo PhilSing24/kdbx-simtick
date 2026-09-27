@@ -209,7 +209,8 @@ daycfg:{[cfg;day;price]
   if[(simtick.session cfg)`hasbreak;
     if[day[`closingtime]<=cfg`breakend;
       dc[`closingtime]:day[`closingtime]&cfg`breakstart;
-      dc[`breakstart]:0Nu; dc[`breakend]:0Nu]];
+      dc[`breakstart]:0Nu;
+      dc[`breakend]:0Nu]];
   dc[`price]:price;
   dc[`vol]:cfg[`vol]*day[`volmult]*sqrt 1-cfg`overnightshare;
   session:simtick.tradingseconds[dc]%simtick.tradingseconds cfg;
@@ -313,8 +314,10 @@ simday:{[cfg;day;price]
   / the first at or after the reopening; null on a day without a break
   breakret:0n;
   if[(simtick.session dc)`hasbreak;
-    bs:day[`date]+`timespan$dc`breakstart; be:day[`date]+`timespan$dc`breakend;
-    pb:exec last price from trades where time<bs; pa:exec first price from trades where time>=be;
+    bs:day[`date]+`timespan$dc`breakstart;
+    be:day[`date]+`timespan$dc`breakend;
+    pb:exec last price from trades where time<bs;
+    pa:exec first price from trades where time>=be;
     if[not (null pb)|null pa; breakret:log pa%pb]];
   row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;breakret:enlist breakret;
     trades:enlist count trades;volume:enlist sum trades`qty);
@@ -416,11 +419,16 @@ nyse.easter:{[y]
   / Easter Sunday of a year (anonymous Gregorian algorithm)
   / the sums are spelled out with neg: q evaluates right to left, so a
   / chain like b-f+1 is b-(f+1)
-  a:y mod 19; b:y div 100; c:y mod 100; d:b div 4; e:b mod 4;
+  a:y mod 19;
+  b:y div 100;
+  c:y mod 100;
+  d:b div 4;
+  e:b mod 4;
   f:(b+8) div 25;
   g:(sum (b;1;neg f)) div 3;
   h:(sum (19*a;b;15;neg d;neg g)) mod 30;
-  i:c div 4; k:c mod 4;
+  i:c div 4;
+  k:c mod 4;
   l:(sum (32;2*e;2*i;neg h;neg k)) mod 7;
   m:(sum (a;11*h;22*l)) div 451;
   n:sum (h;l;114;neg 7*m);
@@ -670,7 +678,8 @@ writeday:{[cfgs;regs;dst;o;state;i]
     :state];
   system "rm -rf ",1_string .Q.par[dst;date;`];
   one:{[cfgs;regs;o;state;date;i;sym]
-    cfg:cfgs sym; day:regs[sym] i;
+    cfg:cfgs sym;
+    day:regs[sym] i;
     gap:.z.m.daygap[cfg;day;state`prevdate];
     open:state[`price;sym]*exp gap;
     cfg[`generatequotes]:`quote in o`tables;
