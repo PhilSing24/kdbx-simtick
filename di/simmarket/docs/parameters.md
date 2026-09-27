@@ -7,6 +7,7 @@ The calendar keys belong to the scenario layer of `di.simtick`'s configuration (
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
 | `overnightshare` | float | di.simmarket: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
+| `breakshare` | float | share of a trading day's variance that occurs over the mid-day break, between 0 and 1 (1 excluded), applied to the mid at the reopening; ignored without a break | 0.05 |
 | `gapdayweight` | float | di.simmarket: weight of each calendar day beyond the first in an overnight gap's variance | 0.25 |
 | `regimepersistence` | float | di.simmarket: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded) | 0.7 |
 | `regimecorr` | float | di.simmarket: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |

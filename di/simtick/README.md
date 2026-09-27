@@ -37,6 +37,26 @@ The shipped market file and instruments are calibrated for **US large-cap stocks
 
 **Futures markets** behave differently: they are most active in the last minutes before the close, with the tightest spreads then and wider spreads at midday. A `profile` with a large last weight and the spread multipliers get close to that; set the auction percentages to 0.
 
+### Sessions
+
+A market may have one mid-day break, as SGX and HKEX do. The market file sets `breakstart` and `breakend` (null for the US) next to `openingtime` and `closingtime`, and the engine then works in trading time, the break removed:
+
+- `tradesperday` and the `profile` span the sessions only. SGX trades 7 hours, so its 14 profile bins are half hours of trading and the bin after the break carries the post-lunch spike.
+- No trade and no quote falls in the break; the last quote stays in force through it.
+- The mid takes a gap over the break: a normal return with variance `breakshare` of the day's (a scenario key, 0.05 shipped), the rest of the day running on what is left, so the close-to-close volatility is still the configured `vol`.
+- A reopening print at `breakend`, condition code `B`, prints `breakauctionpct` of the continuous volume at the afternoon's first mid, and the spread's open multiplier decays again from the reopening.
+
+```q
+q)sgx:simtick.loadmarket `:di/simconfig/markets/sgx.json
+q)ins:simtick.loadinstruments `:di/simconfig/instruments_sg.csv
+q)cfg:simtick.compose[sgx;ins`D05;scenarios`normal;(enlist `tradingdate)!enlist 2026.08.18]
+q)select from (simtick.run cfg)`trade where cond in `O`B`C
+```
+
+Shipped markets: `us_largecap.json` (one session), `sgx.json` (09:00 to 12:00 and 13:00 to 17:00) and `hkex.json` (09:30 to 12:00 and 13:00 to 16:00), with `instruments_sg.csv` and `instruments_hk.csv`. Board lots are instrument configuration: a Hong Kong row sets `roundlots` and `quotelot` to its board lot (400 for 0005), a trade below the smallest round lot is an odd lot (`cond` `I`), and odd lots print on the same tape.
+
+What the sessions do not model, on purpose: the auction phases (order input, no-cancel, random match, trade at close) are one print each; there is no pre-market or after-hours trading; times are the exchange's local time, with no time zones or daylight saving; `ticksize` is one value per instrument, set for the price band the stock trades in (the exchanges' price-dependent tick tables are not applied, and a multi-day run drifting across a band keeps its tick); holiday calendars for SGX and HKEX are supplied as a calendar CSV.
+
 ### Use cases
 
 **Stress testing and scenarios**: generate severe but plausible days. Lower `tradesperday` for a liquidity drought, use `pricemodel` `jump` for gap moves, or raise `vol` for turbulent markets, and see how your systems behave.
@@ -195,7 +215,8 @@ q)k4unit.moduletest`di.simtick
 | Describe | 5 | The parameter list, the essential five first |
 | Constant quantity | 2 | All sizes equal `avgqty` |
 | Reproducibility | 1 | The same seed gives the same output |
-| **Total** | **145** | |
+| Sessions | 29 | Trading seconds and the wall clock with and without a break; no trade or quote in the break; the reopening print (time, quantity, venue, price, code `B`); the profile in trading time; the derived intensity within 2% over two sessions; `breakshare` puts variance over the break; validation of the break; HKEX board lots (round lots, odd lots, quote sizes, tick); the US odd-lot rule unchanged |
+| **Total** | **174** | |
 
 ## Documentation
 
