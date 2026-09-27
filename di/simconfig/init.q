@@ -36,7 +36,7 @@ path:{[relative]
   cands:.z.m.candidate[relative] each .Q.m.SP;
   found:cands where not ()~/:key each cands;
   if[0=count found; '"path: not found in the module search path - ",relative];
-  first found
+  :first found;
   };
 
 
@@ -47,10 +47,10 @@ path:{[relative]
 parseatom:{[base;s]
   / a value from a string (a CSV cell or a JSON string) by its type code
   s:(),s;
-  $[base="S"; `$s;
+  :$[base="S"; `$s;
     base="B"; (lower s) in ("1";"true";"yes";"y");
     base="*"; s;
-    base$s]
+    base$s];
   };
 
 castlist:{[base;v]
@@ -59,7 +59,7 @@ castlist:{[base;v]
   / would otherwise come back as a char atom)
   if[10h=abs type v; v:{(),x} each " " vs (),v];
   if[(0h=type v)&10h=abs type first v; :$[base="S"; `$v; base$v]];
-  $[base="S"; $[11h=abs type v; v; `$v]; base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v; v]
+  :$[base="S"; $[11h=abs type v; v; `$v]; base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v; v];
   };
 
 cast:{[t;v]
@@ -69,13 +69,13 @@ cast:{[t;v]
   if["L"=last t; :.z.m.castlist[base;v]];
   if[10h=abs type v; :.z.m.parseatom[base;v]];
   if[base="S"; :$[11h=abs type v; v; `$v]];
-  $[base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v;
-    base="D"; `date$v; base="U"; `minute$v; base="P"; `timestamp$v; v]
+  :$[base="F"; `float$v; base="J"; `long$v; base="B"; `boolean$v;
+    base="D"; `date$v; base="U"; `minute$v; base="P"; `timestamp$v; v];
   };
 
 isnull:{[v]
   / whether a value carries nothing: a null atom, an empty string or list
-  $[0>type v; null v; 0=count v]
+  :$[0>type v; null v; 0=count v];
   };
 
 nonnull:{[d]
@@ -83,7 +83,7 @@ nonnull:{[d]
   / row: an empty cell is no override)
   if[not 99h=type d; :(`symbol$())!()];
   k:(key d) where not .z.m.isnull each value d;
-  k!d k
+  :k!d k;
   };
 
 
@@ -100,7 +100,7 @@ groupkeys:{[v]
 flatten:{[d]
   / a JSON document's groups flattened into one dictionary; a top-level
   / scalar is kept as it is
-  raze .z.m.groupkeys each value d
+  :raze .z.m.groupkeys each value d;
   };
 
 loadmarket:{[schema;filepath]
@@ -110,7 +110,7 @@ loadmarket:{[schema;filepath]
   d:.j.k raze read0 filepath;
   m:.z.m.flatten d;
   if[count unknown:(key m) except key schema; '"loadmarket: unknown keys - ",", " sv string unknown];
-  key[m]!.z.m.cast'[schema[key m][;0];value m]
+  :key[m]!.z.m.cast'[schema[key m][;0];value m];
   };
 
 csvtype:{[schema;c]
@@ -134,7 +134,7 @@ loadrows:{[schema;filepath;keycol]
   t:(types;enlist csv) 0: filepath;
   / keyed by a copy of the key column (id), so that a row taken by its key
   / still carries its sym or name among its values
-  `id xkey update id:t[keycol] from t
+  :`id xkey update id:t[keycol] from t;
   };
 
 loadinstruments:{[schema;filepath]
@@ -144,12 +144,12 @@ loadinstruments:{[schema;filepath]
   req:`price`drift`vol`tradesperday;
   if[count missing:req where not req in cols t; '"loadinstruments: missing columns - ",", " sv string missing];
   if[any raze null (0!t) req; '"loadinstruments: sym, price, drift, vol and tradesperday must be filled on every row"];
-  t
+  :t;
   };
 
 loadscenarios:{[schema;filepath]
   / the scenario layer: rows keyed by name
-  .z.m.loadrows[schema;filepath;`name]
+  :.z.m.loadrows[schema;filepath;`name];
   };
 
 loadvenues:{[filepath]
@@ -164,7 +164,7 @@ loadvenues:{[filepath]
   if[count[t]<>count distinct t`code; '"loadvenues: repeated codes"];
   if[any null t`code; '"loadvenues: every row needs a code"];
   if[not all t[`type] in `lit`dark`trf; '"loadvenues: type must be lit, dark or trf"];
-  `code xkey t
+  :`code xkey t;
   };
 
 
@@ -193,7 +193,7 @@ compose:{[schema;market;instrument;scenario;run]
   need:(key schema) where not (value[schema][;1]) in `optional`derived;
   if[count missing:need where not need in key cfg;
     '"compose: missing keys - ",", " sv .z.m.keywithlayer[schema] each missing];
-  cfg
+  :cfg;
   };
 
 writejson:{[filepath;cfg]
@@ -226,7 +226,7 @@ loadconfig:{[schema;filepath]
   if[not -11h=type filepath; '"loadconfig: filepath must be a file handle"];
   d:.j.k raze read0 filepath;
   if[count unknown:(key d) except key schema; '"loadconfig: unknown keys - ",", " sv string unknown];
-  key[d]!.z.m.cast'[schema[key d][;0];value d]
+  :key[d]!.z.m.cast'[schema[key d][;0];value d];
   };
 
 describe:{[schema]
@@ -234,7 +234,7 @@ describe:{[schema]
   / group is a q keyword, so the column is built under another name and renamed
   t:([]param:key schema;typ:value[schema][;0];layer:value[schema][;1];grp:value[schema][;2];description:value[schema][;3]);
   t:update ord:(`essential`market`instrument`order`scenario`run`optional`derived)?layer from t;
-  `param`typ`layer`group`description xcol delete ord from `ord xasc t
+  :`param`typ`layer`group`description xcol delete ord from `ord xasc t;
   };
 
 / export public interface

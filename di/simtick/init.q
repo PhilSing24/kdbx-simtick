@@ -44,7 +44,7 @@ rng.boxmuller:{[n]
   u:2 0N#u;
   r:sqrt -2f*log u 0;
   theta:2f*acos[-1]*u 1;
-  n#(r*cos theta),r*sin theta
+  :n#(r*cos theta),r*sin theta;
   };
 
 rng.normal:{[n;cfg]
@@ -53,8 +53,8 @@ rng.normal:{[n;cfg]
   / cfg: config dict containing `rngmodel
   / returns: list of n standard normal floats
   model:cfg`rngmodel;
-  $[model=`pseudo; .z.m.rng.boxmuller[n];
-    '"rng.normal: unknown rngmodel - ",string model]
+  :$[model=`pseudo; .z.m.rng.boxmuller[n];
+    '"rng.normal: unknown rngmodel - ",string model];
   };
 
 
@@ -93,7 +93,7 @@ profile:{[cfg]
   p:cfg`profile;
   w:$[10h=abs type p; "F"$" " vs (),p; `float$(),p];
   if[(0=count w) or any null w; '"profile: must be a list of numbers (a space-separated string in the CSV)"];
-  w
+  :w;
   };
 
 shape:{[cfg;progress]
@@ -110,7 +110,7 @@ shape:{[cfg;progress]
   if[1=n; :$[0>type progress; first w; (count progress)#first w]];
   x:0f|(n-1)&(progress*n)-0.5;
   i:(n-2)&`long$floor x;
-  w[i]+(x-i)*w[i+1]-w[i]
+  :w[i]+(x-i)*w[i+1]-w[i];
   };
 
 mixone:{[a;b]
@@ -169,7 +169,7 @@ hawkes.children:{[params;parents]
   if[0=n; :`float$()];
   k:count .z.m.poisson[1f;n*params[`alpha]%params`beta];
   t:parents[k?n]+neg log[1-k?1.0]%params`beta;
-  asc t where t<params`duration
+  :asc t where t<params`duration;
   };
 
 session:{[cfg]
@@ -184,7 +184,7 @@ session:{[cfg]
   hasbreak:$[`breakstart in key cfg; not null cfg`breakstart; 0b];
   breaklen:$[hasbreak; ((`timespan$cfg`breakend)-`timespan$cfg`breakstart)%nspersec; 0f];
   offset:$[hasbreak; ((`timespan$cfg`breakstart)-open)%nspersec; 0w];
-  `open`close`hasbreak`breakoffset`breaklen`seconds!(open;close;hasbreak;offset;breaklen;((close-open)%nspersec)-breaklen)
+  :`open`close`hasbreak`breakoffset`breaklen`seconds!(open;close;hasbreak;offset;breaklen;((close-open)%nspersec)-breaklen);
   };
 
 tradingseconds:{[cfg] (.z.m.session cfg)`seconds};
@@ -193,7 +193,7 @@ walltime:{[cfg;secs]
   / trading seconds from the open to seconds from the open on the wall
   / clock: the break is inserted before every time at or after it
   s:.z.m.session cfg;
-  secs+s[`breaklen]*secs>=s`breakoffset
+  :secs+s[`breaklen]*secs>=s`breakoffset;
   };
 
 hawkes.process:{[cfg;baseintensity;extra]
@@ -226,7 +226,7 @@ hawkes.process:{[cfg;baseintensity;extra]
   / offspring, generation by generation, until a generation is empty
   params:`alpha`beta`duration!(cfg`alpha;cfg`beta;duration);
   generations:.z.m.hawkes.children[params]\[{0<count x};immigrants];
-  asc `float$raze generations
+  :asc `float$raze generations;
   };
 
 hawkes.shock:{[cfg;jumptimes;n]
@@ -239,7 +239,7 @@ hawkes.shock:{[cfg;jumptimes;n]
   / returns: ascending times in seconds from open
   if[(0=count jumptimes) or 0=n; :`float$()];
   parents:jumptimes where (count jumptimes)#n;
-  asc parents+neg log[1-(count parents)?1.0]*60*cfg`jumpburstminutes
+  :asc parents+neg log[1-(count parents)?1.0]*60*cfg`jumpburstminutes;
   };
 
 arrivals:{[cfg]
@@ -252,7 +252,7 @@ arrivals:{[cfg]
   /   baseintensity, alpha, beta, openingtime, closingtime, profile
   reqkeys:`baseintensity`alpha`beta`openingtime`closingtime`profile;
   .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
-  .z.m.hawkes.process[cfg;cfg`baseintensity;`float$()]
+  :.z.m.hawkes.process[cfg;cfg`baseintensity;`float$()];
   };
 
 gbm:{[s;r;eps;t]
@@ -262,7 +262,7 @@ gbm:{[s;r;eps;t]
   / eps: standard normal random variate
   / t: time step in years
   / returns: multiplicative return factor exp((r - 0.5*s^2)*t + s*sqrt(t)*eps)
-  exp (t*r-.5*s*s)+eps*s*sqrt t
+  :exp (t*r-.5*s*s)+eps*s*sqrt t;
   };
 
 diffusion:{[cfg;dts]
@@ -272,7 +272,7 @@ diffusion:{[cfg;dts]
   /   point at the start price)
   / returns: multiplicative factor per step
   eps:.z.m.rng.normal[count dts;cfg];
-  .z.m.gbm[cfg`vol;cfg`drift;eps;dts]
+  :.z.m.gbm[cfg`vol;cfg`drift;eps;dts];
   };
 
 jump.events:{[cfg;duration]
@@ -284,7 +284,7 @@ jump.events:{[cfg;duration]
   /   the multiplicative jump exp(jumpmean+jumpvol*N)
   n:first .z.m.rng.poisson[enlist `float$cfg`jumpintensity;40];
   times:asc n?`float$duration;
-  ([]time:times;factor:exp cfg[`jumpmean]+cfg[`jumpvol]*.z.m.rng.normal[n;cfg])
+  :([]time:times;factor:exp cfg[`jumpmean]+cfg[`jumpvol]*.z.m.rng.normal[n;cfg]);
   };
 
 clocksteps:{[cfg;times]
@@ -300,9 +300,9 @@ clocksteps:{[cfg;times]
   /   follows the intraday profile and rises in bursts (and clusters), as it
   /   does in a market
   n:count times;
-  $[`transaction=`calendar^cfg`clock;
+  :$[`transaction=`calendar^cfg`clock;
     0f,(n-1)#1%cfg[`tradingdays]*1|n-1;
-    (0f,1_deltas times)%cfg[`tradingdays]*.z.m.tradingseconds cfg]
+    (0f,1_deltas times)%cfg[`tradingdays]*.z.m.tradingseconds cfg];
   };
 
 / ============================================================
@@ -323,7 +323,7 @@ factorseedfor:{[seed;date]
   / the factor seed of a date: from the run seed and the date alone,
   / hashed (see mixseed) so the factors' stream is independent of every
   / stock's own
-  $[null seed; 0N; .z.m.mixseed[.z.m.mixseed[seed;`long$date];5]]
+  :$[null seed; 0N; .z.m.mixseed[.z.m.mixseed[seed;`long$date];5]];
   };
 
 loadings:{[cfg;k]
@@ -345,12 +345,12 @@ loadings:{[cfg;k]
   if[any null vals; '"loadings: ",string[k]," has a value that is not a number - ",v];
   if[count unknown:names except f; '"loadings: ",string[k]," names factors the market does not have - ",", " sv string unknown];
   if[count[names]<>count distinct names; '"loadings: ",string[k]," names a factor twice - ",v];
-  @[z;f?names;:;vals]
+  :@[z;f?names;:;vals];
   };
 
 hasfactors:{[cfg]
   / whether the stock takes anything from the factors
-  any 0<>.z.m.loadings[cfg;`factorloadings],.z.m.loadings[cfg;`jumploadings]
+  :any 0<>.z.m.loadings[cfg;`factorloadings],.z.m.loadings[cfg;`jumploadings];
   };
 
 factorgaps:{[cfg]
@@ -360,7 +360,7 @@ factorgaps:{[cfg]
   / returns: dict `overnight`breakgap, a float per factor each
   k:count cfg`factors;
   if[not null cfg`factorseed; system "S ",string cfg`factorseed];
-  `overnight`breakgap!(.z.m.rng.normal[k;cfg];.z.m.rng.normal[k;cfg])
+  :`overnight`breakgap!(.z.m.rng.normal[k;cfg];.z.m.rng.normal[k;cfg]);
   };
 
 factorpath:{[cfg;w;nsec;i]
@@ -394,7 +394,7 @@ factorday:{[cfg]
   path:.z.m.factorpath[cfg;w;nsec] each til k;
   n:.z.m.rng.poisson[`float$cfg`factorjumpintensities;40];
   jumps:raze .z.m.factorjumps[cfg;nsec;n] each til k;
-  g,`path`variance`jumps!(path;0f,sums w;`time xasc jumps)
+  :g,`path`variance`jumps!(path;0f,sums w;`time xasc jumps);
   };
 
 jumpvariance:{[cfg]
@@ -403,7 +403,7 @@ jumpvariance:{[cfg]
   / taken out of the stock's diffusion, so vol stays the volatility of the
   / close-to-close return with the common jumps in it
   jl:.z.m.loadings[cfg;`jumploadings];
-  $[any 0<>jl; sum cfg[`factorjumpintensities]*jl*jl*cfg[`factorjumpvols]*cfg`factorjumpvols; 0f]
+  :$[any 0<>jl; sum cfg[`factorjumpintensities]*jl*jl*cfg[`factorjumpvols]*cfg`factorjumpvols; 0f];
   };
 
 diffusionvol:{[cfg;share]
@@ -420,7 +420,7 @@ diffusionvol:{[cfg;share]
   v:(cfg[`vol]*cfg[`vol]*1-share)-comp*j*cfg`tradingdays;
   if[v<=0; '"the common jumps carry more variance (",string[j]," a day) than the day of ",string[cfg`sym],": lower ",
     "its jumploadings or the factors' jump intensities and vols"];
-  sqrt v
+  :sqrt v;
   };
 
 commonjumps:{[cfg;fd]
@@ -430,7 +430,7 @@ commonjumps:{[cfg;fd]
   jl:.z.m.loadings[cfg;`jumploadings];
   j:fd`jumps;
   j:select from j where 0<>jl factor;
-  ([]time:j`time;factor:exp jl[j`factor]*j`size)
+  :([]time:j`time;factor:exp jl[j`factor]*j`size);
   };
 
 pricepath:{[cfg;times;jumps]
@@ -468,7 +468,7 @@ pricepath:{[cfg;times;jumps]
     if[common; z:(own*z)+sum b*fd`breakgap];
     gap:(neg 0.5*v)+sqrt[v]*z;
     path*:exp gap*times>=s`breakoffset];
-  path
+  :path;
   };
 
 price:{[cfg;times]
@@ -493,7 +493,7 @@ price:{[cfg;times]
     if[not null cfg`seed; system "S ",string cfg`seed]];
   jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;.z.m.tradingseconds cfg]; ([]time:`float$();factor:`float$())];
   if[`factorday in key cfg; jumps:`time xasc jumps,.z.m.commonjumps[cfg;cfg`factorday]];
-  .z.m.pricepath[cfg;times;jumps]
+  :.z.m.pricepath[cfg;times;jumps];
   };
 
 qty.constant:{[n;cfg]
@@ -501,7 +501,7 @@ qty.constant:{[n;cfg]
   / n: number of quantities
   / cfg: config dict with `qty
   / returns: list of n identical quantities
-  n#cfg`avgqty
+  :n#cfg`avgqty;
   };
 
 qty.lognormal:{[n;cfg]
@@ -513,7 +513,7 @@ qty.lognormal:{[n;cfg]
   qtyvol:cfg`qtyvol;
   mu:log[avgqty]-0.5*qtyvol*qtyvol;
   eps:.z.m.rng.normal[n;cfg];
-  `long$1|floor exp mu+qtyvol*eps
+  :`long$1|floor exp mu+qtyvol*eps;
   };
 
 qty.mixture:{[n;cfg]
@@ -531,7 +531,7 @@ qty.mixture:{[n;cfg]
   rq:cfg[`roundlots] (sums cfg`roundlotweights) binr n?1.0;
   bq:floor 0.5+cfg[`blockqty]*exp cfg[`blockqtyvol]*.z.m.rng.normal[n;cfg];
   iq:.z.m.qty.lognormal[n;cfg];
-  1|?[isround;rq;?[isblock;bq;iq]]
+  :1|?[isround;rq;?[isblock;bq;iq]];
   };
 
 qty.mixturemean:{[cfg]
@@ -559,10 +559,10 @@ qty.gen:{[n;cfg]
   / cfg: config dict with `qtymodel and model-specific params
   / returns: list of n quantities
   model:cfg`qtymodel;
-  $[model=`constant;  .z.m.qty.constant[n;cfg];
+  :$[model=`constant;  .z.m.qty.constant[n;cfg];
     model=`lognormal; .z.m.qty.lognormal[n;cfg];
     model=`mixture;   .z.m.qty.mixture[n;cfg];
-    '"qty.gen: unknown qtymodel - ",string model]
+    '"qty.gen: unknown qtymodel - ",string model];
   };
 
 quote.seeds:{[cfg;arrs]
@@ -577,7 +577,7 @@ quote.seeds:{[cfg;arrs]
   n:count arrs;
   k:count .z.m.poisson[1f;n*cfg[`quotetradelink]*cfg[`quotespertrade]*1-cfg[`alpha]%cfg`beta];
   if[0=k; :`float$()];
-  asc arrs[k?n]+neg log[1-k?1.0]%cfg`beta
+  :asc arrs[k?n]+neg log[1-k?1.0]%cfg`beta;
   };
 
 quote.activity:{[cfg;quotearrs]
@@ -596,7 +596,7 @@ quote.activity:{[cfg;quotearrs]
   rate:cfg[`quotespertrade]*cfg[`baseintensity]*.z.m.shape[cfg;quotearrs%duration]%1-cfg[`alpha]%cfg`beta;
   ratio:(1+cnt)%1+rate*w&quotearrs;
   clip:cfg`activityclip;
-  xexp[clip[0]|ratio&clip[1];cfg`spreadactivity]
+  :xexp[clip[0]|ratio&clip[1];cfg`spreadactivity];
   };
 
 quote.generate:{[cfg;times;mids;activity]
@@ -633,7 +633,7 @@ quote.generate:{[cfg;times;mids;activity]
   lot:cfg`quotelot;
   bidsize:lot*1|floor 0.5+bidsize%lot;
   asksize:lot*1|floor 0.5+asksize%lot;
-  ([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize)
+  :([]time:times;bid:bid;ask:ask;bidsize:bidsize;asksize:asksize);
   };
 
 flow.generate:{[cfg;n]
@@ -647,7 +647,7 @@ flow.generate:{[cfg;n]
   flips:(n?1.0)>cfg`sidepersistence;
   flips[0]:0b;
   sign:(1-2*first 1?2)*1-2*(sums flips) mod 2;
-  `sign`qty!(sign;.z.m.qty.gen[n;cfg])
+  :`sign`qty!(sign;.z.m.qty.gen[n;cfg]);
   };
 
 flow.decay:{[e;dt;a]
@@ -680,7 +680,7 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
   permcum:sums perm*imp;
   / at each quote time: the parts left from the last trade before it
   j:tradetimes bin quotetimes;
-  0f^permcum[j]+trans[j]*exp neg lam*quotetimes-tradetimes j
+  :0f^permcum[j]+trans[j]*exp neg lam*quotetimes-tradetimes j;
   };
 
 trade.generate:{[cfg;times;quotes;flow]
@@ -723,7 +723,7 @@ trade.generate:{[cfg;times;quotes;flow]
   venue:?[isoff;`TRF;lit];
 
   qty:flow`qty;
-  ([]time:times;price:price;qty:qty;aggressor:?[sign>0;`B;`S];cond:?[qty<min cfg`roundlots;`I;`R];venue:venue)
+  :([]time:times;price:price;qty:qty;aggressor:?[sign>0;`B;`S];cond:?[qty<min cfg`roundlots;`I;`R];venue:venue);
   };
 
 auction.prints:{[cfg;quotes;volume]
@@ -753,7 +753,7 @@ auction.prints:{[cfg;quotes;volume]
       qb:quotes i;
       t,:([]time:enlist bet;price:enlist ts*floor 0.5+(0.5*qb[`bid]+qb`ask)%ts;
         qty:enlist floor 0.5+volume*cfg`breakauctionpct;aggressor:enlist `;cond:enlist `B;venue:enlist cfg`primaryvenue)]];
-  select from t where qty>0
+  :select from t where qty>0;
   };
 
 quote.spreadmults:{[cfg;times]
@@ -777,7 +777,7 @@ quote.spreadmults:{[cfg;times]
   toclose:0f|(`float$closetime-timeofday)%60*nspersec;
   tau:cfg`spreaddecayminutes;
   midm:cfg`spreadmidmult;
-  midm+((cfg[`spreadopenmult]-midm)*exp neg sinceopen%tau)+(cfg[`spreadclosemult]-midm)*exp neg toclose%tau
+  :midm+((cfg[`spreadopenmult]-midm)*exp neg sinceopen%tau)+(cfg[`spreadclosemult]-midm)*exp neg toclose%tau;
   };
 
 validate:{[cfg]
@@ -876,7 +876,7 @@ validate:{[cfg]
   if[0>cfg`impactticks; '"validate: impactticks must be zero or positive"];
   if[0>=cfg`impacthalflifeseconds; '"validate: impacthalflifeseconds must be positive"];
   if[not cfg[`impactpermanent] within 0 1; '"validate: impactpermanent must be between 0 and 1"];
-  cfg
+  :cfg;
   };
 
 
@@ -963,7 +963,7 @@ run:{[cfg]
   trades:update seq:(count quotes)_seq from trades;
 
   trades:.z.m.addsym[cfg`sym;trades];
-  $[cfg`generatequotes; `trade`quote!(trades;.z.m.addsym[cfg`sym;quotes]); trades]
+  :$[cfg`generatequotes; `trade`quote!(trades;.z.m.addsym[cfg`sym;quotes]); trades];
   };
 
 / ============================================================
@@ -1115,7 +1115,7 @@ schema[`baseintensity]:("F";`derived;`arrivals;"immigrant arrival rate before th
 
 files:{[]
   / the shipped layer files: the US large-cap market, the instruments and the scenarios
-  `market`instruments`scenarios!simconfig.path each ("markets/us_largecap.json";"instruments.csv";"scenarios.csv")
+  :`market`instruments`scenarios!simconfig.path each ("markets/us_largecap.json";"instruments.csv";"scenarios.csv");
   };
 
 loadmarket:{[filepath] simconfig.loadmarket[.z.m.schema;filepath]};
@@ -1126,7 +1126,7 @@ shapemean:{[cfg]
   / the average of the interpolated intraday shape over the trading
   / seconds of the day, evaluated every second as the engine applies it
   n:`long$.z.m.tradingseconds cfg;
-  avg .z.m.shape[cfg;(0.5+til n)%n]
+  :avg .z.m.shape[cfg;(0.5+til n)%n];
   };
 
 intensityfor:{[cfg]
@@ -1141,7 +1141,7 @@ intensityfor:{[cfg]
   if[burst>=cfg`tradesperday;
     '"compose: the jump bursts are expected to add ",string[`long$burst]," trades a day, more than tradesperday ",string cfg`tradesperday];
   nsec:.z.m.tradingseconds cfg;
-  (cfg[`tradesperday]-burst)*(1-n)%nsec*.z.m.shapemean cfg
+  :(cfg[`tradesperday]-burst)*(1-n)%nsec*.z.m.shapemean cfg;
   };
 
 derive:{[cfg]
@@ -1155,7 +1155,7 @@ derive:{[cfg]
   cfg[`baseintensity]:.z.m.intensityfor cfg;
   cfg[`factorseed]:.z.m.factorseedfor[cfg`seed;cfg`tradingdate];
   cfg[`jumpcomp]:1f;
-  cfg
+  :cfg;
   };
 
 compose:{[market;instrument;scenario;run]
@@ -1167,7 +1167,7 @@ compose:{[market;instrument;scenario;run]
   / scenario: a scenario row (loadscenarios[...]`normal)
   / run: a dictionary with any of tradingdate, seed, generatequotes; the
   /   market file's defaults apply otherwise
-  .z.m.derive simconfig.compose[.z.m.schema;market;instrument;scenario;run]
+  :.z.m.derive simconfig.compose[.z.m.schema;market;instrument;scenario;run];
   };
 
 loadconfig:{[filepath]
@@ -1181,7 +1181,7 @@ loadconfig:{[filepath]
     if[1e-6<abs (cfg[`baseintensity]-b)%b;
       '"loadconfig: baseintensity ",string[cfg`baseintensity]," disagrees with tradesperday ",string[cfg`tradesperday]," (",string[b],")"]];
   cfg[`baseintensity]:b;
-  cfg
+  :cfg;
   };
 
 saveconfig:{[filepath;cfg] simconfig.saveconfig[filepath;cfg]};
@@ -1195,17 +1195,17 @@ quickwith:{[sym;price;drift;vol;tradesperday;tradingdate;overrides]
   ins:`sym`price`drift`vol`tradesperday!(sym;price;drift;vol;tradesperday);
   run:((enlist `tradingdate)!enlist tradingdate),overrides;
   cfg:.z.m.compose[.z.m.loadmarket f`market;ins;.z.m.loadscenarios[f`scenarios]`normal;run];
-  .z.m.run cfg
+  :.z.m.run cfg;
   };
 
 quick:{[sym;price;drift;vol;tradesperday;tradingdate]
   / simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]
-  .z.m.quickwith[sym;price;drift;vol;tradesperday;tradingdate;(`symbol$())!()]
+  :.z.m.quickwith[sym;price;drift;vol;tradesperday;tradingdate;(`symbol$())!()];
   };
 
 describe:{[]
   / the configuration schema as a table, the essential keys first
-  simconfig.describe .z.m.schema
+  :simconfig.describe .z.m.schema;
   };
 
 / export public interface

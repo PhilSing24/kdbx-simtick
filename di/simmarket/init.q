@@ -24,7 +24,7 @@ rng.normal:{[n]
   u:2 0N#1-m?1.0;
   r:sqrt -2f*log u 0;
   theta:2f*acos[-1]*u 1;
-  n#(r*cos theta),r*sin theta
+  :n#(r*cos theta),r*sin theta;
   };
 
 / modulus of the per-day seeds (a prime below 2^31)
@@ -65,7 +65,7 @@ validate:{[calendar]
   missing:calcols where not calcols in cols calendar;
   filled:calendar;
   if[count missing; filled:calendar,'flip missing!.z.m.nullcolumn[n] each calctypes calcols?missing];
-  (`date,calcols) xcols filled
+  :(`date,calcols) xcols filled;
   };
 
 validatecfg:{[cfg]
@@ -87,7 +87,7 @@ validatecfg:{[cfg]
   if[not (0<=cfg`regimepersistence)&1>cfg`regimepersistence; '"validatecfg: regimepersistence must be between 0 and 1, 1 excluded"];
   if[0>min cfg`volregimesd`volumeregimesd; '"validatecfg: volregimesd and volumeregimesd must be zero or positive"];
   if[not cfg[`regimecorr] within -1 1; '"validatecfg: regimecorr must be between -1 and 1"];
-  cfg
+  :cfg;
   };
 
 
@@ -111,14 +111,14 @@ seeds:{[cfg;dates]
   symhash:sum ("j"$string cfg`sym)*1+til count string cfg`sym;
   dayseed:simtick.mixseed[regimeseed;n#symhash];
   gapseed:simtick.mixseed[dayseed;n#3];
-  ([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed)
+  :([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed);
   };
 
 innovation:{[seed]
   / two standard normals from the stream seeded by seed (no reseed when
   / null): the day's volatility and volume shocks before their correlation
   if[not null seed; system "S ",string seed];
-  .z.m.rng.normal 2
+  :.z.m.rng.normal 2;
   };
 
 ar1step:{[st;e]
@@ -132,7 +132,7 @@ ar1:{[phi;eps]
   / driven by the standard normal innovations eps, started at the first
   / innovation. The state carried through the scan is (phi;x), since a
   / scan over a projection with a float atom as initial value is refused by q
-  (first eps),last each .z.m.ar1step\[(phi;first eps);1_eps]
+  :(first eps),last each .z.m.ar1step\[(phi;first eps);1_eps];
   };
 
 regimes:{[cfg;calendar]
@@ -172,7 +172,7 @@ regimes:{[cfg;calendar]
     volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd
   from
     r;
-  update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r
+  :update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r;
   };
 
 
@@ -191,7 +191,7 @@ overnight:{[cfg;ndays]
   / returns: float log return
   v:cfg[`overnightshare]*(cfg[`vol]*cfg`vol)%cfg`tradingdays;
   v*:1+cfg[`gapdayweight]*ndays-1;
-  (neg 0.5*v)+sqrt[v]*first .z.m.rng.normal 1
+  :(neg 0.5*v)+sqrt[v]*first .z.m.rng.normal 1;
   };
 
 
@@ -239,7 +239,7 @@ daycfg:{[cfg;day;price]
   / to the day's regime, so the correction is never more than the day has
   dc[`jumpcomp]:day[`volmult]*day`volmult;
   dc[`seed]:day`dayseed;
-  dc
+  :dc;
   };
 
 daygap:{[cfg;day;prevdate]
@@ -261,7 +261,7 @@ daygap:{[cfg;day;prevdate]
   v*:1+cfg[`gapdayweight]*(day[`date]-prevdate)-1;
   z:first .z.m.rng.normal 1;
   if[common; z:(z*sqrt 1-sum b*b)+sum b*g];
-  (neg 0.5*v)+sqrt[v]*z
+  :(neg 0.5*v)+sqrt[v]*z;
   };
 
 countvalues:{[cfgs;k]
@@ -337,7 +337,7 @@ correlations:{[cfgs]
   d:0f|(v-g+bk)-j;
   lam:.z.m.jumprates each c;
   p:`b`jl`v`g`bk`d`lam!(b;jl;v;g;bk;d;lam);
-  ([]sym:key cfgs)!flip key[cfgs]!flip .z.m.correlationrow[p;n] each til n
+  :([]sym:key cfgs)!flip key[cfgs]!flip .z.m.correlationrow[p;n] each til n;
   };
 
 simday:{[cfg;day;price]
@@ -365,7 +365,7 @@ simday:{[cfg;day;price]
     if[not (null pb)|null pa; breakret:log pa%pb]];
   row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;breakret:enlist breakret;
     trades:enlist count trades;volume:enlist sum trades`qty);
-  `trade`quote`day`close!(trades;quotes;row;close)
+  :`trade`quote`day`close!(trades;quotes;row;close);
   };
 
 runstep:{[cfg;state;day]
@@ -385,7 +385,7 @@ runstep:{[cfg;state;day]
   state[`days],:enlist update overnightret:gap from r`day;
   state[`prevdate]:date;
   state[`price]:r`close;
-  state
+  :state;
   };
 
 run:{[cfg;calendar;dbpath]
@@ -414,9 +414,9 @@ run:{[cfg;calendar;dbpath]
   init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
   state:.z.m.runstep[cfg]/[init;reg];
   days:raze state`days;
-  $[cfg`generatequotes;
+  :$[cfg`generatequotes;
     `trade`quote`days!(raze state`trade;raze state`quote;days);
-    `trade`days!(raze state`trade;days)]
+    `trade`days!(raze state`trade;days)];
   };
 
 
@@ -436,7 +436,7 @@ loadcalendar:{[filepath]
   if[not `date in hdr; '"loadcalendar: the CSV must have a date column"];
   if[count unknown:hdr except `date,calcols; '"loadcalendar: unknown columns - ",", " sv string unknown];
   types:(`date,calcols)!"D",calctypes;
-  .z.m.validate (types hdr;enlist csv) 0: filepath
+  :.z.m.validate (types hdr;enlist csv) 0: filepath;
   };
 
 savecalendar:{[filepath;calendar]
@@ -445,7 +445,7 @@ savecalendar:{[filepath;calendar]
   / calendar: a calendar (see validate)
   / returns: filepath
   if[not -11h=type filepath; '"savecalendar: filepath must be a file handle"];
-  filepath 0: csv 0: .z.m.validate calendar
+  :filepath 0: csv 0: .z.m.validate calendar;
   };
 
 
@@ -456,7 +456,7 @@ savecalendar:{[filepath;calendar]
 
 nyse.ymd:{[y;m;d]
   / the date of a year, month and day
-  (`date$`month$(12*y-2000)+m-1)+d-1
+  :(`date$`month$(12*y-2000)+m-1)+d-1;
   };
 
 nyse.easter:{[y]
@@ -476,25 +476,25 @@ nyse.easter:{[y]
   l:(sum (32;2*e;2*i;neg h;neg k)) mod 7;
   m:(sum (a;11*h;22*l)) div 451;
   n:sum (h;l;114;neg 7*m);
-  .z.m.nyse.ymd[y;n div 31;1+n mod 31]
+  :.z.m.nyse.ymd[y;n div 31;1+n mod 31];
   };
 
 nyse.nthweekday:{[y;m;wd;n]
   / the nth weekday wd (2 Monday ... 5 Thursday) of month m of year y
   d0:.z.m.nyse.ymd[y;m;1];
-  d0+(7*n-1)+(wd-d0 mod 7) mod 7
+  :d0+(7*n-1)+(wd-d0 mod 7) mod 7;
   };
 
 nyse.lastweekday:{[y;m;wd]
   / the last weekday wd of month m of year y
   dl:.z.m.nyse.ymd[y;m+1;1]-1;
-  dl-((dl mod 7)-wd) mod 7
+  :dl-((dl mod 7)-wd) mod 7;
   };
 
 nyse.observed:{[d]
   / the weekday on which a holiday falling on d is observed: Friday before a
   / Saturday, Monday after a Sunday
-  $[0=d mod 7; d-1; 1=d mod 7; d+1; d]
+  :$[0=d mod 7; d-1; 1=d mod 7; d+1; d];
   };
 
 nyse.holidays:{[y]
@@ -511,7 +511,7 @@ nyse.holidays:{[y]
   h,:.z.m.nyse.observed .z.m.nyse.ymd[y;7;4];
   h,:.z.m.nyse.nthweekday[y;9;2;1],.z.m.nyse.nthweekday[y;11;5;4];
   h,:.z.m.nyse.observed .z.m.nyse.ymd[y;12;25];
-  asc h where not (h mod 7) in 0 1
+  :asc h where not (h mod 7) in 0 1;
   };
 
 nyse.halfdays:{[y]
@@ -519,7 +519,7 @@ nyse.halfdays:{[y]
   / July 3 and Christmas Eve when they are trading days
   hol:.z.m.nyse.holidays y;
   h:(1+.z.m.nyse.nthweekday[y;11;5;4]),.z.m.nyse.ymd[y;7;3],.z.m.nyse.ymd[y;12;24];
-  asc h where (not (h mod 7) in 0 1)&not h in hol
+  :asc h where (not (h mod 7) in 0 1)&not h in hol;
   };
 
 nysecalendar:{[from;to]
@@ -537,7 +537,7 @@ nysecalendar:{[from;to]
   half:raze .z.m.nyse.halfdays each years;
   d:from+til 1+to-from;
   d:d where (not (d mod 7) in 0 1)&not d in hol;
-  .z.m.validate ([]date:d;closingtime:?[d in half;13:00;16:00])
+  :.z.m.validate ([]date:d;closingtime:?[d in half;13:00;16:00]);
   };
 
 
@@ -567,7 +567,7 @@ compose:{[market;instruments;scenarios;scenario;run]
     '"compose: instruments not in the instrument table - ",", " sv string missing];
   if[count unknown:(distinct value scenario) where not (distinct value scenario) in exec name from scenarios;
     '"compose: scenarios not in the scenario table - ",", " sv string unknown];
-  syms!.z.m.composeone[market;instruments;scenarios;run]'[syms;value scenario]
+  :syms!.z.m.composeone[market;instruments;scenarios;run]'[syms;value scenario];
   };
 
 dayswithsym:{[sym;r]
@@ -594,7 +594,7 @@ runmany:{[cfgs;calendar;dbpath]
   merged[`trade]:`time`sym xasc raze rs[;`trade];
   if[all `quote in/: key each rs; merged[`quote]:`time`sym xasc raze rs[;`quote]];
   merged[`days]:`sym`date xasc raze .z.m.dayswithsym'[key rs;value rs];
-  merged
+  :merged;
   };
 
 
@@ -635,7 +635,7 @@ version:{[]
   h:@[system;"git -C ",root," rev-parse --short HEAD 2>/dev/null";()];
   if[not count h; :`unknown];
   dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simconfig 2>/dev/null";()];
-  `$first[h],$[dirty;"-dirty";""]
+  :`$first[h],$[dirty;"-dirty";""];
   };
 
 hdbopts:{[opts]
@@ -651,7 +651,7 @@ hdbopts:{[opts]
   if[not ()~o`compression; o[`compression]:`long$(),o`compression];
   if[not (()~o`compression)|3=count o`compression;
     '"writehdb: compression must be (logical block size;algorithm;level) or ()"];
-  o
+  :o;
   };
 
 saverun:{[dst;runcfg]
@@ -677,13 +677,13 @@ loadrun:{[dbpath]
   if[not d[`commit]=.z.m.version[];
     -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
       string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
-  `configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit)
+  :`configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit);
   };
 
 symfile:{[dst]
   / the enumeration domain of a database as a symbol list (empty when new)
   f:.Q.dd[dst;`sym];
-  $[()~key f; `symbol$(); get f]
+  :$[()~key f; `symbol$(); get f];
   };
 
 written:{[dst;date;name]
@@ -706,7 +706,7 @@ complete:{[dst;date;names;syms]
   s:.z.m.symfile dst;
   days:update sym:s `long$sym from days;
   if[not (asc syms)~asc distinct days`sym; :()];
-  days
+  :days;
   };
 
 setsplayed:{[path;t]
@@ -771,7 +771,7 @@ writeday:{[cfgs;regs;dst;o;state;i]
   .z.m.writetable[dst;date;`days;delete date from raze rs[;`day];o`compression;enlist `sym];
   state[`price]:syms!rs[;`close] syms;
   state[`prevdate]:date;
-  state
+  :state;
   };
 
 sameconfig:{[a;b]
@@ -815,7 +815,7 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   regs:.z.m.regimes[;calendar] each cfgs;
   init:`prevdate`price!(0Nd;key[cfgs]!`float$value[cfgs][;`price]);
   .z.m.writeday[cfgs;regs;dst;o]/[init;til count calendar];
-  dbpath
+  :dbpath;
   };
 
 describe:{[]
