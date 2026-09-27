@@ -153,7 +153,13 @@ regimes:{[cfg;calendar]
   volsd:cfg`volregimesd;
   volumesd:cfg`volumeregimesd;
   r:calendar,'sd;
-  r:update volstate:x,volumestate:y,volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd from r;
+  r:update
+    volstate:x,
+    volumestate:y,
+    volmult:(1f^volmult)*exp (volsd*x)-volsd*volsd,
+    volumemult:(1f^volumemult)*exp (volumesd*y)-0.5*volumesd*volumesd
+  from
+    r;
   update closingtime:cfg[`closingtime]^closingtime,jumpintensity:cfg[`jumpintensity]^jumpintensity from r
   };
 
@@ -604,9 +610,11 @@ loadrun:{[dbpath]
   d:get f;
   opts:`tables`compression!(d`tables;d`compression);
   if[not d[`version]~.z.m.moduleversion;
-    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,": the same configuration and seeds reproduce it only with the same code"];
+    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.moduleversion,
+      ": the same configuration and seeds reproduce it only with the same code"];
   if[not d[`commit]=.z.m.version[];
-    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
+    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
+      string[.z.m.version[]],": the same configuration and seeds reproduce it only with the same code"];
   `configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit)
   };
 
@@ -709,7 +717,8 @@ writehdb:{[cfgs;calendar;dbpath;opts]
     if[not all same'[old`configs;cfgs]; '"writehdb: ",string[dbpath]," holds a database built with a different configuration"];
     if[not (asc key old`configs)~asc key cfgs; '"writehdb: ",string[dbpath]," holds a database built for other instruments"];
     if[not old[`opts]~o; '"writehdb: ",string[dbpath]," holds a database written with other tables or compression"];
-    if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on another calendar (a calendar can only be extended)"]];
+    if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on ",
+      "another calendar (a calendar can only be extended)"]];
   system "mkdir -p ",1_string dst;
   .z.m.saverun[dst;runcfg];
   regs:.z.m.regimes[;calendar] each cfgs;
@@ -725,4 +734,6 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe]);
+export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;
+  writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;
+  nysecalendar;validate;validatecfg;describe]);
