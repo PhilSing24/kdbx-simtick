@@ -71,6 +71,7 @@ validatecfg:{[cfg]
   reqkeys,:`vol`tradingdays`price`seed`sym`tradesperday`jumpintensity`openingtime`closingtime;
   .z.m.val.haskeys[cfg;reqkeys;"validatecfg"];
   if[not (0<=cfg`overnightshare)&1>cfg`overnightshare; '"validatecfg: overnightshare must be between 0 and 1, 1 excluded"];
+  if[`breakshare in key cfg; if[not (0<=cfg`breakshare)&1>cfg`breakshare; '"validatecfg: breakshare must be between 0 and 1, 1 excluded"]];
   if[0>cfg`gapdayweight; '"validatecfg: gapdayweight must be zero or positive"];
   if[not (0<=cfg`regimepersistence)&1>cfg`regimepersistence; '"validatecfg: regimepersistence must be between 0 and 1, 1 excluded"];
   if[0>min cfg`volregimesd`volumeregimesd; '"validatecfg: volregimesd and volumeregimesd must be zero or positive"];
@@ -177,7 +178,8 @@ daycfg:{[cfg;day;price]
   / the intraday vol reduced to the share left after the overnight one (so
   / the close-to-close vol is the configured vol) times the day's volatility
   / multiplier, the trades per day times its volume multiplier and the
-  / share of the full session it is open (a half day trades about half),
+  / share of the full day's trading seconds it is open (a half day trades
+  / about half; on a market with a break, a half day is the morning),
   / its jump intensity (a positive one selects the jump model), the base
   / intensity derived from those as compose does, and its own seed, so the
   / day is regenerated exactly from its row of the days table:
@@ -189,9 +191,14 @@ daycfg:{[cfg;day;price]
   dc:cfg;
   dc[`tradingdate]:day`date;
   dc[`closingtime]:day`closingtime;
+  / a half day ending at or inside the break loses the afternoon session
+  if[(simtick.session cfg)`hasbreak;
+    if[day[`closingtime]<=cfg`breakend;
+      dc[`closingtime]:day[`closingtime]&cfg`breakstart;
+      dc[`breakstart]:0Nu; dc[`breakend]:0Nu]];
   dc[`price]:price;
   dc[`vol]:cfg[`vol]*day[`volmult]*sqrt 1-cfg`overnightshare;
-  session:(day[`closingtime]-cfg`openingtime)%cfg[`closingtime]-cfg`openingtime;
+  session:simtick.tradingseconds[dc]%simtick.tradingseconds cfg;
   dc[`tradesperday]:`long$cfg[`tradesperday]*day[`volumemult]*session;
   dc[`jumpintensity]:day`jumpintensity;
   if[0<day`jumpintensity; dc[`pricemodel]:`jump];
@@ -207,12 +214,21 @@ simday:{[cfg;day;price]
   / day: a row of the regimes table
   / price: the day's open
   / returns: dict `trade`quote`day (quote empty when the config does not
-  /   return quotes), `close
-  result:simtick.run .z.m.daycfg[cfg;day;price];
+  /   return quotes; the day row carries the break's return, null without
+  /   a break), `close
+  dc:.z.m.daycfg[cfg;day;price];
+  result:simtick.run dc;
   trades:$[99h=type result; result`trade; result];
   quotes:$[99h=type result; result`quote; ()];
   close:$[count trades; last trades`price; price];
-  row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;
+  / the mid-day break's return, from the last print before the break to
+  / the first at or after the reopening; null on a day without a break
+  breakret:0n;
+  if[(simtick.session dc)`hasbreak;
+    bs:day[`date]+`timespan$dc`breakstart; be:day[`date]+`timespan$dc`breakend;
+    pb:exec last price from trades where time<bs; pa:exec first price from trades where time>=be;
+    if[not (null pb)|null pa; breakret:log pa%pb]];
+  row:(enlist day),'([]open:enlist price;close:enlist close;overnightret:enlist 0f;breakret:enlist breakret;
     trades:enlist count trades;volume:enlist sum trades`qty);
   `trade`quote`day`close!(trades;quotes;row;close)
   };

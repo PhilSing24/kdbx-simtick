@@ -81,7 +81,7 @@ fail,0,0,q,simmarket.compose[market;instruments;scenarios;(enlist `AAPL)!enlist 
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;`wild;runcfg],1,An unknown scenario throws error
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;42;runcfg],1,A scenario that is neither a name nor a dictionary throws error
 true,0,0,q,`param`typ`layer`group`description~cols simmarket.describe[],1,describe returns the schema table
-true,0,0,q,6=count simmarket.describe[],1,With the six calendar keys
+true,0,0,q,7=count simmarket.describe[],1,With the seven days keys
 true,0,0,q,all `days=(simmarket.describe[])`group,1,All of the days group
 comment,0,0,q,,1,=== Run In-Memory Tests ===
 before,0,0,q,result:simmarket.run[cfg;calendar;(::)],1,Run in-memory simulation
@@ -100,7 +100,8 @@ comment,0,0,q,,1,=== Multi-Day Tests ===
 before,0,0,q,daycounts:select count i by "d"$time from trades,1,Count trades per day
 true,0,0,q,(count calendar)=count daycounts,1,All calendar days have trades
 true,0,0,q,all 0<exec x from daycounts,1,Each day has at least one trade
-true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`trades`volume~cols days,1,Days table has the regime columns then the day's results
+true,0,0,q,`date`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`breakret`trades`volume~cols days,1,Days table has the regime columns then the day's results
+true,0,0,q,all null days`breakret,1,A market without a break has a null break return
 true,0,0,q,(calendar`date)~days`date,1,One row per calendar day
 true,0,0,q,all (exec time from trades where ("d"$time)=2026.08.20)<=2026.08.20D13:00,1,The half day's trades end by its closing time
 true,0,0,q,2026.08.20D13:00=last exec time from trades where ("d"$time)=2026.08.20,1,The half day's closing print is at 13:00
@@ -292,11 +293,35 @@ before,0,0,q,system raze ("cd ";cwd),1,And the working directory
 before,0,0,q,plain:{[t] flip {[c] $[20h<=abs type c;value c;c]} each flip 0!t},1,A loaded table's symbol columns de-enumerated
 true,0,0,q,`date`sym`time`seq`price`qty`aggressor`cond`venue~cols hdbtrade,1,The loaded trade table has the partition's date then the tape's columns
 true,0,0,q,`date`sym`time`seq`bid`ask`bidsize`asksize~cols hdbquote,1,The loaded quote table too
-true,0,0,q,`date`sym`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`trades`volume~cols hdbdays,1,And the days table: the partition's date then sym then the day's row
+true,0,0,q,`date`sym`closingtime`volmult`volumemult`jumpintensity`regimeseed`dayseed`gapseed`volstate`volumestate`open`close`overnightret`breakret`trades`volume~cols hdbdays,1,And the days table: the partition's date then sym then the day's row
 true,0,0,q,20h=type hdbtrade`sym,1,sym is enumerated against the root sym file
 true,0,0,q,(plain (delete date from select from hdbtrade where date=2026.08.19))~memday[hdbmem`trade;2026.08.19],1,A loaded date equals the in-memory run
 true,0,0,q,(2*count calendar)=count hdbdays,1,days holds one row per stock and date
 after,0,0,q,system"rm -rf /tmp/simmarket_hdb /tmp/simmarket_hdbraw /tmp/simmarket_hdbtrade /tmp/simmarket_hdbone /tmp/simmarket_hdbresume /tmp/simmarket_hdbreplay /tmp/simmarket_hdbempty",1,Clean up the databases
+comment,0,0,q,,1,=== Sessions Tests ===
+before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simconfig/markets/sgx.json",1,The SGX market: two sessions around a lunch break
+before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simconfig/instruments_sg.csv",1,Its instruments
+before,0,0,q,sgxcfgs:simmarket.compose[sgxmarket;sgxins;scenarios;`normal;runcfg],1,The three SGX stocks on the normal scenario
+before,0,0,q,sgxcal:([]date:2026.08.18 2026.08.19 2026.08.20;closingtime:16:00 12:00 17:00),1,A full day closing early at 16:00 then a half day then a full day
+before,0,0,q,sgxres:simmarket.runmany[sgxcfgs;sgxcal;(::)],1,Run them
+before,0,0,q,sgxdays:sgxres`days,1,Their days
+before,0,0,q,sgxtrades:sgxres`trade,1,Their trades
+true,0,0,q,2026.08.19D12:00=exec max time from sgxtrades where 2026.08.19=`date$time,1,A half day closing at 12:00 is the morning session alone
+true,0,0,q,0=count select from sgxtrades where (time>2026.08.19D12:00)&time<2026.08.20D09:00,1,With no afternoon
+true,0,0,q,all null exec breakret from sgxdays where date=2026.08.19,1,And no break return
+true,0,0,q,2026.08.18D16:00=exec max time from sgxtrades where 2026.08.18=`date$time,1,An early close at 16:00 keeps the afternoon session and ends it there
+true,0,0,q,0=count select from sgxtrades where (time>2026.08.18D12:00)&time<2026.08.18D13:00,1,With the break kept
+true,0,0,q,all not null exec breakret from sgxdays where date<>2026.08.19,1,Full days carry the break's return
+true,0,0,q,all ((exec trades from sgxdays where date=2026.08.19)%exec trades from sgxdays where date=2026.08.20) within 0.3 0.55,1,The half day trades the morning's share of the day (about three sevenths)
+before,0,0,q,sgxthin:sgxins`D05,1,DBS for a two-year close-to-close vol check
+before,0,0,q,sgxthin[`tradesperday]:4000,1,Made quiet so two years run fast
+before,0,0,q,sgxthin[`quotespertrade]:2f,1,With few quotes
+before,0,0,q,sgxcc:simtick.compose[sgxmarket;sgxthin;scenarios`normal;runcfg],1,Composed on the normal scenario (overnight share 0.3 and break share 0.05)
+before,0,0,q,sgxccdays:(simmarket.run[sgxcc;longcal;(::)])`days,1,Two years of days with a break
+before,0,0,q,sgxccret:1_log sgxccdays[`close]%prev sgxccdays`close,1,Close-to-close log returns
+true,0,0,q,(abs ((dev sgxccret)*sqrt 250)-sgxcc`vol)<0.05*sgxcc`vol,1,With a break the close-to-close vol is still within 5% of the configured vol: the break takes its share of the budget
+true,0,0,q,((dev sgxccdays`breakret)*sqrt 250) within 0.6 1.4*sgxcc[`vol]*sqrt 0.05*1-0.3,1,The break returns carry about breakshare of the intraday variance
+fail,0,0,q,simmarket.run[sgxcc upsert (enlist `breakshare)!enlist 1f;calendar;(::)],1,breakshare of 1 throws error
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simmarket.run[cfg;calendar;(::)],1,First run
 before,0,0,q,run2:simmarket.run[cfg;calendar;(::)],1,Second run
