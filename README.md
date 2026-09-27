@@ -48,7 +48,7 @@ A simulator has many knobs, and most of them describe a market and hardly ever c
 | scenario | what makes a day type: multipliers of vol, trades and spread, the jump model, the day-to-day regime | `di/simconfig/scenarios.csv` (normal, volatile, jumpy) |
 | run | what changes between two runs: date, seed, whether to return quotes | a dictionary; the market file carries the defaults |
 
-`simtick.quick` takes the five instrument values and the date and runs that day on the shipped market; `simtick.compose` builds a configuration from the layers, applying the scenario multipliers once and deriving the Hawkes base intensity from the trades per day; `simmarket.compose` does it for several instruments on one scenario or one each; `simorder.compose` joins the market's order keys with an order row (`di/simconfig/orders.csv`). Composition is strict: values are cast to the schema's types, unknown keys throw, missing keys throw naming the layer that should supply them, and a saved configuration replays. Every parameter is listed with its type, layer, group and description in the generated pages [simtick](di/simtick/docs/parameters.md), [simmarket](di/simmarket/docs/parameters.md) and [simorder](di/simorder/docs/parameters.md) (`make params`).
+`simtick.quick` takes the five instrument values and the date and runs that day on the shipped market; `simtick.compose` builds a configuration from the layers, applying the scenario multipliers once and deriving the Hawkes base intensity from the trades per day; `simmarket.compose` does it for several instruments on one scenario or one each; `simorder.compose` joins its own market keys with an order row (`di/simorder/orders.csv`). Composition is strict: values are cast to the schema's types, unknown keys throw, missing keys throw naming the layer that should supply them, and a saved configuration replays. Every parameter is listed with its type, layer, group and description in the generated pages [simtick](di/simtick/docs/parameters.md), [simmarket](di/simmarket/docs/parameters.md) and [simorder](di/simorder/docs/parameters.md) (`make params`).
 
 ## Installation
 
@@ -109,7 +109,6 @@ kdbx-modules/
     │   ├── markets/us_largecap.json
     │   ├── instruments.csv
     │   ├── scenarios.csv
-    │   ├── orders.csv
     │   ├── test.csv
     │   └── README.md
     ├── simtick/           # 1 instrument, 1 day (atomic unit)

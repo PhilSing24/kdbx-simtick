@@ -10,10 +10,9 @@ This module runs `di.simtick` day after day and turns the days into one coherent
 
 ```
 simtick ← simmarket
-simtick ← simorder
 ```
 
-`simtick` is one instrument for one day; `simmarket` runs it over N days. `simorder` runs against one day of the output (pass the whole result: it keeps the order's instrument and day).
+`simtick` is one instrument for one day; `simmarket` runs it for several instruments over N days.
 
 ## Installation
 

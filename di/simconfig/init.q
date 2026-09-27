@@ -15,13 +15,13 @@
 /   type   S symbol, F float, J long, B boolean, D date, U minute,
 /          P timestamp, and SL FL JL for lists of those; * keeps the value
 /   layer  essential (the instrument's required keys), market, instrument,
-/          order (di.simorder's per-order keys), scenario, run, optional
-/          (cast when present, never required) or derived (computed by the
-/          module's compose)
+/          scenario, run, optional (cast when present, never required)
+/          or derived (computed by the module's compose); a module may
+/          name layers of its own, which describe lists after these
 /   group  a short label for the reference page (the column grp of describe)
 
 
-layers:`essential`market`instrument`order`scenario`run`optional`derived;
+layers:`essential`market`instrument`scenario`run`optional`derived;
 
 candidate:{[relative;dir]
   / the handle of di/simconfig/<relative> under a directory of the module
@@ -230,11 +230,12 @@ loadconfig:{[schema;filepath]
   };
 
 describe:{[schema]
-  / the schema as a table, the essential keys first, then by layer. The
+  / the schema as a table, the essential keys first, then by layer (a
+  / module's own layers after the known ones, as they appear). The
   / group's column is grp: group is a reserved word, which a query cannot
   / name
   t:([]param:key schema;typ:value[schema][;0];layer:value[schema][;1];grp:value[schema][;2];description:value[schema][;3]);
-  t:update ord:(`essential`market`instrument`order`scenario`run`optional`derived)?layer from t;
+  t:update ord:.z.m.layers?layer from t;
   :delete ord from `ord xasc t;
   };
 

@@ -63,13 +63,16 @@ For these, a limit order book simulator or a multi-venue market model would be n
 
 ### Configuration
 
-An order's configuration is composed from two layers, the same scheme as `di.simtick`: the market file's `orders` group (venues and their routing shares, latency, the sweep beyond the touch, re-pegs, jitter, capacity) and its `ticksize`, then an order row (what the order is: id, instrument, side, quantity, window, children, pacing, aggression, account, algo, seed). A row may override any market key. The market file also carries the algo menu and the defaults of a generated order flow, and the impact parameters.
+The module owns its keys. Its defaults for a market sit in its own file, `di/simorder/markets/us_largecap.json` (with `sgx.json` and `hkex.json`), in five groups: routing (lit venues and their shares, latency, the sweep beyond the touch, re-pegs, jitter, capacity), dark pools, the algo menu, the defaults of a generated order flow, and the impact parameters. `loadmarket` joins them to a tick market of `di.simtick`, from which it reads `ticksize`, `closingtime` and the default seed. An order's configuration is then composed from two layers: the joined market's routing and dark keys and its `ticksize`, then an order row (what the order is: id, instrument, side, quantity, window, children, pacing, aggression, account, algo, seed). A row may override any market key.
 
 ```q
-q)market:simorder.loadmarket simorder.files[]`market
-q)orders:simorder.loadorders simorder.files[]`orders
+q)f:simorder.files[]                                   / the tick market, the defaults, the order rows, the venues
+q)market:simorder.loadmarket[f`market;f`defaults]      / the joined market
+q)orders:simorder.loadorders f`orders
 q)cfg:simorder.compose[market;orders`good]
 ```
+
+`di.simtick` and `di.simmarket` know nothing of these keys: their market files and schema carry none, and `simtick.compose` refuses the joined market.
 
 `compose` is strict: every value is cast to the schema's type, an unknown key throws, and a missing key throws naming its layer. `urgency` and `maxpct` are read for arrival pacing only. To see every parameter with its layer, group and description:
 ```q
@@ -84,7 +87,7 @@ A KDB-X module for simulating a parent order, its child orders and their fills a
 - **Order lifecycle events** for surveillance
 - **Volume-weighted sizing** derived from real market activity
 - **Nanosecond-precision timestamps**, consistent with `di.simtick`'s `trades`/`quotes`
-- **Order rows in a CSV** (`di/simconfig/orders.csv`) for repeatable good/bad scenarios, composed with the market file's order keys
+- **Order rows in a CSV** (`di/simorder/orders.csv`) for repeatable good/bad scenarios, composed with the joined market's keys
 
 ## Installation
 
@@ -109,8 +112,9 @@ q)result:simtick.quick[`NVDA;215.0;0.08;0.45;500000;2026.08.18]
 q)trades:result`trade
 q)quotes:result`quote
 
-q)market:simorder.loadmarket simorder.files[]`market
-q)orders:simorder.loadorders simorder.files[]`orders
+q)f:simorder.files[]
+q)market:simorder.loadmarket[f`market;f`defaults]
+q)orders:simorder.loadorders f`orders
 q)res:simorder.run[simorder.compose[market;orders`good];trades;quotes]
 q)res`orders
 orderid account algo sym  side orderqty ordtype limitprice capacity starttime                     endtime                       arrivalprice filledqty avgpx    status
@@ -174,7 +178,7 @@ Dark liquidity is limited by construction: midpoint off-exchange prints are abou
 | `darkshare` | market | Probability a passive child is sent dark, between 0 and 1; 0 turns the feature off | 0.25 |
 | `darkfillshare` | market | The most a dark child takes of a qualifying print, as a share of it | 0.5 |
 
-Venue codes stay MIC codes (and the pools' MPIDs) in the simulator; `di/simconfig/venues.csv` maps them to the TCA application's codes for exports. That mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both to `CBOE`, so the TCA application sees exchange groups, not individual exchanges.
+Venue codes stay MIC codes (and the pools' MPIDs) in the simulator. `simorder.venues[]` is the venue reference for executions: the tick market's `di/simconfig/venues.csv` (lit venues and `TRF`) with this module's `di/simorder/venues.csv` (the dark pools), mapping each code to the TCA application's for exports. That mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both to `CBOE`, so the TCA application sees exchange groups, not individual exchanges.
 
 On the good preset above, 66 of 69 fills added liquidity; on the bad preset 29 of 31 removed it. Whether the passive order ends up cheaper depends on the day: a passive child chasing a rising market re-pegs and pays later, an aggressive one pays the spread now.
 
@@ -278,8 +282,11 @@ Orders on the same instrument and day do not interact: each runs against the mar
 | `simorder.runflow[market;spec;trades;quotes]` | `generate` then `runmany`; returns `configs and the four tables |
 | `simorder.menu[market]` | The market's algo menu as a keyed table |
 | `simorder.compose[market;order]` | The flat configuration of an order from the market's keys and an order row |
-| `simorder.files[]` | The paths of the shipped market file and order rows |
-| `simorder.loadmarket[filepath]` | The market file as a flat dictionary (`simtick.loadmarket`) |
+| `simorder.files[]` | The paths of the tick market, this module's defaults for it, its order rows and its venues |
+| `simorder.loadmarket[marketfile;defaultsfile]` | The joined market: a tick market of `di.simtick` with this module's defaults on top |
+| `simorder.loaddefaults[filepath]` | This module's defaults for a market, cast by its schema |
+| `simorder.venues[]` | The venue reference for executions, lit venues and dark pools |
+| `simorder.orderkeys[]` | The keys of an order's configuration (the schema without the flow and impact layers) |
 | `simorder.loadorders[filepath]` | Order rows from a CSV, keyed by `name` |
 | `simorder.impactcfg[market]` | The impact configuration from the market file's `orderimpact` keys and closing time |
 | `simorder.marketday[cfg;t;name]` | Rows of a trades or quotes table for the order's instrument and day, time-sorted; throws if none |
@@ -304,7 +311,7 @@ Orders on the same instrument and day do not interact: each runs against the mar
 
 ## Order rows
 
-`di/simconfig/orders.csv` ships three rows:
+`di/simorder/orders.csv` ships three rows:
 
 | Row | Description |
 |--------|-------------|
@@ -371,23 +378,25 @@ q)k4unit.moduletest`di.simorder
 | Events | 12 | Columns, event kinds, order; one new and one ack per child, replaces matching the children, fill events matching the executions, a done per filled child and a cancel per cancelled one, nothing left at a done, ack before the first fill |
 | Aggression | 11 | spreadcapture 1: all children marketable, all fills removing liquidity, no replace or cancel; spreadcapture 0: scheduled children all limit orders adding liquidity; about spreadcapture of 400 children aggressive; SELL aggressive fills at the bid or one tick below and filled in full; frontloaded and arrival orders filled in full, frontloaded intervals tiling the window |
 | Rollover | 6 | A large passive order on PG made less liquid still: cancels at expiry, a marketable cleanup child, the order still filled in full, cancels carrying the unfilled quantity, the cleanup carrying what the scheduled children left |
-| Dark pools | 34 | The four keys from the market file and their validation; `darkshare` 0 reproduces the executions and events recorded before the feature and leaves the tape untouched; dark fills only on the pools with flag `D`, exactly at the midpoint of the quote in force, each matching an opposite-side `TRF` print (a buy against seller-initiated prints, a sell against buyer-initiated ones) for at most `darkfillshare` of it; dark children are midpoint pegs with no limit that never re-peg; the order fills in full with one fill event per execution; aggressive children never route dark; a generated flow carries the keys; every venue code of the market file is in the venue reference |
+| Dark pools | 42 | The four keys from the market file and their validation; `darkshare` 0 reproduces the executions and events recorded before the feature and leaves the tape untouched; dark fills only on the pools with flag `D`, exactly at the midpoint of the quote in force, each matching an opposite-side `TRF` print (a buy against seller-initiated prints, a sell against buyer-initiated ones) for at most `darkfillshare` of it; dark children are midpoint pegs with no limit that never re-peg; the order fills in full with one fill event per execution; aggressive children never route dark; a generated flow carries the keys; every venue code of the market file is in the venue reference; the module's own files (the tick market carries none of its keys, the defaults file holds its 27 market keys, the joined market, the tick simulator refusing it, the flow and impact layers left out of an order's configuration) |
 | Config | 23 | The order rows load and compose with the market's keys (ticksize, latency, capacity, venues), a row overrides a market key, an even order carries no urgency, missing essential and unknown keys throw; describe lists the order schema and the market's orders keys; the impact configuration from the market file; sweeps walk `sweepticks` beyond the touch |
 | Mixed market | 2 | An order against tables holding two instruments matches the single-instrument run; marketday returns the order's instrument and day only |
 | Order flow | 29 | generate: norders per instrument and day, the schema's keys, windows inside the sessions and within a day, round-lot sizes, sides, accounts and algos from the menu with IS the arrival algo, a seed per order, the same flow from the same seed, none with a null seed and the market's run seed by default, an algo off the menu or an unknown spec key throws; runmany: the four tables, every order filled for its quantity, unique execution ids, fills on their order's instrument and day; runflow returns the configs and the same orders |
 | Reproducibility | 1 | Same inputs produce identical output |
-| **Total** | **229** | |
+| Resting fills | 13 | Passive fills consistent with the quote in force (see the test file's Resting Fill section) |
+| Limit price | 15 | The parent order's limit held by passive, aggressive and dark children (see the test file's Limit price section) |
+| **Total** | **265** | |
 
 The fixture is one simulated day of NVDA on the shipped market file and the normal scenario (and PG, made less liquid, for the rollover tests); order windows are set on that day's date.
 
 ## Project Structure
 
 ```
-di/simconfig/
-├── markets/us_largecap.json   # its orders group: venues, latency, sweep, re-pegs, jitter, capacity, algo menu, flow defaults, impact
-└── orders.csv                 # order rows (good / bad / arrival)
 di/simorder/
 ├── init.q           # Module code
+├── markets/         # the module's defaults per market: us_largecap.json, sgx.json, hkex.json
+├── orders.csv       # order rows (good / bad / arrival)
+├── venues.csv       # the dark pools
 ├── test.csv         # Unit tests (k4unit format)
 ├── testing.q        # Manual test script
 └── README.md        # This file

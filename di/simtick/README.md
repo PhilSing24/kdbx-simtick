@@ -100,17 +100,15 @@ Within the day two stocks correlate less than their loadings say, about 0.35 to 
 
 ## Related modules
 
-`di.simtick` is the first of three modules, each building on the one before:
+`di.simtick` is the first of two modules:
 
 ```
 di/
 ├── simtick/       # one instrument, one day
-├── simmarket/   # runs simtick over a calendar of trading days
-└── simorder/      # generates orders and executes them against the simulated market
+└── simmarket/     # several instruments over a calendar of trading days
 ```
 
 - **`di.simmarket`**: runs `di.simtick` day after day over a trading calendar (with a generator for NYSE holidays and half days), links consecutive days with overnight price gaps, varies volatility and volume from day to day, and can write the result to a date-partitioned kdb+ database. Any single day can be regenerated on its own.
-- **`di.simorder`**: splits parent orders into child orders that cross the spread or wait at the best price, records every order event (new, replace, cancel, fill), and can apply the market impact of the executions.
 
 **Note:** modules are loaded with absolute paths (`` use`di.simtick ``) rather than relative sibling references (`` use`..simtick ``), which did not work in our testing with KDB-X Community Edition.
 
