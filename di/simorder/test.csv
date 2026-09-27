@@ -1,7 +1,7 @@
 action,ms,bytes,lang,code,repeat,comment
 before,0,0,q,simtick:use`di.simtick,1,,Initialize simtick module
 before,0,0,q,simorder:use`di.simorder,1,,Initialize simorder module
-before,0,0,q,simconfig:use`di.simconfig,1,,Initialize simconfig module (the venue reference)
+before,0,0,q,simconfig:use`di.simtick.config,1,,Initialize simconfig module (the venue reference)
 before,0,0,q,f:simtick.files[],1,,The shipped layer files
 before,0,0,q,market:simtick.loadmarket f`market,1,,Load the market layer (its orders group holds this module's defaults)
 before,0,0,q,instruments:simtick.loadinstruments f`instruments,1,,Load the instruments

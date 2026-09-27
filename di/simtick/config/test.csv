@@ -1,5 +1,5 @@
 action,ms,bytes,lang,code,repeat,comment
-before,0,0,q,simconfig:use`di.simconfig,1,,Initialize module
+before,0,0,q,simconfig:use`di.simtick.config,1,,Initialize module
 before,0,0,q,sch:()!(),1,,A toy schema
 before,0,0,q,sch[`sym]:("S";`essential;`id;"ticker"),1,,An essential symbol
 before,0,0,q,sch[`price]:("F";`essential;`id;"start price"),1,,An essential float
@@ -76,6 +76,10 @@ before,0,0,q,optsch:sch upsert (enlist `note)!enlist ("F";`optional;`extra;"an o
 true,0,0,q,not `note in key simconfig.compose[optsch;m;ins`NVDA;sce`normal;(`symbol$())!()],1,,An optional key is not required
 true,0,0,q,1.5=(simconfig.compose[optsch;m;ins`NVDA;sce`normal;(enlist `note)!enlist 1.5])`note,1,,But is kept and cast when present
 true,0,0,q,not `name in key simconfig.compose[sch;m;(ins`NVDA) upsert (enlist `name)!enlist `row;sce`normal;(`symbol$())!()],1,,A row's name is dropped from the composed config
+comment,0,0,q,,1,,=== Shipped File Tests ===
+true,0,0,q,(simconfig.path "markets/us_largecap.json")~hsym `$raze (.Q.m.mp `di.simtick.config;"/markets/us_largecap.json"),1,,A shipped file is in the directory of the module loaded
+true,0,0,q,not ()~key simconfig.path "instruments.csv",1,,And exists
+fail,0,0,q,simconfig.path "nope.json",1,,A file the module does not ship throws error
 comment,0,0,q,,1,,=== Venue Reference Tests ===
 before,0,0,q,venues:simconfig.loadvenues simconfig.path "venues.csv",1,,The shipped venue reference
 true,0,0,q,99h=type venues,1,,loadvenues returns a keyed table

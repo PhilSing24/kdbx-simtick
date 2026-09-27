@@ -16,17 +16,17 @@ simtick ← simmarket
 
 ## Installation
 
-Requires `di.simtick` (and through it `di.simconfig`, which holds the shipped market, instrument and scenario files) as sibling modules:
+Requires `di.simtick` (and through it `di.simtick.config`, which holds the shipped market, instrument and scenario files) as a sibling module:
 
 ```
 di/
-├── simconfig/
-│   ├── init.q
-│   ├── markets/us_largecap.json
-│   ├── instruments.csv
-│   └── scenarios.csv
 ├── simtick/
-│   └── init.q
+│   ├── init.q
+│   └── config/
+│       ├── init.q
+│       ├── markets/us_largecap.json
+│       ├── instruments.csv
+│       └── scenarios.csv
 └── simmarket/
     ├── init.q
     ├── calendar.csv
@@ -148,7 +148,7 @@ In memory the trades and quotes of every instrument come merged and sorted by ti
 
 ## Configuration
 
-A run takes a configuration composed by `di.simtick` from its four layers (market, instrument, scenario, run). The calendar keys below belong to the scenario layer, so `di/simconfig/scenarios.csv` carries them per scenario: `normal` has persistence 0.7, 30% spread and correlation 0.7; `volatile` long spells (persistence 0.8) with 60% spread and correlation 0.8. `tradingdate` and `price` are set per day by `daycfg`, which also multiplies `vol` and `tradesperday` by the day's regime and derives the day's `baseintensity` the way `simtick.compose` does (a half day trades about half a day).
+A run takes a configuration composed by `di.simtick` from its four layers (market, instrument, scenario, run). The calendar keys below belong to the scenario layer, so `di/simtick/config/scenarios.csv` carries them per scenario: `normal` has persistence 0.7, 30% spread and correlation 0.7; `volatile` long spells (persistence 0.8) with 60% spread and correlation 0.8. `tradingdate` and `price` are set per day by `daycfg`, which also multiplies `vol` and `tradesperday` by the day's regime and derives the day's `baseintensity` the way `simtick.compose` does (a half day trades about half a day).
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|

@@ -313,8 +313,8 @@ before,0,0,q,consttrades:simtick.run[constcfg],1,,Generate trades
 true,0,0,q,1=count distinct exec qty from consttrades where cond in `R`I,1,,All continuous quantities equal
 true,0,0,q,constcfg[`avgqty]=first exec qty from consttrades where cond in `R`I,1,,Continuous quantity equals avgqty
 comment,0,0,q,,1,,=== Sessions Tests ===
-before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simconfig/markets/sgx.json",1,,The SGX market: two sessions around a lunch break
-before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simconfig/instruments_sg.csv",1,,Its instruments
+before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simtick/config/markets/sgx.json",1,,The SGX market: two sessions around a lunch break
+before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simtick/config/instruments_sg.csv",1,,Its instruments
 before,0,0,q,sgxcfg:simtick.compose[sgxmarket;sgxins`D05;scenarios`normal;`seed`generatequotes!(42;1b)],1,,DBS on a normal day
 before,0,0,q,sgxres:simtick.run sgxcfg,1,,Run it
 before,0,0,q,sgxt:sgxres`trade,1,,Its trades
@@ -347,8 +347,8 @@ fail,0,0,q,simtick.run sgxcfg upsert `breakstart`breakend!13:00 12:00,1,,A break
 fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakend)!enlist 0Nu,1,,A break with one end null throws error
 fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakshare)!enlist 1f,1,,breakshare of 1 throws error
 fail,0,0,q,simtick.run sgxcfg upsert (enlist `breakstart)!enlist 08:00,1,,A break outside the day throws error
-before,0,0,q,hkmarket:simtick.loadmarket hsym`$"di/simconfig/markets/hkex.json",1,,The HKEX market
-before,0,0,q,hkins:simtick.loadinstruments hsym`$"di/simconfig/instruments_hk.csv",1,,Its instruments with their board lots
+before,0,0,q,hkmarket:simtick.loadmarket hsym`$"di/simtick/config/markets/hkex.json",1,,The HKEX market
+before,0,0,q,hkins:simtick.loadinstruments hsym`$"di/simtick/config/instruments_hk.csv",1,,Its instruments with their board lots
 before,0,0,q,hkcfg:simtick.compose[hkmarket;hkins`0005;scenarios`normal;`seed`generatequotes!(42;1b)],1,,HSBC with a 400-share board lot
 before,0,0,q,hkres:simtick.run hkcfg,1,,Run it
 true,0,0,q,400 800 1200 2000~hkcfg`roundlots,1,,The instrument row sets the board lots

@@ -1,4 +1,4 @@
-# di.simconfig
+# di.simtick.config
 
 Layered configuration for the `di.*` simulators: how the market works, what a stock is, what kind of day it is, and what the run is, kept apart and composed into the flat dictionary the engines read.
 
@@ -22,7 +22,7 @@ A later layer overrides an earlier one. The shipped files are examples; every lo
 The module is used through the simulators, which pass their own schema in. Directly:
 
 ```q
-q)simconfig:use`di.simconfig
+q)simconfig:use`di.simtick.config
 q)schema:simtick.schema                                  / a module's schema
 q)market:simconfig.loadmarket[schema;simconfig.path "markets/us_largecap.json"]
 q)instruments:simconfig.loadinstruments[schema;simconfig.path "instruments.csv"]
@@ -32,7 +32,9 @@ q)simconfig.saveconfig[`:run.json;cfg]                  / one file that reproduc
 q)cfg:simconfig.loadconfig[schema;`:run.json]
 ```
 
-`simconfig.path` finds a shipped file in the module search path from any working directory.
+`simconfig.path` gives the handle of a shipped file in the directory of the module that is loaded, so it is found from any working directory and is the file of the code that runs.
+
+The module is a child of `di.simtick` and lives in its folder. Loading it does not load `di.simtick`, and it needs nothing from it: a module passes its own schema in.
 
 ## Venue reference
 
@@ -77,7 +79,7 @@ A schema is a dictionary `key!(type;layer;group;description)`. Types: `S` symbol
 ## Testing
 
 ```bash
-make test-simconfig
+make test-simtick-config
 ```
 
 ## License

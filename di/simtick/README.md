@@ -47,8 +47,8 @@ A market may have one mid-day break, as SGX and HKEX do. The market file sets `b
 - A reopening print at `breakend`, condition code `B`, prints `breakauctionpct` of the continuous volume at the afternoon's first mid, and the spread's open multiplier decays again from the reopening.
 
 ```q
-q)sgx:simtick.loadmarket `:di/simconfig/markets/sgx.json
-q)ins:simtick.loadinstruments `:di/simconfig/instruments_sg.csv
+q)sgx:simtick.loadmarket `:di/simtick/config/markets/sgx.json
+q)ins:simtick.loadinstruments `:di/simtick/config/instruments_sg.csv
 q)cfg:simtick.compose[sgx;ins`D05;scenarios`normal;(enlist `tradingdate)!enlist 2026.08.18]
 q)select from (simtick.run cfg)`trade where cond in `O`B`C
 ```
@@ -193,9 +193,9 @@ A run is driven by a flat dictionary holding every parameter, which `compose` bu
 
 | Layer | What it holds | Shipped as |
 |-------|---------------|------------|
-| market | How a market works: session times, tick size, arrival clustering and intraday profile, sizes, spreads, venues and their shares, impact. Also the run defaults (date, seed, quotes) | `di/simconfig/markets/us_largecap.json`, grouped by topic |
-| instrument | What makes a stock itself: `sym`, `price`, `drift`, `vol`, `tradesperday`, and any market key it overrides (XOM and PG override `spreadticks` and `primaryvenue`) | `di/simconfig/instruments.csv`, one row per stock |
-| scenario | What makes a day type: multipliers of vol, trades per day and spread, the jump model, and the day-to-day regime keys read by `di.simmarket` | `di/simconfig/scenarios.csv`: `normal`, `volatile`, `jumpy` |
+| market | How a market works: session times, tick size, arrival clustering and intraday profile, sizes, spreads, venues and their shares, impact. Also the run defaults (date, seed, quotes) | `di/simtick/config/markets/us_largecap.json`, grouped by topic |
+| instrument | What makes a stock itself: `sym`, `price`, `drift`, `vol`, `tradesperday`, and any market key it overrides (XOM and PG override `spreadticks` and `primaryvenue`) | `di/simtick/config/instruments.csv`, one row per stock |
+| scenario | What makes a day type: multipliers of vol, trades per day and spread, the jump model, and the day-to-day regime keys read by `di.simmarket` | `di/simtick/config/scenarios.csv`: `normal`, `volatile`, `jumpy` |
 | run | What changes between two runs of the same stock: `tradingdate`, `seed`, `generatequotes` | a dictionary, empty for the market defaults |
 
 The layers are composed in that order, a later one overriding an earlier one. `compose` is strict: every value is cast to the type of the schema, an unknown key throws, and a missing key throws naming the layer that should supply it. There are no silent defaults. The scenario multipliers are applied once and then set to 1, so a saved configuration is not multiplied again.
@@ -204,7 +204,7 @@ The layers are composed in that order, a later one overriding an earlier one. `c
 
 To edit the layers, add a row to the instrument or scenario file, copy the market file for another market, or pass your own dictionaries: `compose` takes any dictionary for the instrument, so `` `sym`price`drift`vol`tradesperday!(`ACME;100.0;0.05;0.3;100000) `` is a complete instrument. The loaders take any path.
 
-Every parameter, with its type, layer, group and description, is listed in [docs/parameters.md](docs/parameters.md), generated from `simtick.describe[]`. The shared loading and composition code is in `di.simconfig`.
+Every parameter, with its type, layer, group and description, is listed in [docs/parameters.md](docs/parameters.md), generated from `simtick.describe[]`. The shared loading and composition code is in `di.simtick.config`.
 
 
 ## Testing
@@ -247,25 +247,27 @@ q)k4unit.moduletest`di.simtick
 
 The `docs/` folder contains:
 
-- **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)**: the mathematical foundations of all three modules, with the statistics the simulator reproduces
+- **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)**: the mathematical foundations of `di.simtick` and `di.simmarket`, with the statistics the simulator reproduces
 - **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)**: reference paper on Hawkes processes in finance (Bacry, Mastromatteo and Muzy, 2015)
 
 ## Project structure
 
 ```
-di/simconfig/
-├── init.q           # layered configuration shared by the modules
-├── markets/us_largecap.json
-├── instruments.csv
-└── scenarios.csv
 di/simtick/
 ├── init.q           # module code
 ├── test.csv         # unit tests (k4unit format)
 ├── testing.q        # manual test script
 ├── README.md        # this file
-└── docs/
-    ├── IntradayTickSimulatorPaper.pdf
-    └── HawkesProcessesInFinance.pdf
+├── docs/
+│   ├── IntradayTickSimulatorPaper.pdf
+│   ├── HawkesProcessesInFinance.pdf
+│   └── parameters.md
+└── config/          # di.simtick.config: the layered configuration
+    ├── init.q
+    ├── markets/     # us_largecap.json, sgx.json, hkex.json
+    ├── instruments.csv, instruments_sg.csv, instruments_hk.csv
+    ├── scenarios.csv
+    └── venues.csv
 ```
 
 ## License

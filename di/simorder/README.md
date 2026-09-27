@@ -178,7 +178,7 @@ Dark liquidity is limited by construction: midpoint off-exchange prints are abou
 | `darkshare` | market | Probability a passive child is sent dark, between 0 and 1; 0 turns the feature off | 0.25 |
 | `darkfillshare` | market | The most a dark child takes of a qualifying print, as a share of it | 0.5 |
 
-Venue codes stay MIC codes (and the pools' MPIDs) in the simulator. `simorder.venues[]` is the venue reference for executions: the tick market's `di/simconfig/venues.csv` (lit venues and `TRF`) with this module's `di/simorder/venues.csv` (the dark pools), mapping each code to the TCA application's for exports. That mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both to `CBOE`, so the TCA application sees exchange groups, not individual exchanges.
+Venue codes stay MIC codes (and the pools' MPIDs) in the simulator. `simorder.venues[]` is the venue reference for executions: the tick market's `di/simtick/config/venues.csv` (lit venues and `TRF`) with this module's `di/simorder/venues.csv` (the dark pools), mapping each code to the TCA application's for exports. That mapping loses granularity on purpose: `ARCX` maps to `NYSE`, and `BATS` and `EDGX` both to `CBOE`, so the TCA application sees exchange groups, not individual exchanges.
 
 On the good preset above, 66 of 69 fills added liquidity; on the bad preset 29 of 31 removed it. Whether the passive order ends up cheaper depends on the day: a passive child chasing a rising market re-pegs and pays later, an aggressive one pays the spread now.
 
