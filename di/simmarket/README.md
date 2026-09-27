@@ -60,11 +60,11 @@ q)result:simmarket.run[cfg;calendar;(::)]
 q)key result
 `trade`quote`days
 q)select date,closingtime,volmult,volumemult,dayseed,open,close,overnightret,trades,volume from result`days
-date       closingtime volmult   volumemult dayseed  open     close  overnightret trades volume  
--------------------------------------------------------------------------------------------------
-2026.08.18 16:00       0.852167  0.852167   10612790 215      211.74 0            237203 39090196
-2026.08.19 16:00       0.7869607 0.7869607  10612821 209.1146 214.22 -0.01247679  218335 36320283
-2026.08.20 13:00       1.325001  1.325001   10612852 212.5223 221.48 -0.007956562 196695 32583884
+date       closingtime volmult   volumemult dayseed    open     close  overnightret trades volume
+---------------------------------------------------------------------------------------------------
+2026.08.18 16:00       0.8656371 1.22277    1645517308 215      206.43 0            609930 101137024
+2026.08.19 16:00       0.8869423 1.437307   171140401  207.4679 199.68 0.0050151    723077 120458140
+2026.08.20 13:00       0.9602986 1.48355    1374270189 197.2886 199.4  -0.01204867  397249 65388781
 ```
 
 `generatequotes:0b` in the config returns `trade` and `days` only. The `days` table starts with the calendar and regime columns (`closingtime`, `volmult`, `volumemult`, `jumpintensity`, the seeds and the regime states `volstate` and `volumestate`) and ends with the day's open, close, overnight return, trades and volume.
@@ -128,6 +128,7 @@ In memory the trades and quotes of every instrument come merged and sorted by ti
 |----------|-------------|
 | `simmarket.run[cfg;calendar;dbpath]` | Run one stock; returns a dict `trade`quote`days` in memory, or writes the database and returns `dbpath` |
 | `simmarket.writehdb[cfgs;calendar;dbpath;opts]` | Several stocks written as a date-partitioned database one day at a time; `opts` with any of `tables` and `compression` |
+| `simmarket.correlations[cfgs]` | The close-to-close correlations a configuration implies, as a table keyed by sym |
 | `simmarket.loadrun[dbpath]` | The run that wrote a database: `configs`, `calendar`, `opts`, `version`, `commit`; warns when the module version or the commit differs from the code running |
 | `simmarket.version[]` | The git commit of the code (with `-dirty` when the modules have uncommitted changes), or `unknown` outside a checkout |
 | `simmarket.moduleversion` | The module's version string, `0.1.0` |
@@ -221,11 +222,33 @@ Days differ. Two standardized AR(1) states with persistence `regimepersistence`,
 
 ### Seeds: one per day, shared across instruments
 
+Every seed is a hash of what it depends on (`simtick.mixseed`). Seeds computed by arithmetic from the date and the ticker, as they were before, gave streams that were correlated between instruments and between consecutive dates (q's generator correlates the streams of related seeds at 0.7 and more, all along the stream), so instruments documented as independent were not. With hashed seeds they are, and the tapes of a multi-day run differ from those of earlier versions.
+
 With `cfg[`seed]` set, every date gets a regime seed from the seed and the date alone, so a date's regime innovation is the same in any calendar that contains it and, since it does not depend on `sym`, the same for every instrument run on that date: the market's day. From it the instrument gets a day seed (for its tape) and a gap seed (for its overnight return). Consequences:
 
 - Any day can be regenerated alone, exactly, from its row of the `days` table: `simtick.run simmarket.daycfg[cfg;days d;days[d]`open]`.
 - Adding or removing days elsewhere in the calendar does not change a day's innovation or tape, only the regime level that the AR(1) carries into it and the open it inherits.
 - Without a seed nothing is seeded and every run differs.
+
+### Co-movement across days
+
+The factors of `di.simtick` (see its README, Co-movement) are carried across days. Each date has its factor seed, a hash of the run seed and the date, so every stock of a run shares the day's factor paths and common jumps. The overnight gap mixes the factors' overnight normals of the date with the stock's own, with the stock's loadings, so the gaps of two stocks correlate as their days do. The common jumps' variance is taken out of the diffusion in proportion to the day's volatility regime, and the bursts after jumps follow the day's volume, so what composition checked holds on every day.
+
+`simmarket.correlations[cfgs]` returns the close-to-close correlations a configuration implies, loadings and common jumps together. For the shipped US instruments:
+
+```q
+q)simmarket.correlations simmarket.compose[market;instruments;scenarios;`normal;(enlist `seed)!enlist 42]
+sym | NVDA      XOM       PG        MSFT
+----| ---------------------------------------
+NVDA| 1         0.4553626 0.3603431 0.6184789
+XOM | 0.4553626 1         0.3255571 0.4728909
+PG  | 0.3603431 0.3255571 1         0.3693238
+MSFT| 0.6184789 0.4728909 0.3693238 1
+```
+
+These are above the products of the loadings (0.36 for NVDA and XOM) because the common jumps add covariance. Over two years the six pairs measure within 0.1 of these values and every stock's close-to-close vol within 5% of its `vol`.
+
+A run needs a seed when its stocks have loadings (they share the factors through it), and its stocks must agree on the factor keys, the session and the seed; both are checked.
 
 ### Validation
 
@@ -251,11 +274,11 @@ q)k4unit:use`local.k4unit
 q)k4unit.moduletest`di.simmarket
 ```
 
-The suite (174 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) sessions (a half day as the morning alone, an early close keeping the break, the break's return in `days`, the close-to-close vol with a break over two years) and reproducibility.
+The suite (198 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) the independence of the seeds' streams, co-movement (the implied correlations and their matrix, two years of four stocks against them, vols inside the budget, overnight gaps, a stock alone or with others, the intraday correlation below the daily one), sessions (a half day as the morning alone, an early close keeping the break, the break's return in `days`, the close-to-close vol with a break over two years) and reproducibility.
 
 ## Future Extensions
 
-- **A market factor across instruments**: the shared regime seed is the hook for a common day and, later, a common intraday path
+- **Stress dependence**: loadings that rise on bad days and a leverage effect, on top of the constant factor model
 
 ## License
 
