@@ -23,11 +23,17 @@
 
 layers:`essential`market`instrument`order`scenario`run`optional`derived;
 
+candidate:{[relative;dir]
+  / the handle of di/simconfig/<relative> under a directory of the module
+  / search path (the working directory when the entry is empty)
+  :hsym `$$[dir~"";"";dir,"/"],"di/simconfig/",relative;
+  };
+
 path:{[relative]
   / the first file at di/simconfig/<relative> in the module search path,
   / so the shipped market, instrument and scenario files are found from
   / any working directory; a loader takes any other path as well
-  cands:{[r;p] hsym `$$[p~"";"";p,"/"],"di/simconfig/",r}[relative] each .Q.m.SP;
+  cands:.z.m.candidate[relative] each .Q.m.SP;
   found:cands where not ()~/:key each cands;
   if[0=count found; '"path: not found in the module search path - ",relative];
   first found
@@ -85,10 +91,16 @@ nonnull:{[d]
 / loaders
 / ============================================================
 
+groupkeys:{[v]
+  / the keys of one top-level entry of a market file: the group's own
+  / dictionary, or nothing for a scalar
+  :$[99h=type v; v; (`symbol$())!()];
+  };
+
 flatten:{[d]
   / a JSON document's groups flattened into one dictionary; a top-level
   / scalar is kept as it is
-  raze {[v] $[99h=type v; v; (`symbol$())!()]} each value d
+  raze .z.m.groupkeys each value d
   };
 
 loadmarket:{[schema;filepath]
@@ -101,6 +113,14 @@ loadmarket:{[schema;filepath]
   key[m]!.z.m.cast'[schema[key m][;0];value m]
   };
 
+csvtype:{[schema;c]
+  / the type a CSV column is read with: the name column a symbol, list
+  / and starred types a string (compose casts them), the others by the
+  / schema
+  t:schema[c;0];
+  :$[c=`name; "S"; ("L"=last t) or "*"=first t; "*"; first t];
+  };
+
 loadrows:{[schema;filepath;keycol]
   / a CSV of rows keyed by keycol (instruments by sym, scenarios by name):
   / columns are typed by the schema, list and starred types read as strings
@@ -110,7 +130,7 @@ loadrows:{[schema;filepath;keycol]
   hdr:`$csv vs first read0 filepath;
   if[not keycol in hdr; '"loadrows: the CSV must have a ",string[keycol]," column"];
   if[count unknown:hdr except keycol,key schema; '"loadrows: unknown columns - ",", " sv string unknown];
-  types:{[schema;c] t:schema[c;0]; $[c=`name; "S"; ("L"=last t) or "*"=first t; "*"; first t]}[schema] each hdr;
+  types:.z.m.csvtype[schema] each hdr;
   t:(types;enlist csv) 0: filepath;
   / keyed by a copy of the key column (id), so that a row taken by its key
   / still carries its sym or name among its values
@@ -152,6 +172,11 @@ loadvenues:{[filepath]
 / compose, save, reload
 / ============================================================
 
+keywithlayer:{[schema;k]
+  / a key with the layer that should supply it, for an error message
+  :string[k]," (",string[schema[k;1]]," layer)";
+  };
+
 compose:{[schema;market;instrument;scenario;run]
   / the flat configuration: market, then the instrument's filled entries,
   / then the scenario's, then the run's; every value cast by the schema;
@@ -167,8 +192,20 @@ compose:{[schema;market;instrument;scenario;run]
   cfg:key[cfg]!.z.m.cast'[schema[key cfg][;0];value cfg];
   need:(key schema) where not (value[schema][;1]) in `optional`derived;
   if[count missing:need where not need in key cfg;
-    '"compose: missing keys - ",", " sv {[schema;k] string[k]," (",string[schema[k;1]]," layer)"}[schema] each missing];
+    '"compose: missing keys - ",", " sv .z.m.keywithlayer[schema] each missing];
   cfg
+  };
+
+writejson:{[filepath;cfg]
+  / a configuration written as one line of JSON
+  filepath 0: enlist .j.j cfg;
+  :(::);
+  };
+
+caught:{[e]
+  / the message of an error trapped, for the caller to signal once it has
+  / restored what it changed
+  :e;
   };
 
 saveconfig:{[filepath;cfg]
@@ -178,7 +215,7 @@ saveconfig:{[filepath;cfg]
   / floats written at full precision (.j.j follows \P), so the reload replays exactly
   prec:system"P";
   system"P 17";
-  r:@[{[f;c] f 0: enlist .j.j c; ::}[filepath;];cfg;{[e] e}];
+  r:@[.z.m.writejson filepath;cfg;.z.m.caught];
   system"P ",string prec;
   if[10h=type r; 'r];
   };

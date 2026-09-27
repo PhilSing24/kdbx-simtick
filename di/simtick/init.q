@@ -113,6 +113,12 @@ shape:{[cfg;progress]
   w[i]+(x-i)*w[i+1]-w[i]
   };
 
+mixone:{[a;b]
+  / a seed from two integer atoms: the first four bytes of the md5 of
+  / their text, between 1 and 2^31-1
+  :1+(256 sv `long$4#md5 (string a),"|",string b) mod 2147483646;
+  };
+
 mixseed:{[a;b]
   / a seed from two integers, hashed (md5), between 1 and 2^31-1. q's
   / generator gives correlated streams for seeds that are related (a
@@ -122,8 +128,7 @@ mixseed:{[a;b]
   / arithmetic, so that the streams are independent
   / a, b: integers (atoms, or lists of the same length)
   / returns: long seed(s)
-  f:{[a;b] 1+(256 sv `long$4#md5 (string a),"|",string b) mod 2147483646};
-  $[(0>type a)&0>type b; f[a;b]; f'[a;b]]
+  :$[(0>type a)&0>type b; .z.m.mixone[a;b]; .z.m.mixone'[a;b]];
   };
 
 poissonshort:{[duration;t]
@@ -358,6 +363,20 @@ factorgaps:{[cfg]
   `overnight`breakgap!(.z.m.rng.normal[k;cfg];.z.m.rng.normal[k;cfg])
   };
 
+factorpath:{[cfg;w;nsec;i]
+  / one factor's path: its value before each trading second, 0 at the
+  / open, the variance of each second its share w of the day's
+  / i: the factor's index (the paths are drawn factor after factor)
+  :0f,sums sqrt[w]*.z.m.rng.normal[nsec;cfg];
+  };
+
+factorjumps:{[cfg;nsec;n;i]
+  / one factor's jumps of the day: n[i] of them, at times uniform in the
+  / trading seconds, with normal log sizes of spread factorjumpvols
+  / returns: table `time`factor`size
+  :([]time:asc n[i]?`float$nsec;factor:n[i]#i;size:cfg[`factorjumpvols;i]*.z.m.rng.normal[n i;cfg]);
+  };
+
 factorday:{[cfg]
   / the day's common inputs, from factorseed and the market's keys alone
   / (the factors, their profile and jumps, the session)
@@ -372,9 +391,9 @@ factorday:{[cfg]
   nsec:`long$.z.m.tradingseconds cfg;
   w:.z.m.shape[@[cfg;`profile;:;cfg`factorprofile];(0.5+til nsec)%nsec];
   w:w%sum w;
-  path:{[cfg;w;nsec;i] 0f,sums sqrt[w]*.z.m.rng.normal[nsec;cfg]}[cfg;w;nsec] each til k;
+  path:.z.m.factorpath[cfg;w;nsec] each til k;
   n:.z.m.rng.poisson[`float$cfg`factorjumpintensities;40];
-  jumps:raze {[cfg;nsec;n;i] ([]time:asc n[i]?`float$nsec;factor:n[i]#i;size:cfg[`factorjumpvols;i]*.z.m.rng.normal[n i;cfg])}[cfg;nsec;n] each til k;
+  jumps:raze .z.m.factorjumps[cfg;nsec;n] each til k;
   g,`path`variance`jumps!(path;0f,sums w;`time xasc jumps)
   };
 
@@ -631,6 +650,14 @@ flow.generate:{[cfg;n]
   `sign`qty!(sign;.z.m.qty.gen[n;cfg])
   };
 
+flow.decay:{[e;dt;a]
+  / the transient impact in force at a trade: what was in force at the
+  / previous one, decayed over the time since, plus the trade's own
+  / e: the transient impact before; dt: the decay exponent of the step
+  / a: the trade's transient impulse
+  :a+e*exp neg dt;
+  };
+
 flow.impact:{[cfg;tradetimes;flow;quotetimes]
   / the shift of the mid in force at each quote time from the signed trades
   / before it (a propagator): each trade moves the mid by impactticks ticks
@@ -649,7 +676,7 @@ flow.impact:{[cfg;tradetimes;flow;quotetimes]
   lam:log[2]%cfg`impacthalflifeseconds;
   perm:cfg`impactpermanent;
   / transient part in force just after each trade, and the permanent part
-  trans:{[e;dt;a] a+e*exp neg dt}\[0f;lam*deltas tradetimes;(1-perm)*imp];
+  trans:.z.m.flow.decay\[0f;lam*deltas tradetimes;(1-perm)*imp];
   permcum:sums perm*imp;
   / at each quote time: the parts left from the last trade before it
   j:tradetimes bin quotetimes;
@@ -853,6 +880,11 @@ validate:{[cfg]
   };
 
 
+addsym:{[s;t]
+  / a day's table with its sym column first, parted
+  :update `p#sym from `sym`time`seq xcols update sym:s from t;
+  };
+
 run:{[cfg]
   / main simulation entry point
   / cfg: configuration dictionary (typically loaded via loadconfig)
@@ -930,9 +962,8 @@ run:{[cfg]
   quotes:update seq:(count quotes)#seq from quotes;
   trades:update seq:(count quotes)_seq from trades;
 
-  addsym:{[s;t] update `p#sym from `sym`time`seq xcols update sym:s from t};
-  trades:addsym[cfg`sym;trades];
-  $[cfg`generatequotes; `trade`quote!(trades;addsym[cfg`sym;quotes]); trades]
+  trades:.z.m.addsym[cfg`sym;trades];
+  $[cfg`generatequotes; `trade`quote!(trades;.z.m.addsym[cfg`sym;quotes]); trades]
   };
 
 / ============================================================
