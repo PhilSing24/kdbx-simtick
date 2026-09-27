@@ -76,6 +76,8 @@ Then load modules:
 simmarket:use`di.simmarket
 ```
 
+`di.simmarket` logs through a logger the caller injects, once, before a run: `simmarket.init[(use`di.util.log)`logdict]` with the Data Intellect logger, or any dictionary of `info`, `warn` and `error` functions (see its README).
+
 ## Testing
 
 Each module carries a `test.csv` in k4unit format, run by `di.k4unit`, the Data Intellect test module. It ships upstream, so clone [DataIntellectTech/kdbx-modules](https://github.com/DataIntellectTech/kdbx-modules) and put the clone on `QPATH` after this repository (`make test` says so when it is missing):

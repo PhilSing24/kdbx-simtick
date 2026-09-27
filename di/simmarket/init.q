@@ -9,6 +9,59 @@ simtick:use`di.simtick;
 simconfig:use`di.simtick.config;
 
 
+/ ============================================================
+/ logging: an injected dependency
+/ ============================================================
+/ the module logs through functions the caller injects with init, never
+/ through a logger of its own choosing: a dictionary `info`warn`error of
+/ functions {[ctx;msg]}, ctx a symbol and msg a string. di.util.log
+/ provides one ready to pass (init logger.logdict); to silence the
+/ module, pass functions that do nothing. Only the functions that log
+/ need it: run, runmany, writehdb and loadrun. The others are pure
+
+ready:0b;
+
+init:{[deps]
+  / wire the injected dependencies; required before run, runmany,
+  / writehdb and loadrun
+  / deps: `log!(logdict), logdict `info`warn`error!({[c;m]};{[c;m]};{[c;m]})
+  / examples:
+  /   logger:use`di.util.log
+  /   simmarket.init[logger.logdict]
+  /   simmarket.init[enlist[`log]!enlist `info`warn`error!(f;g;h)]
+  logdict:$[99h=type deps;$[(`log in key deps) and not (::)~deps`log;deps`log;()!()];()!()];
+  if[not count logdict;
+    '"di.simmarket: log dependency is required; pass `info`warn`error functions - see di.util.log"];
+  if[not 99h=type logdict; '"di.simmarket: the log dependency must be a dictionary of `info`warn`error functions"];
+  if[count missing:`info`warn`error except key logdict;
+    '"di.simmarket: the log dependency lacks ",(", " sv string missing)," - pass `info`warn`error functions"];
+  if[not all 100h<=type each logdict`info`warn`error;
+    '"di.simmarket: the log dependency's info, warn and error must be functions {[ctx;msg]}"];
+  .z.m.loginfo:logdict`info;
+  .z.m.logwarn:logdict`warn;
+  .z.m.logerr:logdict`error;
+  .z.m.ready:1b;
+  };
+
+needinit:{[fn]
+  / fail clearly when a function that logs is called before init
+  if[not .z.m.ready;
+    '"di.simmarket: ",fn," logs, so init[deps] is needed first - deps a dictionary with a log entry of `info`warn`error ",
+      "functions {[ctx;msg]}, for example simmarket.init[(use`di.util.log)`logdict]"];
+  };
+
+span:{[calendar]
+  / the dates of a calendar in words, for a log message
+  d:calendar`date;
+  :string[count d]," dates from ",string[first d]," to ",string last d;
+  };
+
+stocks:{[syms]
+  / the stocks of a run in words, for a log message
+  :string[count syms]," stocks (",(" " sv string syms),")";
+  };
+
+
 val.haskeys:{[cfg;reqkeys;fn]
   / check config dictionary has all required keys
   / cfg: configuration dictionary
@@ -407,12 +460,22 @@ run:{[cfg;calendar;dbpath]
   /
   / example (persist to disk):
   /   simmarket.run[cfg;calendar;`:/tmp/mydb]
+  .z.m.needinit "run";
   cfg:.z.m.validatecfg cfg;
   if[not (::)~dbpath; :.z.m.writehdb[(enlist cfg`sym)!enlist cfg;calendar;dbpath;(`symbol$())!()]];
+  .z.m.loginfo[`simmarket;"run: ",string[cfg`sym],", ",.z.m.span[.z.m.validate calendar],", in memory"];
+  r:.z.m.runmemory[cfg;calendar];
+  .z.m.loginfo[`simmarket;"run: done, ",string[cfg`sym],", ",string[count r`days]," dates, ",string[count r`trade]," trades"];
+  :r;
+  };
+
+runmemory:{[cfg;calendar]
+  / one stock over a calendar in memory, without logging (see run)
+  / cfg: a validated configuration
   reg:.z.m.regimes[cfg;calendar];
   / every day draws from its own seeds (see seeds); none when the config has no seed
-  init:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
-  state:.z.m.runstep[cfg]/[init;reg];
+  start:`prevdate`price`trade`quote`days!(0Nd;`float$cfg`price;();();());
+  state:.z.m.runstep[cfg]/[start;reg];
   days:raze state`days;
   :$[cfg`generatequotes;
     `trade`quote`days!(raze state`trade;raze state`quote;days);
@@ -586,14 +649,19 @@ runmany:{[cfgs;calendar;dbpath]
   /   return quotes), the tables of every instrument and day, sorted by
   /   time, and the days table with a sym column; on disk, dbpath: the
   /   standard date-partitioned database of writehdb with its defaults
+  .z.m.needinit "runmany";
   if[not 99h=type cfgs; '"runmany: cfgs must be a dictionary sym!configuration"];
   .z.m.samefactors cfgs;
   if[not (::)~dbpath; :.z.m.writehdb[cfgs;calendar;dbpath;(`symbol$())!()]];
-  rs:.z.m.run[;calendar;(::)] each cfgs;
+  cfgs:.z.m.validatecfg each cfgs;
+  .z.m.loginfo[`simmarket;"runmany: ",.z.m.stocks[key cfgs],", ",.z.m.span[.z.m.validate calendar],", in memory"];
+  rs:.z.m.runmemory[;calendar] each cfgs;
   merged:(`symbol$())!();
   merged[`trade]:`time`sym xasc raze rs[;`trade];
   if[all `quote in/: key each rs; merged[`quote]:`time`sym xasc raze rs[;`quote]];
   merged[`days]:`sym`date xasc raze .z.m.dayswithsym'[key rs;value rs];
+  .z.m.loginfo[`simmarket;"runmany: done, ",string[count cfgs]," stocks, ",string[count distinct merged[`days]`date]," dates, ",
+    string[count merged`trade]," trades"];
   :merged;
   };
 
@@ -666,17 +734,18 @@ loadrun:{[dbpath]
   / writehdb[r`configs;r`calendar;path;r`opts] reproduces the database
   / with the same code. A warning is printed when either the module
   / version or the commit differs from the code running
+  .z.m.needinit "loadrun";
   if[not -11h=type dbpath; '"loadrun: dbpath must be a file handle"];
   f:.Q.dd[hsym`$string dbpath;`simrun];
   if[()~key f; '"loadrun: no simrun at ",string dbpath];
   d:get f;
   opts:`tables`compression!(d`tables;d`compression);
   if[not d[`version]~.z.m.version;
-    -1 "loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.version,
-      ": the same configuration and seeds reproduce it only with the same code"];
+    .z.m.logwarn[`simmarket;"loadrun: the database was written by di.simmarket ",d[`version],", the module running is ",.z.m.version,
+      ": the same configuration and seeds reproduce it only with the same code"]];
   if[not d[`commit]=.z.m.commit[];
-    -1 "loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
-      string[.z.m.commit[]],": the same configuration and seeds reproduce it only with the same code"];
+    .z.m.logwarn[`simmarket;"loadrun: the database was written at commit ",string[d`commit],", the code running is at ",
+      string[.z.m.commit[]],": the same configuration and seeds reproduce it only with the same code"]];
   :`configs`calendar`opts`version`commit!(d`configs;.z.m.validate d`calendar;opts;d`version;d`commit);
   };
 
@@ -760,8 +829,10 @@ writeday:{[cfgs;regs;dst;o;state;i]
   syms:key cfgs;
   done:.z.m.complete[dst;date;o`tables;syms];
   if[count done;
+    .z.m.loginfo[`simmarket;"writehdb: ",string[date]," skipped, already complete"];
     state[`price]:syms!(exec sym!close from done) syms;
     state[`prevdate]:date;
+    state[`skipped]+:1;
     :state];
   system "rm -rf ",1_string .Q.par[dst;date;`];
   rs:syms!.z.m.stockday[cfgs;regs;o;state;i] each syms;
@@ -769,8 +840,11 @@ writeday:{[cfgs;regs;dst;o;state;i]
   .z.m.writetable[dst;date;`trade;trade;o`compression;`sym`time];
   if[`quote in o`tables; .z.m.writetable[dst;date;`quote;raze rs[;`quote];o`compression;`sym`time]];
   .z.m.writetable[dst;date;`days;delete date from raze rs[;`day];o`compression;enlist `sym];
+  .z.m.loginfo[`simmarket;"writehdb: ",string[date]," written, ",string[count syms]," stocks, ",string[count trade]," trades",
+    $[`quote in o`tables;", ",string[sum count each rs[;`quote]]," quotes";""]];
   state[`price]:syms!rs[;`close] syms;
   state[`prevdate]:date;
+  state[`written]+:1;
   :state;
   };
 
@@ -794,6 +868,7 @@ writehdb:{[cfgs;calendar;dbpath;opts]
   /   continues where it stopped and equals a full run; the simrun file
   /   at the root replays the run (see loadrun); a database built with
   /   another configuration, other than a shorter calendar, is refused
+  .z.m.needinit "writehdb";
   if[not 99h=type cfgs; '"writehdb: cfgs must be a dictionary sym!configuration"];
   if[not -11h=type dbpath; '"writehdb: dbpath must be a file handle"];
   cfgs:.z.m.validatecfg each cfgs;
@@ -810,11 +885,14 @@ writehdb:{[cfgs;calendar;dbpath;opts]
     if[not old[`opts]~o; '"writehdb: ",string[dbpath]," holds a database written with other tables or compression"];
     if[not (old`calendar)~(count old`calendar)#calendar; '"writehdb: ",string[dbpath]," holds a database built on ",
       "another calendar (a calendar can only be extended)"]];
+  .z.m.loginfo[`simmarket;"writehdb: ",.z.m.stocks[key cfgs],", ",.z.m.span[calendar],", to ",string[dbpath],", tables ",
+    (" " sv string o`tables),", compression ",$[count o`compression;" " sv string o`compression;"none"]];
   system "mkdir -p ",1_string dst;
   .z.m.saverun[dst;runcfg];
   regs:.z.m.regimes[;calendar] each cfgs;
-  init:`prevdate`price!(0Nd;key[cfgs]!`float$value[cfgs][;`price]);
-  .z.m.writeday[cfgs;regs;dst;o]/[init;til count calendar];
+  start:`prevdate`price`written`skipped!(0Nd;key[cfgs]!`float$value[cfgs][;`price];0;0);
+  state:.z.m.writeday[cfgs;regs;dst;o]/[start;til count calendar];
+  .z.m.loginfo[`simmarket;"writehdb: done, ",string[state`written]," dates written, ",string[state`skipped]," skipped, at ",string dbpath];
   :dbpath;
   };
 
@@ -825,6 +903,6 @@ describe:{[]
   };
 
 / export public interface
-export:([version;commit;run;runmany;writehdb;correlations;daygap;samefactors;loadrun;complete;writetable;
+export:([version;commit;init;run;runmany;writehdb;correlations;daygap;samefactors;loadrun;complete;writetable;
   writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;
   nysecalendar;validate;validatecfg;describe]);

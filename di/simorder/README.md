@@ -251,6 +251,7 @@ q)arrmoved:simorder.run[arrcfg;moved`trades;moved`quotes]
 `generate` draws an order flow over every instrument and day in the market it is given, and `runmany` runs a table of order configs; `runflow` does both. `di.simmarket`'s in-memory result serves as the market as it is, and so do the `trade` and `quote` tables of its database.
 
 ```q
+q)simmarket.init[(use`di.util.log)`logdict]          / di.simmarket logs through an injected logger
 q)cal:simmarket.run[cfg;calendar;(::)]
 q)flow:simorder.runflow[market;`norders`seed!(3;7);cal`trade;cal`quote]
 q)select orderid,sym,side,orderqty,`date$starttime,algo,account,filledqty,avgpx,arrivalprice from flow`orders
