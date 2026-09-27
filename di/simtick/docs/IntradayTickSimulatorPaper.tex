@@ -130,6 +130,14 @@ s(p)=w_i+(x-i)\,(w_{i+1}-w_i),\qquad x=\min\!\Bigl(n-1,\max\bigl(0,\,np-\tfrac12
 \end{equation}
 A binned profile expresses a flat midday and a spike in the last minutes, which the earlier three-multiplier cosine could not. The shape never exceeds $\max_i w_i$, which the simulation relies on.
 
+\subsection{Sessions and the Mid-Day Break}
+
+A market may have one mid-day break $[t_b,t_e]$ (\key{breakstart}, \key{breakend}), as the Singapore and Hong Kong exchanges do. The simulator then works in trading time, the break removed: with $T$ the trading seconds of the day, the arrival processes, the profile $s(\cdot)$ and the clocks of Section~4 live on $[0,T)$, and a trading time $u$ is mapped to the wall clock by $u\mapsto u+(t_e-t_b)\,\mathbf{1}\{u\ge t_b\}$, so no trade or quote falls in the break and the last quote stays in force through it. The mid takes a gap over the break,
+\begin{equation}
+\ln\frac{S(t_e)}{S(t_b^-)}\sim\mathcal N\!\left(-\tfrac12 v_b,\;v_b\right),\qquad v_b=\key{breakshare}\,\frac{\sigma^2}{D},
+\end{equation}
+with $D$ the trading days of the year, while the diffusion runs at $\sigma\sqrt{1-\key{breakshare}}$, so the variance of the day, and with the overnight gap of Section~7 the close-to-close variance, is unchanged. A reopening print at $t_e$ (condition code \key{B}) prints a share \key{breakauctionpct} of the continuous volume at the afternoon's first mid. A half day on such a market is the morning session alone. The auction phases of the exchanges are single prints, there is no pre-market or after-hours trading, and times are the exchange's local time.
+
 \subsection{Exact Simulation by the Cluster Representation}
 
 Ogata's thinning simulates a Hawkes process by accepting candidates of a Poisson process at a rate that must bound the intensity. With a fixed bound the acceptance probability is capped at 1 in bursts, which under-produces arrivals: 5\% at branching ratio 0.4 and threefold at 0.9 in the earlier implementation. The simulator now uses the cluster representation of Hawkes and Oakes (1974), which is exact and needs no bound: immigrants arrive as an inhomogeneous Poisson process of intensity $\lambda_0(t)$, and every event spawns Poisson($n$) children at Exp($\beta$) delays, generation after generation until a generation is empty. The union of all generations is the process.

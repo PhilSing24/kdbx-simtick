@@ -133,6 +133,30 @@ hawkes.children:{[params;parents]
   asc t where t<params`duration
   };
 
+session:{[cfg]
+  / the day's trading time: the open and close, whether the market has a
+  / mid-day break (breakstart and breakend, null for none), the trading
+  / seconds T with the break removed, and the break's offset in trading
+  / seconds from the open and its length in seconds. The engine works in
+  / trading seconds (arrivals, profile, clocks) and maps to the wall clock
+  / by inserting the break (see walltime)
+  open:`timespan$cfg`openingtime;
+  close:`timespan$cfg`closingtime;
+  hasbreak:$[`breakstart in key cfg; not null cfg`breakstart; 0b];
+  breaklen:$[hasbreak; ((`timespan$cfg`breakend)-`timespan$cfg`breakstart)%nspersec; 0f];
+  offset:$[hasbreak; ((`timespan$cfg`breakstart)-open)%nspersec; 0w];
+  `open`close`hasbreak`breakoffset`breaklen`T!(open;close;hasbreak;offset;breaklen;((close-open)%nspersec)-breaklen)
+  };
+
+tradingseconds:{[cfg] (.z.m.session cfg)`T};
+
+walltime:{[cfg;secs]
+  / trading seconds from the open to seconds from the open on the wall
+  / clock: the break is inserted before every time at or after it
+  s:.z.m.session cfg;
+  secs+s[`breaklen]*secs>=s`breakoffset
+  };
+
 hawkes.process:{[cfg;baseintensity;extra]
   / a Hawkes process with exponential kernel on the session, simulated
   / through its cluster representation (Hawkes and Oakes, 1974): immigrants
@@ -144,16 +168,14 @@ hawkes.process:{[cfg;baseintensity;extra]
   / cfg: config dict with `alpha`beta`openingtime`closingtime`profile
   / baseintensity: immigrant intensity before the intraday shape (per second)
   / extra: extra immigrant times in seconds from open (a shock, see hawkes.shock)
-  / returns: ascending event times in seconds from session start
+  / returns: ascending event times in trading seconds from the open
   /
   / This is exact: unlike Ogata thinning it needs no upper bound on the
   / intensity, so bursts are never capped (a fixed bound under-produced
   / arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and each
   / generation is a vector operation rather than a scan over candidates
-  open:`timespan$cfg`openingtime;
-  close:`timespan$cfg`closingtime;
-  if[open>=close; '"arrivals: openingtime must be before closingtime"];
-  duration:(close-open)%nspersec;
+  if[(`timespan$cfg`openingtime)>=`timespan$cfg`closingtime; '"arrivals: openingtime must be before closingtime"];
+  duration:.z.m.tradingseconds cfg;
 
   / immigrants: a homogeneous Poisson process at the day's peak baseline,
   / thinned by shape/maxmult (exact, since shape never exceeds maxmult)
@@ -218,8 +240,8 @@ jump.events:{[cfg;duration]
   / the day's price jumps as events (Merton jump-diffusion): Poisson arrivals
   / at jumpintensity per day, uniform in the session, with lognormal sizes
   / cfg: config dict with `jumpintensity`jumpmean`jumpvol`rngmodel
-  / duration: session length in seconds
-  / returns: table `time`factor, time in seconds from open ascending, factor
+  / duration: trading seconds of the day
+  / returns: table `time`factor, time in trading seconds from open ascending, factor
   /   the multiplicative jump exp(jumpmean+jumpvol*N)
   n:first .z.m.rng.poisson[enlist `float$cfg`jumpintensity;40];
   times:asc n?`float$duration;
@@ -241,26 +263,38 @@ clocksteps:{[cfg;times]
   n:count times;
   $[`transaction=`calendar^cfg`clock;
     0f,(n-1)#1%cfg[`tradingdays]*1|n-1;
-    [open:`timespan$cfg`openingtime; close:`timespan$cfg`closingtime;
-     (0f,1_deltas times)%cfg[`tradingdays]*(close-open)%nspersec]]
+    (0f,1_deltas times)%cfg[`tradingdays]*.z.m.tradingseconds cfg]
   };
 
 pricepath:{[cfg;times;jumps]
   / the price path at the given points: start price, diffusion steps by the
-  / config's clock, and the jumps at or before each point
+  / config's clock, the jumps at or before each point, and over a mid-day
+  / break a gap return: normal with variance breakshare of the day's
+  / (vol^2/tradingdays) and mean minus half of it, applied to every point
+  / at or after the break, the diffusion running on the rest of the day's
+  / variance so the close-to-close variance is unchanged
   / cfg: config dict with `price`vol`drift`clock`tradingdays and the session keys
-  / times: points in seconds from open, ascending
+  / times: points in trading seconds from open, ascending
   / jumps: `time`factor table (see jump.events), possibly empty
   / returns: price per point
   times:`float$times;
-  path:cfg[`price]*prds .z.m.diffusion[cfg;.z.m.clocksteps[cfg;times]];
-  path*1f^(prds jumps`factor) jumps[`time] bin times
+  s:.z.m.session cfg;
+  share:$[s[`hasbreak]&`breakshare in key cfg; cfg`breakshare; 0f];
+  dc:cfg;
+  dc[`vol]:cfg[`vol]*sqrt 1-share;
+  path:cfg[`price]*prds .z.m.diffusion[dc;.z.m.clocksteps[cfg;times]];
+  path*:1f^(prds jumps`factor) jumps[`time] bin times;
+  if[share>0;
+    v:share*cfg[`vol]*cfg[`vol]%cfg`tradingdays;
+    gap:(neg 0.5*v)+sqrt[v]*first .z.m.rng.normal[1;cfg];
+    path*:exp gap*times>=s`breakoffset];
+  path
   };
 
 price:{[cfg;times]
   / generate prices for given points in time
   / cfg: configuration dictionary
-  / times: list of times in seconds from session start, ascending
+  / times: list of times in trading seconds from the open, ascending
   / returns: list of prices corresponding to each time
   /
   / Required config keys:
@@ -273,8 +307,7 @@ price:{[cfg;times]
   if[any times<0; '"price: times must be non-negative"];
   reqkeys:`openingtime`closingtime`tradingdays`pricemodel`price`vol`drift;
   .z.m.val.haskeys[cfg;reqkeys;"price"];
-  duration:(`timespan$cfg[`closingtime])-`timespan$cfg`openingtime;
-  jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration%nspersec]; ([]time:`float$();factor:`float$())];
+  jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;.z.m.tradingseconds cfg]; ([]time:`float$();factor:`float$())];
   .z.m.pricepath[cfg;times;jumps]
   };
 
@@ -361,11 +394,11 @@ quote.activity:{[cfg;quotearrs]
   / expects there, clipped to activityclip and raised to spreadactivity;
   / multiplies the mean spread, so bursts widen it
   / cfg: config dict with `spreadactivity`activitywindowseconds`activityclip`quotespertrade`baseintensity`alpha`beta`profile
-  / quotearrs: quote times in seconds from open, ascending
+  / quotearrs: quote times in trading seconds from open, ascending
   / returns: float multiplier per quote, 1 when spreadactivity is 0
   n:count quotearrs;
   if[0=cfg`spreadactivity; :n#1f];
-  duration:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  duration:.z.m.tradingseconds cfg;
   w:`float$cfg`activitywindowseconds;
   cnt:(til n)-quotearrs bin quotearrs-w;
   rate:cfg[`quotespertrade]*cfg[`baseintensity]*.z.m.shape[cfg;quotearrs%duration]%1-cfg[`alpha]%cfg`beta;
@@ -458,7 +491,7 @@ trade.generate:{[cfg;times;quotes;flow]
   / quotes: quote table (see quote.generate)
   / flow: `sign`qty of the trades (see flow.generate)
   / returns: trade table `time`price`qty`aggressor`cond`venue, aggressor `B
-  /   (buyer-initiated) or `S, cond `R (regular) or `I (odd lot, below 100),
+  /   (buyer-initiated) or `S, cond `R (regular) or `I (odd lot, below the smallest round lot: 100 in the US, the board lot in Hong Kong),
   /   venue a lit MIC code or `TRF
   n:count times;
   idx:quotes[`time] bin times;
@@ -488,17 +521,19 @@ trade.generate:{[cfg;times;quotes;flow]
   venue:?[isoff;`TRF;lit];
 
   qty:flow`qty;
-  ([]time:times;price:price;qty:qty;aggressor:?[sign>0;`B;`S];cond:?[qty<100;`I;`R];venue:venue)
+  ([]time:times;price:price;qty:qty;aggressor:?[sign>0;`B;`S];cond:?[qty<min cfg`roundlots;`I;`R];venue:venue)
   };
 
 auction.prints:{[cfg;quotes;volume]
   / the opening and closing auction prints: at the first and last mid, for
   / openauctionpct and closeauctionpct of the continuous volume, cond `O and
-  / `C, with no aggressor; a print of zero quantity is left out
-  / cfg: config dict with `openauctionpct`closeauctionpct`closingtime`ticksize`primaryvenue
+  / `C, with no aggressor; and after a mid-day break the reopening print at
+  / breakend, at the mid of the first quote of the afternoon, for
+  / breakauctionpct, cond `B. A print of zero quantity is left out
+  / cfg: config dict with `openauctionpct`closeauctionpct`breakauctionpct`closingtime`breakend`ticksize`primaryvenue
   / quotes: the day's quote table
   / volume: the day's continuous volume
-  / returns: trade table `time`price`qty`aggressor`cond`venue, up to two rows,
+  / returns: trade table `time`price`qty`aggressor`cond`venue, up to three rows,
   /   venue the primary listing venue
   ts:cfg`ticksize;
   q0:first quotes;
@@ -508,6 +543,14 @@ auction.prints:{[cfg;quotes;volume]
   mids:0.5*(q0[`bid]+q0`ask;q1[`bid]+q1`ask);
   t:([]time:(opent;closet);price:ts*floor 0.5+mids%ts;
     qty:floor 0.5+volume*cfg`openauctionpct`closeauctionpct;aggressor:2#`;cond:`O`C;venue:2#cfg`primaryvenue);
+  s:.z.m.session cfg;
+  if[s[`hasbreak]&0<$[`breakauctionpct in key cfg; cfg`breakauctionpct; 0f];
+    bet:(`date$opent)+`timespan$cfg`breakend;
+    i:quotes[`time] binr bet;
+    if[i<count quotes;
+      qb:quotes i;
+      t,:([]time:enlist bet;price:enlist ts*floor 0.5+(0.5*qb[`bid]+qb`ask)%ts;
+        qty:enlist floor 0.5+volume*cfg`breakauctionpct;aggressor:enlist `;cond:enlist `B;venue:enlist cfg`primaryvenue)]];
   select from t where qty>0
   };
 
@@ -524,6 +567,11 @@ quote.spreadmults:{[cfg;times]
   closetime:`timespan$cfg`closingtime;
   timeofday:times-`timestamp$`date$times;
   sinceopen:0f|(`float$timeofday-opentime)%60*nspersec;
+  / after a mid-day break the afternoon opens like a session: the open
+  / multiplier decays again from the reopening
+  if[(.z.m.session cfg)`hasbreak;
+    bet:`timespan$cfg`breakend;
+    sinceopen:?[timeofday>=bet;(`float$timeofday-bet)%60*nspersec;sinceopen]];
   toclose:0f|(`float$closetime-timeofday)%60*nspersec;
   tau:cfg`spreaddecayminutes;
   midm:cfg`spreadmidmult;
@@ -572,6 +620,13 @@ validate:{[cfg]
   reqkeys,:`quotespertrade`sidepersistence`midpointshare`improvementshare;
   .z.m.val.haskeys[cfg;reqkeys;"validate"];
   if[0>=cfg`ticksize; '"validate: ticksize must be positive"];
+  if[`breakstart in key cfg;
+    if[(null cfg`breakstart)<>null cfg`breakend; '"validate: breakstart and breakend must both be set or both null"];
+    if[not null cfg`breakstart;
+      if[not (cfg[`openingtime]<cfg`breakstart)&(cfg[`breakstart]<cfg`breakend)&cfg[`breakend]<cfg`closingtime;
+        '"validate: the break must lie inside the day: openingtime < breakstart < breakend < closingtime"]]];
+  if[`breakshare in key cfg; if[not (0<=cfg`breakshare)&1>cfg`breakshare; '"validate: breakshare must be between 0 and 1, 1 excluded"]];
+  if[`breakauctionpct in key cfg; if[0>cfg`breakauctionpct; '"validate: breakauctionpct must be zero or positive"]];
   if[not (0<cfg`printgrid)&1>=cfg`printgrid; '"validate: printgrid must be between 0 and 1"];
   if[not cfg[`offexchangeinside] within 0 1; '"validate: offexchangeinside must be between 0 and 1"];
   if[not cfg[`improvementtick] within 0 1; '"validate: improvementtick must be between 0 and 1"];
@@ -642,8 +697,10 @@ run:{[cfg]
 
   basetime:cfg[`tradingdate]+`timespan$cfg`openingtime;
 
-  / the day's jumps, and the bursts of activity they seed on both clocks
-  duration:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  / the day's jumps, and the bursts of activity they seed on both clocks;
+  / the engine works in trading seconds (a mid-day break removed) and maps
+  / to the wall clock when the tables are built
+  duration:.z.m.tradingseconds cfg;
   jumps:$[`jump=cfg`pricemodel; .z.m.jump.events[cfg;duration]; ([]time:`float$();factor:`float$())];
   tradeshock:.z.m.hawkes.shock[cfg;jumps`time;cfg`jumpburst];
   quoteshock:.z.m.hawkes.shock[cfg;jumps`time;`long$cfg[`jumpburst]*cfg`quotespertrade];
@@ -663,11 +720,11 @@ run:{[cfg]
   mids:.z.m.pricepath[cfg;quotearrs;jumps];
   mids+:.z.m.flow.impact[cfg;arrs;flow;quotearrs];
   activity:.z.m.quote.activity[cfg;quotearrs];
-  quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$quotearrs*nspersec;mids;activity];
+  quotes:.z.m.quote.generate[cfg;basetime+`timespan$`long$nspersec*.z.m.walltime[cfg;quotearrs];mids;activity];
 
   / trades against the quote in force
   trades:$[n;
-    .z.m.trade.generate[cfg;basetime+`timespan$`long$arrs*nspersec;quotes;flow];
+    .z.m.trade.generate[cfg;basetime+`timespan$`long$nspersec*.z.m.walltime[cfg;arrs];quotes;flow];
     ([]time:`timestamp$();price:`float$();qty:`long$();aggressor:`symbol$();cond:`symbol$();venue:`symbol$())];
 
   / the auction prints around the continuous session
@@ -699,8 +756,10 @@ schema[`price]:("F";`essential;`instrument;"price at the open of the (first) day
 schema[`drift]:("F";`essential;`instrument;"expected annual return (annualized drift of the mid)")
 schema[`vol]:("F";`essential;`instrument;"annual volatility of the close-to-close return")
 schema[`tradesperday]:("J";`essential;`instrument;"average number of trades per day (long-run average over the day-to-day regime)")
-schema[`openingtime]:("U";`market;`session;"market open time")
-schema[`closingtime]:("U";`market;`session;"market close time")
+schema[`openingtime]:("U";`market;`session;"market open time (the day's first session opens)")
+schema[`closingtime]:("U";`market;`session;"market close time (the day's last session closes)")
+schema[`breakstart]:("U";`market;`session;"start of the mid-day break, null for a market without one (US); trading pauses until breakend, the last quote stays in force, the profile and the trades per day span the sessions only")
+schema[`breakend]:("U";`market;`session;"end of the mid-day break (the afternoon session opens), null for a market without one")
 schema[`tradingdays]:("J";`market;`session;"trading days per year, for annualizing vol and drift")
 schema[`rngmodel]:("S";`market;`session;"random number source (`pseudo)")
 schema[`ticksize]:("F";`market;`session;"minimum price increment; quotes sit on it (0.01 for US equities)")
@@ -715,11 +774,12 @@ schema[`quotespertrade]:("F";`market;`arrivals;"quote updates per trade on avera
 schema[`quotetradelink]:("F";`market;`arrivals;"share of the quote updates seeded by the trades (at Exp(beta) delays after them), between 0 and 1")
 schema[`openauctionpct]:("F";`market;`auctions;"opening auction print as a fraction of the day's continuous volume (0 = none)")
 schema[`closeauctionpct]:("F";`market;`auctions;"closing auction print as a fraction of the day's continuous volume (0 = none)")
+schema[`breakauctionpct]:("F";`market;`auctions;"reopening print after the mid-day break as a fraction of the day's continuous volume, condition code B (0 = none; ignored without a break)")
 schema[`qtymodel]:("S";`market;`sizes;"quantity model: `mixture (round lots, blocks and irregular lots), `lognormal or `constant")
 schema[`avgqty]:("J";`market;`sizes;"average trade quantity (of the irregular lots under `mixture)")
 schema[`qtyvol]:("F";`market;`sizes;"quantity log volatility (lognormal and the irregular lots of the mixture)")
 schema[`roundlotshare]:("F";`market;`sizes;"mixture: share of trades that are round lots")
-schema[`roundlots]:("JL";`market;`sizes;"mixture: the round-lot sizes")
+schema[`roundlots]:("JL";`market;`sizes;"mixture: the round-lot sizes; the smallest is the board lot, and a trade below it is an odd lot (cond I)")
 schema[`roundlotweights]:("FL";`market;`sizes;"mixture: the weights of the round-lot sizes (sum to 1)")
 schema[`blockshare]:("F";`market;`sizes;"mixture: share of trades that are blocks")
 schema[`blockqty]:("J";`market;`sizes;"mixture: median block size")
@@ -783,6 +843,7 @@ schema[`jumpintensity]:("F";`scenario;`scenario;"jump model: jumps per day")
 schema[`jumpmean]:("F";`scenario;`scenario;"jump model: mean of the log jump size")
 schema[`jumpvol]:("F";`scenario;`scenario;"jump model: standard deviation of the log jump size")
 schema[`overnightshare]:("F";`scenario;`days;"di.simmarket: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded)")
+schema[`breakshare]:("F";`scenario;`days;"share of a trading day's variance that occurs over the mid-day break, between 0 and 1 (1 excluded), applied to the mid at the reopening; ignored without a break")
 schema[`gapdayweight]:("F";`scenario;`days;"di.simmarket: weight of each calendar day beyond the first in an overnight gap's variance")
 schema[`regimepersistence]:("F";`scenario;`days;"di.simmarket: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded)")
 schema[`regimecorr]:("F";`scenario;`days;"di.simmarket: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1")
@@ -803,9 +864,9 @@ loadinstruments:{[filepath] simconfig.loadinstruments[.z.m.schema;filepath]};
 loadscenarios:{[filepath] simconfig.loadscenarios[.z.m.schema;filepath]};
 
 shapemean:{[cfg]
-  / the average of the interpolated intraday shape over the session,
-  / evaluated every second as the engine applies it
-  n:`long$((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  / the average of the interpolated intraday shape over the trading
+  / seconds of the day, evaluated every second as the engine applies it
+  n:`long$.z.m.tradingseconds cfg;
   avg .z.m.shape[cfg;(0.5+til n)%n]
   };
 
@@ -817,7 +878,7 @@ intensityfor:{[cfg]
   burst:$[`jump=cfg`pricemodel; cfg[`jumpintensity]*cfg[`jumpburst]%1-n; 0f];
   if[burst>=cfg`tradesperday;
     '"compose: the jump bursts are expected to add ",string[`long$burst]," trades a day, more than tradesperday ",string cfg`tradesperday];
-  T:((`timespan$cfg`closingtime)-`timespan$cfg`openingtime)%nspersec;
+  T:.z.m.tradingseconds cfg;
   (cfg[`tradesperday]-burst)*(1-n)%T*.z.m.shapemean cfg
   };
 
@@ -884,4 +945,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;quick;quickwith;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])
+export:([run;quick;quickwith;session;tradingseconds;walltime;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])

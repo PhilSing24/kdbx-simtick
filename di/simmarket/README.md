@@ -174,7 +174,7 @@ date,closingtime,volmult,volumemult,jumpintensity
 
 | Column | Meaning |
 |--------|---------|
-| `closingtime` | The day's close (minute): `13:00` makes a half day |
+| `closingtime` | The day's close (minute): `13:00` makes a US half day; on a market with a mid-day break, a close at or inside the break (`12:00`) makes the day the morning session alone, a later one ends the afternoon early |
 | `volmult` | Multiplies the day's volatility on top of the regime: 2 for an earnings day |
 | `volumemult` | Multiplies the day's trade intensity on top of the regime: 3 for an earnings day |
 | `jumpintensity` | The day's jumps per day; a positive value selects the jump model for that day |
@@ -213,7 +213,7 @@ overnightshare * vol^2 / tradingdays * (1 + gapdayweight * (calendar days - 1))
 
 The intraday simulation runs at `vol * sqrt(1 - overnightshare)`, so over a one-night gap the close-to-close variance is exactly `vol^2 / tradingdays`: the configured `vol` is the close-to-close volatility, as it is quoted. A weekend or holiday gap carries more variance than one night but less than its calendar days, which is what markets show.
 
-The `days` table records, per session, the open, the close (the last print, the closing auction), the overnight return that produced the open, the number of trades and the volume, so close-to-open and close-to-close returns are one query away. With `overnightshare:0` the module behaves as before: each day opens exactly at the previous close.
+The `days` table records, per day, the open, the close (the last print, the closing auction), the overnight return that produced the open, the return across the mid-day break (`breakret`, null on a market or a day without a break), the number of trades and the volume, so close-to-open and close-to-close returns are one query away. With `overnightshare:0` the module behaves as before: each day opens exactly at the previous close.
 
 ### Day-level regimes
 
@@ -251,7 +251,7 @@ q)k4unit:use`local.k4unit
 q)k4unit.moduletest`di.simmarket
 ```
 
-The suite (161 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) and reproducibility.
+The suite (174 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) sessions (a half day as the morning alone, an early close keeping the break, the break's return in `days`, the close-to-close vol with a break over two years) and reproducibility.
 
 ## Future Extensions
 

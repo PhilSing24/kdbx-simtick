@@ -24,8 +24,10 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
-| `openingtime` | minute | market open time | 09:30 |
-| `closingtime` | minute | market close time | 16:00 |
+| `openingtime` | minute | market open time (the day's first session opens) | 09:30 |
+| `closingtime` | minute | market close time (the day's last session closes) | 16:00 |
+| `breakstart` | minute | start of the mid-day break, null for a market without one (US); trading pauses until breakend, the last quote stays in force, the profile and the trades per day span the sessions only |  |
+| `breakend` | minute | end of the mid-day break (the afternoon session opens), null for a market without one |  |
 | `tradingdays` | long | trading days per year, for annualizing vol and drift | 252 |
 | `rngmodel` | symbol | random number source (`pseudo) | pseudo |
 | `ticksize` | float | minimum price increment; quotes sit on it (0.01 for US equities) | 0.01 |
@@ -50,6 +52,7 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 |---|---|---|---|
 | `openauctionpct` | float | opening auction print as a fraction of the day's continuous volume (0 = none) | 0.01 |
 | `closeauctionpct` | float | closing auction print as a fraction of the day's continuous volume (0 = none) | 0.08 |
+| `breakauctionpct` | float | reopening print after the mid-day break as a fraction of the day's continuous volume, condition code B (0 = none; ignored without a break) | 0 |
 
 ### sizes
 
@@ -59,7 +62,7 @@ Grouped as in the file. An instrument row may override any of these (XOM and PG 
 | `avgqty` | long | average trade quantity (of the irregular lots under `mixture) | 60 |
 | `qtyvol` | float | quantity log volatility (lognormal and the irregular lots of the mixture) | 0.9 |
 | `roundlotshare` | float | mixture: share of trades that are round lots | 0.35 |
-| `roundlots` | long list | mixture: the round-lot sizes | 100 200 300 500 1000 |
+| `roundlots` | long list | mixture: the round-lot sizes; the smallest is the board lot, and a trade below it is an odd lot (cond I) | 100 200 300 500 1000 |
 | `roundlotweights` | float list | mixture: the weights of the round-lot sizes (sum to 1) | 0.5 0.2 0.1 0.12 0.08 |
 | `blockshare` | float | mixture: share of trades that are blocks | 0.002 |
 | `blockqty` | long | mixture: median block size | 10000 |
@@ -125,6 +128,7 @@ One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied
 | Parameter | Type | Description | Shipped value |
 |---|---|---|---|
 | `overnightshare` | float | di.simmarket: share of a trading day's variance that occurs overnight, between 0 and 1 (1 excluded) | 0.3 |
+| `breakshare` | float | share of a trading day's variance that occurs over the mid-day break, between 0 and 1 (1 excluded), applied to the mid at the reopening; ignored without a break | 0.05 |
 | `gapdayweight` | float | di.simmarket: weight of each calendar day beyond the first in an overnight gap's variance | 0.25 |
 | `regimepersistence` | float | di.simmarket: AR(1) persistence of the day-level regimes, between 0 and 1 (1 excluded) | 0.7 |
 | `regimecorr` | float | di.simmarket: correlation of the daily shocks to the volatility and volume regimes, between -1 and 1 | 0.7 |
