@@ -515,16 +515,23 @@ qty.mixture:{[n;cfg]
   1|?[isround;rq;?[isblock;bq;iq]]
   };
 
+qty.mixturemean:{[cfg]
+  / the expected trade size of the mixture: the irregular lots at avgqty,
+  / the round lots at the mean of their sizes and the blocks at the mean
+  / of their lognormal
+  / cfg: config dict with the mixture's keys
+  / returns: float
+  r:cfg`roundlotshare;
+  b:cfg`blockshare;
+  :((1-r+b)*cfg`avgqty)+(r*sum cfg[`roundlots]*cfg`roundlotweights)+b*cfg[`blockqty]*exp 0.5*cfg[`blockqtyvol]*cfg`blockqtyvol;
+  };
+
 qty.mean:{[cfg]
   / the expected trade size under the config's quantity model, the size
   / an average trade's impact is scaled by
   / cfg: config dict with `qtymodel and model-specific params
   / returns: float
-  model:cfg`qtymodel;
-  $[model=`mixture;
-    [r:cfg`roundlotshare; b:cfg`blockshare;
-     ((1-r+b)*cfg`avgqty)+(r*sum cfg[`roundlots]*cfg`roundlotweights)+b*cfg[`blockqty]*exp 0.5*cfg[`blockqtyvol]*cfg`blockqtyvol];
-    `float$cfg`avgqty]
+  :$[`mixture=cfg`qtymodel; .z.m.qty.mixturemean cfg; `float$cfg`avgqty];
   };
 
 qty.gen:{[n;cfg]
