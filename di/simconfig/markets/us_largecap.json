@@ -9,6 +9,10 @@
     "jumpburst": 3000, "jumpburstminutes": 1.0,
     "quotespertrade": 4, "quotetradelink": 0.5
   },
+  "factors": {
+    "factors": ["market", "Technology", "Energy", "ConsumerStaples"], "factorprofile": [1.6, 1.2, 1.0, 0.85, 0.75, 0.7, 0.65, 0.7, 0.75, 0.85, 1.0, 1.2, 1.8],
+    "factorjumpintensities": [0.5, 0, 0, 0], "factorjumpvols": [0.01, 0, 0, 0]
+  },
   "auctions": { "openauctionpct": 0.01, "closeauctionpct": 0.08, "breakauctionpct": 0 },
   "sizes": {
     "qtymodel": "mixture", "avgqty": 60, "qtyvol": 0.9,
