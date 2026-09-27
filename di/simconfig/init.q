@@ -21,7 +21,7 @@
 /   group  a short label for the reference page
 
 
-layers:`essential`market`instrument`order`scenario`run`optional`derived
+layers:`essential`market`instrument`order`scenario`run`optional`derived;
 
 path:{[relative]
   / the first file at di/simconfig/<relative> in the module search path,
@@ -200,4 +200,4 @@ describe:{[schema]
   };
 
 / export public interface
-export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path])
+export:([compose;loadmarket;loadinstruments;loadscenarios;loadvenues;loadrows;loadconfig;saveconfig;describe;cast;nonnull;path]);

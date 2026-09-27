@@ -5,8 +5,8 @@
 / in a table from which any day can be regenerated alone
 
 / load simtick module
-simtick:use`di.simtick
-simconfig:use`di.simconfig
+simtick:use`di.simtick;
+simconfig:use`di.simconfig;
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -28,11 +28,11 @@ rng.normal:{[n]
   };
 
 / modulus of the per-day seeds (a prime below 2^31)
-seedmod:2147483647
+seedmod:2147483647;
 
 / optional calendar columns, their CSV types and their meaning when null
-calcols:`closingtime`volmult`volumemult`jumpintensity
-calctypes:"UFFF"
+calcols:`closingtime`volmult`volumemult`jumpintensity;
+calctypes:"UFFF";
 
 
 / ============================================================
@@ -550,12 +550,12 @@ runmany:{[cfgs;calendar;dbpath]
 / a rerun (its closes carried forward), an incomplete one is rewritten from
 / scratch, and a database built with another configuration is refused
 
-hdbdefaults:`tables`compression!(`trade`quote;17 5 3)
+hdbdefaults:`tables`compression!(`trade`quote;17 5 3);
 
 / the module's version, recorded in every database it writes next to the
 / git commit, so a database written from a copied module folder (no git
 / checkout) still carries a version
-moduleversion:"0.1.0"
+moduleversion:"0.1.0";
 
 version:{[]
   / the git commit of the code (with -dirty when the modules have
@@ -725,4 +725,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe])
+export:([run;runmany;writehdb;correlations;daygap;samefactors;loadrun;version;moduleversion;complete;writetable;writeday;hdbopts;saverun;symfile;compose;runstep;simday;daycfg;overnight;seeds;regimes;loadcalendar;savecalendar;nysecalendar;validate;validatecfg;describe]);
