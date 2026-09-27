@@ -4,8 +4,8 @@
 nsperms:1000000;
 nspersec:1000000000;
 
-/ configuration layers (market, instrument, scenario, run) composed by di.simconfig
-simconfig:use`di.simconfig;
+/ configuration layers (market, instrument, scenario, run) composed by di.simtick.config
+simconfig:use`di.simtick.config;
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -969,7 +969,7 @@ run:{[cfg]
 / ============================================================
 / configuration: schema and layers
 / ============================================================
-/ schema: key!(type;layer;group;description), see di.simconfig. The essential
+/ schema: key!(type;layer;group;description), see di.simtick.config. The essential
 / layer is what a user sets for a stock; market keys come from the market
 / file (and any of them can be overridden on an instrument row); scenario
 / keys from the scenario row; run keys from the run dictionary (the market
@@ -1127,7 +1127,7 @@ derive:{[cfg]
   };
 
 compose:{[market;instrument;scenario;run]
-  / the flat configuration of a run: the layers composed (see di.simconfig),
+  / the flat configuration of a run: the layers composed (see di.simtick.config),
   / the scenario multipliers applied and baseintensity derived
   / market: a market dictionary (loadmarket)
   / instrument: an instrument row (loadinstruments[...]`NVDA) or a dictionary

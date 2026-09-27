@@ -1,4 +1,4 @@
-/ di.simconfig - layered configuration for the di.* simulators
+/ di.simtick.config - layered configuration for the di.* simulators
 
 / four layers, composed in order, a later one overriding an earlier one:
 /   market     how a market works (JSON, one file per market)
@@ -23,20 +23,14 @@
 
 layers:`essential`market`instrument`scenario`run`optional`derived;
 
-candidate:{[relative;dir]
-  / the handle of di/simconfig/<relative> under a directory of the module
-  / search path (the working directory when the entry is empty)
-  :hsym `$$[dir~"";"";dir,"/"],"di/simconfig/",relative;
-  };
-
 path:{[relative]
-  / the first file at di/simconfig/<relative> in the module search path,
-  / so the shipped market, instrument and scenario files are found from
-  / any working directory; a loader takes any other path as well
-  cands:.z.m.candidate[relative] each .Q.m.SP;
-  found:cands where not ()~/:key each cands;
-  if[0=count found; '"path: not found in the module search path - ",relative];
-  :first found;
+  / the handle of a file shipped with this module (a market, instrument
+  / or scenario file), in the directory of the module that is loaded, so
+  / it is found from any working directory and is the file of the code
+  / that runs; a loader takes any other path as well
+  f:hsym `$(.Q.m.mp `di.simtick.config),"/",relative;
+  if[()~key f; '"path: no such file shipped with di.simtick.config - ",relative];
+  :f;
   };
 
 

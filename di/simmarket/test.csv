@@ -314,8 +314,8 @@ true,0,0,q,(plain (delete date from select from hdbtrade where date=2026.08.19))
 true,0,0,q,(2*count calendar)=count hdbdays,1,days holds one row per stock and date
 after,0,0,q,system"rm -rf /tmp/simmarket_hdb /tmp/simmarket_hdbraw /tmp/simmarket_hdbtrade /tmp/simmarket_hdbone /tmp/simmarket_hdbresume /tmp/simmarket_hdbreplay /tmp/simmarket_hdbempty",1,Clean up the databases
 comment,0,0,q,,1,=== Sessions Tests ===
-before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simconfig/markets/sgx.json",1,The SGX market: two sessions around a lunch break
-before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simconfig/instruments_sg.csv",1,Its instruments
+before,0,0,q,sgxmarket:simtick.loadmarket hsym`$"di/simtick/config/markets/sgx.json",1,The SGX market: two sessions around a lunch break
+before,0,0,q,sgxins:simtick.loadinstruments hsym`$"di/simtick/config/instruments_sg.csv",1,Its instruments
 before,0,0,q,sgxcfgs:simmarket.compose[sgxmarket;sgxins;scenarios;`normal;runcfg],1,The three SGX stocks on the normal scenario
 before,0,0,q,sgxcal:([]date:2026.08.18 2026.08.19 2026.08.20;closingtime:16:00 12:00 17:00),1,A full day closing early at 16:00 then a half day then a full day
 before,0,0,q,sgxres:simmarket.runmany[sgxcfgs;sgxcal;(::)],1,Run them

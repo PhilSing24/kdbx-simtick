@@ -8,7 +8,7 @@
 / from that joined market and an order row (see compose)
 
 simtick:use`di.simtick
-simconfig:use`di.simconfig
+simconfig:use`di.simtick.config
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -843,7 +843,7 @@ runflow:{[market;spec;trades;quotes]
 / ============================================================
 / CONFIGURATION SCHEMA AND LAYERS
 / ============================================================
-/ schema: key!(type;layer;group;description), see di.simconfig. An order
+/ schema: key!(type;layer;group;description), see di.simtick.config. An order
 / row (orders.csv, or a dictionary) gives the essential and order keys;
 / the joined market gives the market keys (the routing and dark groups of
 / this module's defaults file, and the tick market's ticksize), which a

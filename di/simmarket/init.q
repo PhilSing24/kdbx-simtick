@@ -6,7 +6,7 @@
 
 / load simtick module
 simtick:use`di.simtick;
-simconfig:use`di.simconfig;
+simconfig:use`di.simtick.config;
 
 
 val.haskeys:{[cfg;reqkeys;fn]
@@ -634,7 +634,7 @@ version:{[]
   root:first roots;
   h:@[system;"git -C ",root," rev-parse --short HEAD 2>/dev/null";()];
   if[not count h; :`unknown];
-  dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simconfig 2>/dev/null";()];
+  dirty:count @[system;"git -C ",root," status --porcelain di/simtick di/simmarket di/simtick/config 2>/dev/null";()];
   :`$first[h],$[dirty;"-dirty";""];
   };
 
