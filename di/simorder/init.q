@@ -61,8 +61,10 @@ validate:{[cfg]
   if[count[cfg`ordervenues]<>count cfg`ordervenueshares; '"validate: ordervenues and ordervenueshares must have the same length"];
   if[1e-6<abs 1-sum cfg`ordervenueshares; '"validate: ordervenueshares must sum to 1"];
   if[count[cfg`darkvenues]<>count cfg`darkvenueshares; '"validate: darkvenues and darkvenueshares must have the same length"];
-  if[1e-6<abs 1-sum cfg`darkvenueshares; '"validate: darkvenueshares must sum to 1"];
   if[not cfg[`darkshare] within 0 1; '"validate: darkshare must be between 0 and 1"];
+  / a market without dark pools has empty lists and darkshare 0
+  if[(0<cfg`darkshare)|count cfg`darkvenues; if[1e-6<abs 1-sum cfg`darkvenueshares; '"validate: darkvenueshares must sum to 1"]];
+  if[(0<cfg`darkshare)&0=count cfg`darkvenues; '"validate: darkshare above 0 needs darkvenues"];
   if[not (0<cfg`darkfillshare)&1>=cfg`darkfillshare; '"validate: darkfillshare must be above 0 and at most 1"];
   if[`arrival=cfg`pacing;
     .z.m.val.haskeys[cfg;`urgency`maxpct;"validate"];
