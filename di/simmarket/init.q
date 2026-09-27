@@ -821,7 +821,9 @@ writehdb:{[cfgs;calendar;dbpath;opts]
 describe:{[]
   / the calendar keys of the configuration schema (the scenario layer's
   / days group), with their types and descriptions
-  ?[simtick.describe[];enlist (=;`group;enlist `days);0b;()]
+  / select from simtick.describe[] where group=`days
+  / (in functional form: the column's name, group, is a reserved word)
+  :?[simtick.describe[];enlist (=;`group;enlist `days);0b;()];
   };
 
 / export public interface
