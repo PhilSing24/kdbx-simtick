@@ -18,7 +18,7 @@
 /          order (di.simorder's per-order keys), scenario, run, optional
 /          (cast when present, never required) or derived (computed by the
 /          module's compose)
-/   group  a short label for the reference page
+/   group  a short label for the reference page (the column grp of describe)
 
 
 layers:`essential`market`instrument`order`scenario`run`optional`derived;
@@ -230,11 +230,12 @@ loadconfig:{[schema;filepath]
   };
 
 describe:{[schema]
-  / the schema as a table, the essential keys first, then by layer
-  / group is a q keyword, so the column is built under another name and renamed
+  / the schema as a table, the essential keys first, then by layer. The
+  / group's column is grp: group is a reserved word, which a query cannot
+  / name
   t:([]param:key schema;typ:value[schema][;0];layer:value[schema][;1];grp:value[schema][;2];description:value[schema][;3]);
   t:update ord:(`essential`market`instrument`order`scenario`run`optional`derived)?layer from t;
-  :`param`typ`layer`group`description xcol delete ord from `ord xasc t;
+  :delete ord from `ord xasc t;
   };
 
 / export public interface

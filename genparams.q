@@ -64,13 +64,13 @@ lines,:enlist "## Market (`di/simconfig/markets/us_largecap.json`)"
 lines,:enlist ""
 lines,:enlist "Grouped as in the file. An instrument row may override any of these (XOM and PG override `spreadticks` and `primaryvenue`). The `orders` group is read by `di.simorder` and listed on its page."
 lines,:enlist ""
-lines,:raze {[vals;t;g] section[vals;string g;?[t;((=;`layer;enlist `market);(=;`group;enlist g));0b;()]]}[nvda;tick] each groups
+lines,:raze {[vals;t;g] section[vals;string g;select from t where layer=`market,grp=g]}[nvda;tick] each groups
 lines,:enlist "## Scenario (`di/simconfig/scenarios.csv`)"
 lines,:enlist ""
 lines,:enlist "One row per day type: `normal`, `volatile`, `jumpy`. The multipliers are applied once by `compose` (then 1). The days group is read by `di.simmarket`."
 lines,:enlist ""
-lines,:section[nvda;"scenario";?[tick;((=;`layer;enlist `scenario);(=;`group;enlist `scenario));0b;()]]
-lines,:section[nvda;"days (di.simmarket)";?[tick;((=;`layer;enlist `scenario);(=;`group;enlist `days));0b;()]]
+lines,:section[nvda;"scenario";select from tick where layer=`scenario,grp=`scenario]
+lines,:section[nvda;"days (di.simmarket)";select from tick where layer=`scenario,grp=`days]
 lines,:enlist "## Run"
 lines,:enlist ""
 lines,:enlist "A dictionary with any of these; the market file's `run` group carries the defaults."

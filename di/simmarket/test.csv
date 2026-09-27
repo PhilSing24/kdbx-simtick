@@ -80,9 +80,9 @@ true,0,0,q,((simmarket.regimes[cfgs`NVDA;calendar])`volmult)~(simmarket.regimes[
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;(enlist `AAPL)!enlist `normal;runcfg],1,An instrument not in the table throws error naming it
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;`wild;runcfg],1,An unknown scenario throws error
 fail,0,0,q,simmarket.compose[market;instruments;scenarios;42;runcfg],1,A scenario that is neither a name nor a dictionary throws error
-true,0,0,q,`param`typ`layer`group`description~cols simmarket.describe[],1,describe returns the schema table
+true,0,0,q,`param`typ`layer`grp`description~cols simmarket.describe[],1,describe returns the schema table
 true,0,0,q,7=count simmarket.describe[],1,With the seven days keys
-true,0,0,q,all `days=(simmarket.describe[])`group,1,All of the days group
+true,0,0,q,all `days=(simmarket.describe[])`grp,1,All of the days group
 comment,0,0,q,,1,=== Run In-Memory Tests ===
 before,0,0,q,result:simmarket.run[cfg;calendar;(::)],1,Run in-memory simulation
 before,0,0,q,trades:result`trade,1,The trades of all days

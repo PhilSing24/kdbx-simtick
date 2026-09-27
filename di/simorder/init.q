@@ -913,7 +913,7 @@ describe:{[]
   / orders keys (the algo menu, the flow defaults and the impact keys, held
   / in di.simtick's schema)
   own:simconfig.describe .z.m.schema;
-  own,?[simtick.describe[];((=;`group;enlist `orders);(not;(in;`param;enlist key .z.m.schema)));0b;()]
+  own,select from simtick.describe[] where grp=`orders,not param in key .z.m.schema
   };
 
 / export public interface

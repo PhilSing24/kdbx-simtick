@@ -336,7 +336,7 @@ before,0,0,q,`:/tmp/simorder_noside.csv 0: csv 0: (cols[0!orders] except `id`sid
 fail,0,0,q,simorder.loadorders`:/tmp/simorder_noside.csv,1,,A missing essential column throws error
 before,0,0,q,`:/tmp/simorder_unknown.csv 0: csv 0: update foo:1 from (cols[0!orders] except `id)#0!orders,1,,Order rows written with an extra column
 fail,0,0,q,simorder.loadorders`:/tmp/simorder_unknown.csv,1,,An unknown column throws error
-true,0,0,q,`param`typ`layer`group`description~cols simorder.describe[],1,,describe has the layer and group columns
+true,0,0,q,`param`typ`layer`grp`description~cols simorder.describe[],1,,describe has the layer and group columns
 true,0,0,q,all (key simorder.schema) in exec param from simorder.describe[],1,,It lists the order schema
 true,0,0,q,all `algos`norders`orderimpacteta in exec param from simorder.describe[],1,,And the market's other orders keys
 before,0,0,q,mimp:simorder.impactcfg market,1,,The market's impact configuration
