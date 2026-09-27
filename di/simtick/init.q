@@ -64,7 +64,7 @@ rng.poisson:{[lams;maxk]
   / maxk: largest value returned; choose it so that P(X>maxk) is negligible
   /   for the means in use (12 covers means up to about 3)
   / returns: list of longs
-  / X is the number of k from 0 up with P(X<=k) below the uniform
+  / the variate X is the number of k from 0 up with P(X<=k) below the uniform
   u:(count lams)?1.0;
   term:exp neg lams;
   cdf:term;
@@ -183,7 +183,7 @@ hawkes.process:{[cfg;baseintensity;extra]
   / extra: extra immigrant times in seconds from open (a shock, see hawkes.shock)
   / returns: ascending event times in trading seconds from the open
   /
-  / This is exact: unlike Ogata thinning it needs no upper bound on the
+  / this is exact: unlike Ogata thinning it needs no upper bound on the
   / intensity, so bursts are never capped (a fixed bound under-produced
   / arrivals by 5% at branching ratio 0.4 and by 3x at 0.9), and each
   / generation is a vector operation rather than a scan over candidates
@@ -222,7 +222,7 @@ arrivals:{[cfg]
   / cfg: configuration dictionary
   / returns: ascending list of arrival times in seconds from session start
   /
-  / Required config keys:
+  / required config keys:
   /   baseintensity, alpha, beta, openingtime, closingtime, profile
   reqkeys:`baseintensity`alpha`beta`openingtime`closingtime`profile;
   .z.m.val.haskeys[cfg;reqkeys;"arrivals"];
@@ -280,9 +280,9 @@ clocksteps:{[cfg;times]
   };
 
 / ============================================================
-/ CO-MOVEMENT: COMMON FACTORS
+/ co-movement: common factors
 / ============================================================
-/ A stock's log-mid is driven by its own Brownian motion and by the
+/ a stock's log-mid is driven by its own Brownian motion and by the
 / market's factors F_k, independent standard Brownian motions in trading
 / time with the intraday variance profile factorprofile and variance 1
 / over the day. With loadings b (|b|^2 <= 1) the diffusive return of the
@@ -437,7 +437,7 @@ price:{[cfg;times]
   / times: list of times in trading seconds from the open, ascending
   / returns: list of prices corresponding to each time
   /
-  / Required config keys:
+  / required config keys:
   /   openingtime, closingtime, tradingdays, pricemodel, price, vol, drift
   /   For jump model: jumpintensity, jumpmean, jumpvol
   /   clock (`calendar or `transaction, see clocksteps) defaults to `calendar
@@ -730,7 +730,7 @@ validate:{[cfg]
   / cfg: configuration dictionary
   / returns: cfg if valid, throws error otherwise
   /
-  / Checks:
+  / checks:
   /   - Hawkes stability: alpha < beta
   /   - Positive profile weights
   /   - Positive base intensity
@@ -838,13 +838,13 @@ run:{[cfg]
   / as the mid, shifted by the impact of the signed order flow before each
   / quote (see flow.impact); a jump seeds a burst on both clocks (see
   / hawkes.shock) and local activity widens the spread (see quote.activity).
-  / The opening and closing auction prints frame the session (see
+  / the opening and closing auction prints frame the session (see
   / auction.prints), and one sequence number runs across quotes and
   / trades in time order. Trades arrive on the trade clock and execute
   / against the quote in force (see trade.generate), so every trade sits
   / inside its prevailing quote and carries an aggressor side
   /
-  / Example:
+  / example:
   /   cfg:first loadconfig`:presets.csv
   /   trades:run[cfg]
   /   cfg[`generatequotes]:1b
@@ -908,7 +908,7 @@ run:{[cfg]
   };
 
 / ============================================================
-/ CONFIGURATION: SCHEMA AND LAYERS
+/ configuration: schema and layers
 / ============================================================
 / schema: key!(type;layer;group;description), see di.simconfig. The essential
 / layer is what a user sets for a stock; market keys come from the market

@@ -1,6 +1,6 @@
 / di.simconfig - layered configuration for the di.* simulators
 
-/ Four layers, composed in order, a later one overriding an earlier one:
+/ four layers, composed in order, a later one overriding an earlier one:
 /   market     how a market works (JSON, one file per market)
 /   instrument what makes a stock itself (a CSV row: sym, price, drift, vol,
 /              tradesperday, and any key it overrides)
@@ -11,7 +11,7 @@
 / every value by the schema's type, and throws on a missing key naming the
 / layer that should supply it. A module passes its own schema in.
 
-/ A schema is a dictionary key!(type;layer;group;description):
+/ a schema is a dictionary key!(type;layer;group;description):
 /   type   S symbol, F float, J long, B boolean, D date, U minute,
 /          P timestamp, and SL FL JL for lists of those; * keeps the value
 /   layer  essential (the instrument's required keys), market, instrument,
@@ -35,7 +35,7 @@ path:{[relative]
 
 
 / ============================================================
-/ TYPES
+/ types
 / ============================================================
 
 parseatom:{[base;s]
@@ -82,7 +82,7 @@ nonnull:{[d]
 
 
 / ============================================================
-/ LOADERS
+/ loaders
 / ============================================================
 
 flatten:{[d]
@@ -136,7 +136,7 @@ loadvenues:{[filepath]
   / the venue reference (venues.csv): every venue code the market file can
   / use, keyed by code, with its full name, its type (lit, dark or trf) and
   / the code the TCA application uses for it (null when it has none yet).
-  / The engines never read it; exports map codes with it
+  / the engines never read it; exports map codes with it
   if[not -11h=type filepath; '"loadvenues: filepath must be a file handle"];
   hdr:`$csv vs first read0 filepath;
   if[not `code`name`type`tcacode~hdr; '"loadvenues: the columns must be code, name, type, tcacode"];
@@ -149,7 +149,7 @@ loadvenues:{[filepath]
 
 
 / ============================================================
-/ COMPOSE, SAVE, RELOAD
+/ compose, save, reload
 / ============================================================
 
 compose:{[schema;market;instrument;scenario;run]

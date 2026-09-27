@@ -1,5 +1,5 @@
 / di.simmarket - multi-day tick simulation over a trading calendar
-/ Runs di.simtick day after day: each day opens at the previous close moved
+/ runs di.simtick day after day: each day opens at the previous close moved
 / by an overnight return, has its own volatility and volume regime, closing
 / time and jump intensity, and its own seed, and the days are summarized
 / in a table from which any day can be regenerated alone
@@ -36,7 +36,7 @@ calctypes:"UFFF";
 
 
 / ============================================================
-/ VALIDATION
+/ validation
 / ============================================================
 
 validate:{[calendar]
@@ -86,7 +86,7 @@ validatecfg:{[cfg]
 
 
 / ============================================================
-/ SEEDS AND REGIMES
+/ seeds and regimes
 / ============================================================
 
 seeds:{[cfg;dates]
@@ -134,7 +134,7 @@ regimes:{[cfg;calendar]
   / multiplier is exp(sd*x-sd^2), whose square has mean 1, since volatility
   / enters the day as variance: the close-to-close variance then averages
   / the configured vol^2/tradingdays instead of exceeding it by exp(sd^2).
-  / Volume and volatility move together at regimecorr, as they do in
+  / volume and volatility move together at regimecorr, as they do in
   / markets, without being one thing
   / cfg: config dict (see validatecfg)
   / calendar: a calendar (see validate)
@@ -165,7 +165,7 @@ regimes:{[cfg;calendar]
 
 
 / ============================================================
-/ OVERNIGHT GAP
+/ overnight gap
 / ============================================================
 
 overnight:{[cfg;ndays]
@@ -184,7 +184,7 @@ overnight:{[cfg;ndays]
 
 
 / ============================================================
-/ CORE SIMULATION
+/ core simulation
 / ============================================================
 
 daycfg:{[cfg;day;price]
@@ -353,12 +353,12 @@ run:{[cfg;calendar;dbpath]
   /   on disk, dbpath: the standard date-partitioned database of writehdb,
   /   with this one stock
   /
-  / Example (in-memory):
+  / example (in-memory):
   /   cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;(enlist `seed)!enlist 42]
   /   result:simmarket.run[cfg;calendar;(::)]
   /   result`days
   /
-  / Example (persist to disk):
+  / example (persist to disk):
   /   simmarket.run[cfg;calendar;`:/tmp/mydb]
   cfg:.z.m.validatecfg cfg;
   if[not (::)~dbpath; :.z.m.writehdb[(enlist cfg`sym)!enlist cfg;calendar;dbpath;(`symbol$())!()]];
@@ -374,7 +374,7 @@ run:{[cfg;calendar;dbpath]
 
 
 / ============================================================
-/ CALENDAR AND CONFIG LOADING
+/ calendar and config loading
 / ============================================================
 
 loadcalendar:{[filepath]
@@ -403,7 +403,7 @@ savecalendar:{[filepath;calendar]
 
 
 / ============================================================
-/ NYSE CALENDAR
+/ NYSE calendar
 / ============================================================
 / q dates count from 2000.01.01, a Saturday: d mod 7 is 0 Saturday, 1 Sunday, 2 Monday ... 6 Friday
 
@@ -490,7 +490,7 @@ nysecalendar:{[from;to]
 
 
 / ============================================================
-/ SEVERAL INSTRUMENTS
+/ several instruments
 / ============================================================
 
 compose:{[market;instruments;scenarios;scenario;run]
@@ -537,7 +537,7 @@ runmany:{[cfgs;calendar;dbpath]
 
 
 / ============================================================
-/ THE OUTPUT DATABASE: ONE DAY OF ALL STOCKS AT A TIME
+/ the output database: one day of all stocks at a time
 / ============================================================
 / writehdb writes a standard compressed date-partitioned kdb+ database:
 /   dbpath/sym            the symbol enumeration shared by all partitions
@@ -551,7 +551,7 @@ runmany:{[cfgs;calendar;dbpath]
 /   dbpath/<date>/trade   all stocks that day, sorted by sym then time, `p#sym
 /   dbpath/<date>/quote   the same, when requested
 /   dbpath/<date>/days    one row per stock: regime, open, close, gap, trades, volume
-/ Every partition holds every requested table; days is written last, so a
+/ every partition holds every requested table; days is written last, so a
 / crash cannot leave a date looking complete. A complete date is skipped on
 / a rerun (its closes carried forward), an incomplete one is rewritten from
 / scratch, and a database built with another configuration is refused
