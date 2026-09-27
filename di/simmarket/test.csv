@@ -8,6 +8,13 @@ before,0,0,q,scenarios:simtick.loadscenarios f`scenarios,1,Load the scenarios (t
 before,0,0,q,runcfg:`seed`generatequotes!(42;0b),1,Seeded and trades only for the run tests
 before,0,0,q,cfg:simtick.compose[market;instruments`NVDA;scenarios`normal;runcfg],1,The NVDA normal configuration
 before,0,0,q,calendar:simmarket.loadcalendar`:di/simmarket/calendar.csv,1,Load calendar
+before,0,0,q,catch:{[f] @[f;(::);{[e] e}]},1,The error message of a call that throws
+before,0,0,q,preinit:catch each ({[x] simmarket.run[cfg;calendar;(::)]};{[x] simmarket.runmany[(enlist `NVDA)!enlist cfg;calendar;(::)]};{[x] simmarket.writehdb[(enlist `NVDA)!enlist cfg;calendar;`:/tmp/simmarket_hdbpreinit;(`symbol$())!()]};{[x] simmarket.loadrun `:/tmp/simmarket_hdbpreinit}),1,The four functions that log called before init
+before,0,0,q,prepure:(simmarket.regimes[cfg;calendar];simmarket.validatecfg cfg;simmarket.nysecalendar[2026.11.25;2026.11.27];simmarket.describe[]),1,Pure functions called before init
+before,0,0,q,logrec:([]level:`symbol$();ctx:`symbol$();msg:()),1,The messages the stub logger records
+before,0,0,q,rec:{[l;c;m] `logrec insert (enlist l;enlist c;enlist m);},1,A recording function for one level
+before,0,0,q,stub:(enlist `log)!enlist `info`warn`error!(rec[`info];rec[`warn];rec[`error]),1,The stub logger as the dependency dictionary
+before,0,0,q,simmarket.init stub,1,Inject the stub logger
 comment,0,0,q,,1,=== Validation Tests ===
 fail,0,0,q,simmarket.validate[2026.01.20],1,Non-list date throws error
 fail,0,0,q,simmarket.validate[`date$()],1,Empty date list throws error
@@ -375,6 +382,80 @@ before,0,0,q,epps10m:eppscor[eppsq;0D00:10:00],1,At ten minutes
 true,0,0,q,epps5s>0.2,1,Two stocks co-move within the day: at five seconds
 true,0,0,q,epps10m>0.2,1,And at ten minutes
 true,0,0,q,epps10m<cmimplied[`NVDA;`MSFT],1,Below the daily correlation: order-flow impact and tick rounding add noise of the stock's own that a day washes out
+comment,0,0,q,,1,=== Logging Tests ===
+true,0,0,q,all 10h=type each preinit,1,Before init each of run and runmany and writehdb and loadrun throws
+true,0,0,q,all preinit like "*init?deps? is needed first*",1,With a message saying init[deps] is needed
+true,0,0,q,(preinit like "di.simmarket: run logs*")~1000b,1,Naming the function called: run
+true,0,0,q,(preinit like "di.simmarket: runmany logs*")~0100b,1,runmany
+true,0,0,q,(preinit like "di.simmarket: writehdb logs*")~0010b,1,writehdb
+true,0,0,q,(preinit like "di.simmarket: loadrun logs*")~0001b,1,loadrun
+true,0,0,q,()~key `:/tmp/simmarket_hdbpreinit,1,And nothing is written
+true,0,0,q,4=count prepure,1,Pure functions work without init
+true,0,0,q,(prepure 0)~simmarket.regimes[cfg;calendar],1,With the same result as after it
+fail,0,0,q,simmarket.init[(::)],1,init without dependencies throws error
+fail,0,0,q,simmarket.init[(`symbol$())!()],1,init with an empty dictionary throws error
+fail,0,0,q,simmarket.init[(enlist `log)!enlist (::)],1,init with a null log entry throws error
+fail,0,0,q,simmarket.init[(enlist `log)!enlist `info`warn!(rec[`info];rec[`warn])],1,A log dictionary without error throws error
+fail,0,0,q,simmarket.init[(enlist `log)!enlist `info`warn`error!(rec[`info];rec[`warn];`notafunction)],1,A level that is not a function throws error
+true,0,0,q,(@[simmarket.init;(`symbol$())!();{[e] e}]) like "di.simmarket: log dependency is required*di.util.log",1,The message names the dependency and di.util.log
+true,0,0,q,(@[simmarket.init;(enlist `log)!enlist `info`warn!(rec[`info];rec[`warn]);{[e] e}]) like "di.simmarket: the log dependency lacks error*",1,And the level that is missing
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,logrun:simmarket.run[cfg;calendar;(::)],1,One stock in memory
+before,0,0,q,runlog:logrec,1,Its messages
+true,0,0,q,2=count runlog,1,A run in memory logs two messages: its start and its end
+true,0,0,q,all `info=runlog`level,1,At level info
+true,0,0,q,all `simmarket=runlog`ctx,1,In the context simmarket
+true,0,0,q,(runlog[`msg] 0) like "run: NVDA? 3 dates from 2026.08.18 to 2026.08.20? in memory",1,The start names the stock and the dates
+true,0,0,q,(runlog[`msg] 1) like raze ("run: done? NVDA? 3 dates? ";string count logrun`trade;" trades"),1,The end gives the dates and the trades
+true,0,0,q,logrun~result,1,Logging does not change the output
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,logmany:simmarket.runmany[hdbcfgs;calendar;(::)],1,Two stocks in memory
+before,0,0,q,manylog:logrec,1,Their messages
+true,0,0,q,2=count manylog,1,runmany in memory logs its own start and end: not one pair per stock
+true,0,0,q,(manylog[`msg] 0) like "runmany: 2 stocks (NVDA PG)? 3 dates from 2026.08.18 to 2026.08.20? in memory",1,The start names the stocks and the dates
+true,0,0,q,(manylog[`msg] 1) like raze ("runmany: done? 2 stocks? 3 dates? ";string count logmany`trade;" trades"),1,The end gives the stocks and the dates and the trades
+before,0,0,q,system"rm -rf /tmp/simmarket_hdblog",1,Clean up
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,simmarket.writehdb[hdbcfgs;2#calendar;`:/tmp/simmarket_hdblog;(`symbol$())!()],1,The first two dates written
+before,0,0,q,writelog:logrec,1,The messages of the write
+true,0,0,q,4=count writelog,1,A write logs its start and each date and its end
+true,0,0,q,all `info=writelog`level,1,At level info
+true,0,0,q,(writelog[`msg] 0) like "writehdb: 2 stocks (NVDA PG)? 2 dates from 2026.08.18 to 2026.08.19? to :/tmp/simmarket_hdblog? tables trade quote? compression 17 5 3",1,The start names the stocks and the dates and the database and the options
+true,0,0,q,(writelog[`msg] 1) like raze ("writehdb: 2026.08.18 written? 2 stocks? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.18;`trade];" trades? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.18;`quote];" quotes"),1,Each date written is logged with its rows
+true,0,0,q,(writelog[`msg] 2) like raze ("writehdb: 2026.08.19 written? 2 stocks? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.19;`trade];" trades? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.19;`quote];" quotes"),1,The second date too
+true,0,0,q,(writelog[`msg] 3) like "writehdb: done? 2 dates written? 0 skipped? at :/tmp/simmarket_hdblog",1,The end counts the dates written and skipped
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,simmarket.writehdb[hdbcfgs;calendar;`:/tmp/simmarket_hdblog;(`symbol$())!()],1,Resumed on the full calendar
+before,0,0,q,resumelog:logrec,1,The messages of the resume
+true,0,0,q,5=count resumelog,1,A resume logs its start and each date and its end
+true,0,0,q,all (resumelog[`msg] 1 2) like' ("writehdb: 2026.08.18 skipped? already complete";"writehdb: 2026.08.19 skipped? already complete"),1,Each date skipped on resume is logged
+true,0,0,q,(resumelog[`msg] 3) like raze ("writehdb: 2026.08.20 written? 2 stocks? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.20;`trade];" trades? ";string count readpart[`:/tmp/simmarket_hdblog;2026.08.20;`quote];" quotes"),1,The missing date is written
+true,0,0,q,(resumelog[`msg] 4) like "writehdb: done? 1 dates written? 2 skipped? at :/tmp/simmarket_hdblog",1,The end counts both
+before,0,0,q,system"rm -rf /tmp/simmarket_hdblogtrade",1,Clean up
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,simmarket.writehdb[hdbcfgs;1#calendar;`:/tmp/simmarket_hdblogtrade;`tables`compression!(`trade;())],1,Trades only and uncompressed
+before,0,0,q,tradelog:logrec,1,Its messages
+true,0,0,q,(tradelog[`msg] 0) like "writehdb: * tables trade? compression none",1,The start gives the options of the run
+true,0,0,q,(tradelog[`msg] 1) like "writehdb: 2026.08.18 written? 2 stocks? * trades",1,Without quotes the date's message counts trades only
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,simmarket.loadrun `:/tmp/simmarket_hdblog,1,The run of a database written by the code running
+before,0,0,q,samelog:logrec,1,Its messages
+true,0,0,q,0=count samelog,1,loadrun logs nothing when the version and the commit are those of the code running
+before,0,0,q,{[f] d:get f; d[`version]:"0.0.0"; f set d} `:/tmp/simmarket_hdblog/simrun,1,The database marked as written by another version
+before,0,0,q,simmarket.loadrun `:/tmp/simmarket_hdblog,1,Read back
+before,0,0,q,versionlog:logrec,1,Its messages
+true,0,0,q,1=count versionlog,1,Another version logs one message
+true,0,0,q,`warn~first versionlog`level,1,At level warn
+true,0,0,q,(first versionlog`msg) like raze ("loadrun: the database was written by di.simmarket 0.0.0? the module running is ";simmarket.version;": *"),1,Naming both versions
+before,0,0,q,quiet:{[c;m]},1,A function that does nothing
+before,0,0,q,simmarket.init[(enlist `log)!enlist `info`warn`error!(quiet;quiet;quiet)],1,init again with a silent logger
+before,0,0,q,delete from `logrec,1,Empty the record
+before,0,0,q,quietrun:simmarket.run[cfg;calendar;(::)],1,A run with the silent logger
+before,0,0,q,quietlog:logrec,1,Its messages
+before,0,0,q,simmarket.init stub,1,The stub logger again for the rows below
+true,0,0,q,0=count quietlog,1,Passing functions that do nothing silences the module
+true,0,0,q,quietrun~logrun,1,And the output is the same
+after,0,0,q,system"rm -rf /tmp/simmarket_hdblog /tmp/simmarket_hdblogtrade",1,Clean up the logging databases
 comment,0,0,q,,1,=== Reproducibility Tests ===
 before,0,0,q,run1:simmarket.run[cfg;calendar;(::)],1,First run
 before,0,0,q,run2:simmarket.run[cfg;calendar;(::)],1,Second run

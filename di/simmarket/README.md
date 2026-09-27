@@ -33,6 +33,8 @@ di/
     └── README.md
 ```
 
+The functions that log (`run`, `runmany`, `writehdb`, `loadrun`) take their logger from the caller, through `init` (see [Logging](#logging)). Any logger with the three functions does; `di.util.log`, the Data Intellect logging module, provides one ready to pass. It ships upstream in [DataIntellectTech/kdbx-modules](https://github.com/DataIntellectTech/kdbx-modules), so its clone goes on `QPATH` to use it. It is not listed in `deps.toml`: the module never loads it, the caller does.
+
 > **Note:** We use absolute module paths (`use`di.simtick`) rather than relative sibling references (`use`..simtick`). The sibling syntax did not work in our testing with KDB-X Community Edition — further investigation needed.
 
 ## Usage
@@ -42,6 +44,10 @@ di/
 ```q
 q)simtick:use`di.simtick
 q)simmarket:use`di.simmarket
+
+/ Inject the logger, once, before run, runmany, writehdb or loadrun
+q)logger:use`di.util.log
+q)simmarket.init[logger.logdict]
 
 / A configuration composed from the layers (see di.simtick): the scenario
 / row carries the calendar keys; the run dictionary sets the seed
@@ -56,6 +62,8 @@ q)calendar:simmarket.loadcalendar[`:di/simmarket/calendar.csv]
 
 / Run multi-day simulation (in-memory)
 q)result:simmarket.run[cfg;calendar;(::)]
+2026.09.27D14:37:16.770342975 INFO PID[7588] HOST[myhost] [simmarket] run: NVDA, 3 dates from 2026.08.18 to 2026.08.20, in memory
+2026.09.27D14:37:21.851077330 INFO PID[7588] HOST[myhost] [simmarket] run: done, NVDA, 3 dates, 1730256 trades
 q)key result
 `trade`quote`days
 q)select date,closingtime,volmult,volumemult,dayseed,open,close,overnightret,trades,volume from result`days
@@ -121,10 +129,45 @@ q)select sym,date,open,close,trades from result`days
 
 In memory the trades and quotes of every instrument come merged and sorted by time, and the `days` table gets a `sym` column; on disk the database above holds every instrument, sorted by `sym` then time within each partition. An instrument named in the scenario dictionary but not in the table, or a scenario not in the scenario table, throws an error naming it.
 
+### Logging
+
+The module logs through functions the caller injects, never through a logger of its own. `simmarket.init[deps]` takes a dictionary with a `log` entry: a dictionary of three functions `info`, `warn` and `error`, each `{[ctx;msg]}` with `ctx` a symbol and `msg` a string. `di.util.log` provides it as `logdict`:
+
+```q
+q)logger:use`di.util.log
+q)simmarket.init[logger.logdict]
+```
+
+`init` is required by the four functions that log: `run`, `runmany`, `writehdb` and `loadrun`. Called before it, each throws `di.simmarket: run logs, so init[deps] is needed first ...`. Every other function is pure and works without `init`. `init` can be called again to change the logger.
+
+The messages, all in the context `simmarket`:
+
+| Level | When | Message |
+|-------|------|---------|
+| info | start of a run in memory | `run: NVDA, 3 dates from 2026.08.18 to 2026.08.20, in memory` (`runmany: 2 stocks (NVDA PG), ...` for several) |
+| info | end of a run in memory | `run: done, NVDA, 3 dates, 24443 trades` |
+| info | start of a write | `writehdb: 2 stocks (NVDA PG), 3 dates from 2026.08.18 to 2026.08.20, to :/data/hdb, tables trade quote, compression 17 5 3` |
+| info | each date written | `writehdb: 2026.08.18 written, 2 stocks, 13956 trades, 56379 quotes` |
+| info | each date skipped on resume | `writehdb: 2026.08.18 skipped, already complete` |
+| info | end of a write | `writehdb: done, 1 dates written, 2 skipped, at :/data/hdb` |
+| warn | `loadrun` on a database of another version or commit | `loadrun: the database was written by di.simmarket 0.1.0, the module running is 0.2.0: ...` |
+
+`runmany` in memory logs its own start and end, not one pair per stock; `run` and `runmany` with a `dbpath` log as `writehdb`, which they call. Errors are thrown, not logged: the `error` function is part of the contract and kept for later use.
+
+There is no switch to turn logging off. To silence the module, pass functions that do nothing:
+
+```q
+q)quiet:{[ctx;msg]}
+q)simmarket.init[(enlist `log)!enlist `info`warn`error!(quiet;quiet;quiet)]
+```
+
+Any other logger is passed the same way, for example one that writes to a file or keeps the messages in a table.
+
 ## API
 
 | Function | Description |
 |----------|-------------|
+| `simmarket.init[deps]` | Inject the dependencies: `deps` a dictionary with a `log` entry of `info`, `warn` and `error` functions `{[ctx;msg]}`; required before `run`, `runmany`, `writehdb` and `loadrun` |
 | `simmarket.run[cfg;calendar;dbpath]` | Run one stock; returns a dict `trade`quote`days` in memory, or writes the database and returns `dbpath` |
 | `simmarket.writehdb[cfgs;calendar;dbpath;opts]` | Several stocks written as a date-partitioned database one day at a time; `opts` with any of `tables` and `compression` |
 | `simmarket.correlations[cfgs]` | The close-to-close correlations a configuration implies, as a table keyed by sym |
@@ -273,7 +316,7 @@ q)k4unit:use`di.k4unit
 q)k4unit.moduletest`di.simmarket
 ```
 
-The suite (198 checks) covers calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) the independence of the seeds' streams, co-movement (the implied correlations and their matrix, two years of four stocks against them, vols inside the budget, overnight gaps, a stock alone or with others, the intraday correlation below the daily one), sessions (a half day as the morning alone, an early close keeping the break, the break's return in `days`, the close-to-close vol with a break over two years) and reproducibility.
+The suite (242 checks) covers the logging through a stub logger that records the messages (the failure before `init`, the messages of a run, a write and a resume, the silent logger), calendar validation and loading, the composition of several instruments on one scenario or one each, the NYSE generator (2026's 251 days, its holidays and early closes, Good Friday by year, the New Year and Christmas observance rules, a saved calendar loading back), the overnight gap and the variance budget, the seeds and regimes, a half day, a tripled-volume day and a jump day from the calendar, a day regenerated exactly from its row, several instruments run together in memory, the output database (loads with `\l`, schema and attributes, disk equal to memory per date and stock, two stocks in one run, a stock alone or with others, every table in every partition, trades only, compression applied and read back, an interrupted run resumed, a database of another configuration refused, the run reproduced from its config file) the independence of the seeds' streams, co-movement (the implied correlations and their matrix, two years of four stocks against them, vols inside the budget, overnight gaps, a stock alone or with others, the intraday correlation below the daily one), sessions (a half day as the morning alone, an early close keeping the break, the break's return in `days`, the close-to-close vol with a break over two years) and reproducibility.
 
 ## Future Extensions
 
