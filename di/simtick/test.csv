@@ -356,6 +356,18 @@ true,0,0,q,all 0=(exec bidsize from hkres`quote) mod 400,1,,Quote sizes are mult
 true,0,0,q,all 1e-9>abs (exec bid from hkres`quote)-0.05*floor 0.5+(exec bid from hkres`quote)%0.05,1,,Quotes sit on the instrument's tick
 true,0,0,q,0=count select from hkres`trade where (time>hkcfg[`tradingdate]+0D12:00)&time<hkcfg[`tradingdate]+0D13:00,1,,No trade in the HKEX break
 true,0,0,q,all 100>exec qty from trades where cond=`I,1,,In the US an odd lot is below 100 shares as before
+comment,0,0,q,,1,,=== Seed Hash Tests ===
+true,0,0,q,simtick.mixseed[42;7]=simtick.mixseed[42;7],1,,mixseed is a function of its arguments
+true,0,0,q,not simtick.mixseed[42;7]=simtick.mixseed[42;8],1,,Neighbouring arguments give different seeds
+true,0,0,q,(simtick.mixseed[42 42;7 8])~(simtick.mixseed[42;7];simtick.mixseed[42;8]),1,,It takes lists
+true,0,0,q,all (simtick.mixseed[1000#42;til 1000]) within 1 2147483647,1,,Seeds are between 1 and 2^31-1
+before,0,0,q,mixdraw:{[s] system raze ("S ";string s); first 1?1.0},1,,The first uniform of the stream of a seed
+before,0,0,q,mixa:mixdraw each simtick.mixseed[3000#42;til 3000],1,,First draws of hashed seeds
+before,0,0,q,mixb:mixdraw each simtick.mixseed[3000#43;til 3000],1,,And of another family
+true,0,0,q,0.1>abs mixa cor mixb,1,,Streams of hashed seeds are independent across families
+true,0,0,q,0.1>abs (1_mixa) cor -1_mixa,1,,And along a family
+before,0,0,q,plaina:mixdraw each 1000000+7*til 3000,1,,First draws of seeds computed by arithmetic
+true,0,0,q,0.5<abs (1_plaina) cor -1_plaina,1,,Which are correlated: the reason seeds are hashed
 comment,0,0,q,,1,,=== Reproducibility Tests ===
 before,0,0,q,seedcfg:cfg,1,,Setup seeded config
 before,0,0,q,seedcfg[`seed]:999,1,,Set seed

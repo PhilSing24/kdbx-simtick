@@ -102,6 +102,19 @@ shape:{[cfg;progress]
   w[i]+(x-i)*w[i+1]-w[i]
   };
 
+mixseed:{[a;b]
+  / a seed from two integers, hashed (md5), between 1 and 2^31-1. q's
+  / generator gives correlated streams for seeds that are related (a
+  / constant apart, or consecutive): the draws of two such streams
+  / correlate at 0.7 and more, all along the stream. Seeds derived from a
+  / date, a run seed or a ticker are therefore hashed, never computed by
+  / arithmetic, so that the streams are independent
+  / a, b: integers (atoms, or lists of the same length)
+  / returns: long seed(s)
+  f:{[a;b] 1+(256 sv `long$4#md5 (string a),"|",string b) mod 2147483646};
+  $[(0>type a)&0>type b; f[a;b]; f'[a;b]]
+  };
+
 poisson:{[rate;duration]
   / event times of a homogeneous Poisson process on [0;duration)
   / rate: events per unit time, positive
@@ -945,4 +958,4 @@ describe:{[]
   };
 
 / export public interface
-export:([run;quick;quickwith;session;tradingseconds;walltime;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])
+export:([run;quick;quickwith;mixseed;session;tradingseconds;walltime;compose;loadmarket;loadinstruments;loadscenarios;loadconfig;saveconfig;files;intensityfor;shapemean;arrivals;price;describe;schema])

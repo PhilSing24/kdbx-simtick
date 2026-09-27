@@ -87,16 +87,19 @@ validatecfg:{[cfg]
 seeds:{[cfg;dates]
   / the per-day seeds: a regime seed per date, shared by every instrument
   / (the market's day), and from it the instrument's day seed and gap seed;
-  / all null when the config has no seed
+  / all null when the config has no seed. Every seed is a hash of what it
+  / depends on (see simtick.mixseed): seeds computed by arithmetic from
+  / the date and the ticker gave streams that were correlated between
+  / instruments and between consecutive dates
   / cfg: config dict with `seed`sym
   / dates: list of dates
   / returns: table `date`regimeseed`dayseed`gapseed
   n:count dates;
   if[null cfg`seed; :([]date:dates;regimeseed:n#0N;dayseed:n#0N;gapseed:n#0N)];
-  regimeseed:1+(("j"$dates)+7919*cfg`seed) mod seedmod;
+  regimeseed:simtick.mixseed[n#cfg`seed;`long$dates];
   symhash:sum ("j"$string cfg`sym)*1+til count string cfg`sym;
-  dayseed:1+(symhash+31*regimeseed) mod seedmod;
-  gapseed:1+(3+17*dayseed) mod seedmod;
+  dayseed:simtick.mixseed[regimeseed;n#symhash];
+  gapseed:simtick.mixseed[dayseed;n#3];
   ([]date:dates;regimeseed:regimeseed;dayseed:dayseed;gapseed:gapseed)
   };
 

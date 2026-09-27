@@ -133,6 +133,18 @@ before,0,0,q,xomcfg:cfg,1,Setup config for another instrument
 before,0,0,q,xomcfg[`sym]:`XOM,1,Set the sym
 true,0,0,q,(sd`regimeseed)~(simmarket.seeds[xomcfg;calendar`date])`regimeseed,1,The regime seed of a date is shared across instruments (the market's day)
 true,0,0,q,not (sd`dayseed)~(simmarket.seeds[xomcfg;calendar`date])`dayseed,1,The day seed differs by instrument
+before,0,0,q,manydates:2026.01.01+asc where not ((2026.01.01+til 2920) mod 7) in 0 1,1,Eight years of weekdays
+before,0,0,q,drawat:{[k;s] system raze ("S ";string s); last k?1.0},1,The k-th uniform of the stream of a seed
+before,0,0,q,sdn:simmarket.seeds[cfg;manydates],1,The seeds of NVDA over them
+before,0,0,q,sdx:simmarket.seeds[xomcfg;manydates],1,And of XOM
+true,0,0,q,0.1>abs (drawat[1] each sdn`gapseed) cor drawat[1] each sdx`gapseed,1,The gap streams of two instruments are independent at their first draw (seeds a constant apart gave 0.7)
+true,0,0,q,0.1>abs (drawat[1000] each sdn`dayseed) cor drawat[1000] each sdx`dayseed,1,The day streams of two instruments are independent deep in the stream
+before,0,0,q,firstday:drawat[1] each sdn`dayseed,1,The first draw of each day's stream
+true,0,0,q,0.1>abs (1_firstday) cor -1_firstday,1,The day streams of consecutive dates are independent
+before,0,0,q,firstregime:drawat[1] each sdn`regimeseed,1,The first draw of each date's regime stream
+true,0,0,q,0.1>abs (1_firstregime) cor -1_firstregime,1,So are the regime streams
+true,0,0,q,(count manydates)=count distinct sdn`dayseed,1,Eight years of dates have distinct day seeds
+true,0,0,q,all (sdn`dayseed) within 1 2147483647,1,Seeds are valid for the generator
 before,0,0,q,noseedcfg:cfg,1,Setup config without a seed
 before,0,0,q,noseedcfg[`seed]:0N,1,No seed
 true,0,0,q,all null (simmarket.seeds[noseedcfg;calendar`date])`dayseed,1,Without a seed there are no day seeds
