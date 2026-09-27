@@ -20,6 +20,9 @@
 % configuration keys, written like \key{vol}
 \newcommand{\key}[1]{\texttt{#1}}
 
+% let lines with long setting names stretch rather than run into the margin
+\setlength{\emergencystretch}{3em}
+
 \newtheoremstyle{paper}{6pt}{6pt}{\itshape}{}{\bfseries}{.}{0.5em}{}
 \theoremstyle{paper}
 \newtheorem{definition}{Definition}
@@ -75,7 +78,7 @@ A realistic market simulator should reproduce the main features of real intraday
 \item \textbf{Co-movement:} stocks move together, more so within a sector, and market-wide news moves all of them at the same instant.
 \end{itemize}
 
-The simulator is made of two KDB-X modules. \textbf{di.simtick} generates one trading day for one instrument. \textbf{di.simmarket} runs it for several instruments over a calendar of trading days, linking each day to the next, and writes the result as a date-partitioned database. A shared module, \textbf{di.simconfig}, composes the configuration of a run from four layers: the market, the instrument, the scenario and the run.
+The simulator is made of two KDB-X modules. \textbf{di.simtick} generates one trading day for one instrument. \textbf{di.simmarket} runs it for several instruments over a calendar of trading days, linking each day to the next, and writes the result as a date-partitioned database. The configuration of a run is composed by \textbf{di.simtick.config}, a child module of di.simtick that both use, from four layers: the market, the instrument, the scenario and the run.
 
 Each model in the following sections is given with the configuration settings that control it, written like \key{vol} or \key{spreadticks}. All random numbers come from seeded generators, so the same configuration always produces the same data.
 
@@ -94,7 +97,10 @@ H(a,b)=1+\Bigl(\text{the first four bytes of }\mathrm{md5}(a\,|\,b)\Bigr)\bmod\b
 \end{equation}
 Every date $d$ receives a \emph{regime seed} from the seed $s$ and the date alone, shared by every instrument run on that date (the market's day), and from it the instrument's \emph{day seed} and \emph{gap seed}, and the \emph{factor seed} of Section~\ref{sec:comovement}:
 \begin{equation}
-s_{\text{regime}}=H\bigl(s,\text{days}(d)\bigr),\qquad s_{\text{day}}=H\bigl(s_{\text{regime}},h(\text{sym})\bigr),\qquad s_{\text{gap}}=H\bigl(s_{\text{day}},3\bigr),\qquad s_{\text{factor}}=H\bigl(s_{\text{regime}},5\bigr)
+\begin{gathered}
+s_{\text{regime}}=H\bigl(s,\text{days}(d)\bigr),\qquad s_{\text{day}}=H\bigl(s_{\text{regime}},h(\text{sym})\bigr),\\
+s_{\text{gap}}=H\bigl(s_{\text{day}},3\bigr),\qquad s_{\text{factor}}=H\bigl(s_{\text{regime}},5\bigr)
+\end{gathered}
 \end{equation}
 with $h$ a hash of the ticker's characters. A date's regime innovation is therefore the same in any calendar that contains it, any day's tape can be regenerated alone from its row of the summary table, and the streams of two instruments, or of two dates, are independent: over eight years of dates the first draws of two instruments' streams correlate within 0.03, as do those of consecutive dates.
 
@@ -341,7 +347,7 @@ while the stock's own part is the path of Section~4 at volatility $\sigma_i^{d}(
 
 \subsection{Common Jumps and the Variance Budget}
 
-A factor can jump: the number of jumps of factor $k$ in a day is Poisson($\lambda_k$) (\key{factorjumpintensities}), their times uniform in the trading time, their log sizes $Y\sim\mathcal N(0,s_k^2)$ (\key{factorjumpvols}). Every stock takes the jump at the same instant, times its jump loading $\ell_{ik}$ (\key{jumploadings}): its mid is multiplied by $\exp(\ell_{ik}Y)$, and the burst of Section~\ref{sec:bursts} follows. A 1\% market jump moves a stock of jump loading 1.5 by 1.5\% and one of 0.4 by 0.4\%. The stock's own jumps (Section~\ref{sec:jumps}) are separate: single-name news.
+{\sloppy A factor can jump: the number of jumps of factor $k$ in a day is Poisson($\lambda_k$) (\key{factorjumpintensities}), their times uniform in the trading time, their log sizes $Y\sim\mathcal N(0,s_k^2)$ (\key{factorjumpvols}). Every stock takes the jump at the same instant, times its jump loading $\ell_{ik}$ (\key{jumploadings}): its mid is multiplied by $\exp(\ell_{ik}Y)$, and the burst of Section~\ref{sec:bursts} follows. A 1\% market jump moves a stock of jump loading 1.5 by 1.5\% and one of 0.4 by 0.4\%. The stock's own jumps (Section~\ref{sec:jumps}) are separate: single-name news.\par}
 
 The common jumps carry a variance per day
 \begin{equation}
