@@ -249,7 +249,8 @@ q)k4unit.moduletest`di.simtick
 The `docs/` folder contains:
 
 - **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)**: the mathematical foundations of `di.simtick` and `di.simmarket`, with the statistics the simulator reproduces
-- **[HawkesProcessesInFinance.pdf](docs/HawkesProcessesInFinance.pdf)**: reference paper on Hawkes processes in finance (Bacry, Mastromatteo and Muzy, 2015)
+
+Reference on Hawkes processes: Bacry, E., Mastromatteo, I. and Muzy, J.F. (2015), *Hawkes processes in finance*, Market Microstructure and Liquidity 1(1), available at [arXiv:1502.04592](https://arxiv.org/abs/1502.04592). The technical paper cites it.
 
 ## Project structure
 
@@ -261,7 +262,6 @@ di/simtick/
 ├── README.md        # this file
 ├── docs/
 │   ├── IntradayTickSimulatorPaper.pdf
-│   ├── HawkesProcessesInFinance.pdf
 │   └── parameters.md
 └── config/          # di.simtick.config: the layered configuration
     ├── init.q
