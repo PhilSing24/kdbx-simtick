@@ -1,0 +1,3 @@
+pykx>=4.1.0
+matplotlib
+jupyterlab
