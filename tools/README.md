@@ -9,6 +9,8 @@ Scripts that show a change did not alter what the modules generate. They are for
 | `suites.sh` | Runs the four test suites and prints the counts on one line |
 | `hashes.q` | The outputs that are hashed; run by the two scripts above |
 
+[UPSTREAM.md](UPSTREAM.md) holds the decisions and the steps for submitting the modules upstream.
+
 ## Requirements
 
 `q` on the path, and `QPATH` set as the root README describes, with the clone of [DataIntellectTech/kdbx-modules](https://github.com/DataIntellectTech/kdbx-modules) after this repository. `suites.sh` needs `di.k4unit` from that clone. The scripts run from any directory.
