@@ -250,6 +250,17 @@ The `docs/` folder contains:
 
 - **[IntradayTickSimulatorPaper.pdf](docs/IntradayTickSimulatorPaper.pdf)**: the mathematical foundations of `di.simtick` and `di.simmarket`, with the statistics the simulator reproduces
 
+The `notebooks/` folder contains:
+
+- **[config_examples.ipynb](notebooks/config_examples.ipynb)**: two worked examples of the configuration layers, one day of a stock from its five values and the same day with jump diffusion
+
+The notebook runs q through PyKX. Its Python packages are listed in `requirements.txt`:
+
+```bash
+pip install -r di/simtick/requirements.txt
+jupyter lab di/simtick/notebooks/config_examples.ipynb
+```
+
 Reference on Hawkes processes: Bacry, E., Mastromatteo, I. and Muzy, J.F. (2015), *Hawkes processes in finance*, Market Microstructure and Liquidity 1(1), available at [arXiv:1502.04592](https://arxiv.org/abs/1502.04592). The technical paper cites it.
 
 ## Project structure
@@ -260,6 +271,9 @@ di/simtick/
 ├── test.csv         # unit tests (k4unit format)
 ├── testing.q        # manual test script
 ├── README.md        # this file
+├── requirements.txt # Python packages of the notebook
+├── notebooks/
+│   └── config_examples.ipynb
 ├── docs/
 │   ├── IntradayTickSimulatorPaper.pdf
 │   └── parameters.md
